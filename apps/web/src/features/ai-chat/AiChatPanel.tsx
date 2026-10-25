@@ -51,6 +51,7 @@ export function AiChatPanel() {
   const [open, setOpen] = useState(true);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  const [lastInput, setLastInput] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -198,6 +199,19 @@ export function AiChatPanel() {
     }
   };
 
+  const clearInput = () => {
+    setLastInput(input);
+    setInput('');
+  };
+
+  const undoClear = () => {
+    if (lastInput === null) {
+      return;
+    }
+    setInput(lastInput);
+    setLastInput(null);
+  };
+
   return (
     <section className="ai-chat" aria-label="AI chat">
       <button
@@ -258,13 +272,24 @@ export function AiChatPanel() {
               onKeyDown={handleKeyDown}
               disabled={inFlight}
             />
-            <button
-              type="submit"
-              className="ai-chat__send"
-              disabled={inFlight || input.trim().length === 0}
-            >
-              {inFlight ? 'Thinking…' : 'Send'}
-            </button>
+            <div className="ai-chat__actions">
+              {lastInput !== null ? (
+                <button type="button" className="ai-chat__clear" onClick={undoClear}>
+                  撤销
+                </button>
+              ) : input.length > 0 ? (
+                <button type="button" className="ai-chat__clear" onClick={clearInput}>
+                  清空
+                </button>
+              ) : null}
+              <button
+                type="submit"
+                className="ai-chat__send"
+                disabled={inFlight || input.trim().length === 0}
+              >
+                {inFlight ? 'Thinking…' : 'Send'}
+              </button>
+            </div>
           </form>
         </div>
       ) : null}
