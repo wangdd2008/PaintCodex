@@ -1,77 +1,106 @@
-# Handoff: PaintCodex Phase 1 MVP Design Complete
+# Handoff: Agent Observability Design Complete
 
 > Generated: 2026-10-25
-> Session focus: Architecture design → Spec → Tickets
+> Session focus: Design Agent Observability feature (grill-with-docs → to-spec → to-tickets)
 
-## Project Status
+## Current state
 
-PaintCodex is an AI-assisted painting application. This session completed the **architecture design** and **Phase 1 MVP spec** generation. **No code has been written yet.** The next session should begin implementing Ticket 01 (Project Scaffold).
+- `main` remains at `0b9c3c8` (unchanged this session).
+- **No code changes** were made to `apps/daemon` or `apps/web`.
+- All design artifacts are **new files** — untracked and uncommitted.
+- Phase 1 MVP is fully implemented and stable; this session scoped Phase 2's first feature.
 
-## Key Decisions (Read: ADRs)
+## What was delivered
 
-All architecture decisions were made via `/grill-with-docs` + `/domain-modeling`. The full decision tree is captured in:
+A complete design for **Agent Observability** — structured logging and a monitoring page.
 
-- `docs/adr/0001-ai-generates-svg-only.md` — AI generates only SVG code
-- `docs/adr/0002-codex-cli-local-process.md` — Codex CLI via local child process
-- `docs/adr/0003-snapshot-undo.md` — Snapshot-level Undo/Redo for Phase 1
-- `docs/adr/0004-sse-full-snapshot-push.md` — SSE pushes full snapshots
+- **ADR**: `docs/adr/0006-agent-observability.md` — SQLite-backed structured logging, trace/span model, independent monitor page.
+- **Spec**: `.scratch/agent-observability/spec.md` — full spec with problem statement, user stories, implementation decisions, testing decisions, and out-of-scope items.
+- **Tickets**: 6 tracer-bullet tickets in `.scratch/agent-observability/issues/01-` through `06-`.
 
-## Documents Generated
+## Decisions made (do not re-litigate)
 
-| File | Purpose |
-|------|---------|
-| `GLOSSARY.md` | Domain terminology (Canvas, Layer, Actor, Command Dispatcher, etc.) |
-| `docs/adr/0001-ai-generates-svg-only.md` | AI code format decision |
-| `docs/adr/0002-codex-cli-local-process.md` | Codex integration decision |
-| `docs/adr/0003-snapshot-undo.md` | Undo/Redo strategy decision |
-| `docs/adr/0004-sse-full-snapshot-push.md` | SSE strategy decision |
-| `.scratch/phase-1-mvp/spec.md` | **Phase 1 MVP full spec** (read this first) |
-| `.scratch/phase-1-mvp/issues/01-*.md` | Ticket 01: Project Scaffold |
-| `.scratch/phase-1-mvp/issues/02-*.md` | Ticket 02: Canvas End-to-End |
-| `.scratch/phase-1-mvp/issues/03-*.md` | Ticket 03: Brush Tool and Layer Persistence |
-| `.scratch/phase-1-mvp/issues/04-*.md` | Ticket 04: Layer Panel |
-| `.scratch/phase-1-mvp/issues/05-*.md` | Ticket 05: SSE Real-Time Sync |
-| `.scratch/phase-1-mvp/issues/06-*.md` | Ticket 06: Snapshot-Level Undo/Redo |
-| `.scratch/phase-1-mvp/issues/07-*.md` | Ticket 07: AI Chat Panel |
-| `.scratch/phase-1-mvp/issues/08-*.md` | Ticket 08: AI Generates SVG → New Layer |
-| `.scratch/phase-1-mvp/issues/09-*.md` | Ticket 09: PNG Export |
+| Decision | Choice |
+|----------|--------|
+| Log scope | Backend only (daemon) |
+| Agent observation | Both Codex CLI runner **and** AI canvas action lifecycle |
+| Visualization | Independent monitor page (not embedded) |
+| Storage | SQLite `agent_logs` table (reuses `better-sqlite3`) |
+| Log cleanup | **Deferred** — no retention policy for now |
+| Monitor page location | `apps/web` (React, zero new router dependencies) |
+| Real-time updates | SSE (`/monitor/events`) |
+| Trace model | OpenTelemetry-style trace/span hierarchy |
+| Zero new runtime dependencies | Confirmed — reuses existing stack |
 
-## Tech Stack
+## Tickets status
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React + TypeScript + Vite + Fabric.js + Zustand |
-| Backend | Node.js + TypeScript + Fastify + better-sqlite3 |
-| AI Engine | Codex CLI (local child process) |
-| Build | pnpm workspace monorepo |
+| # | Ticket | Blocked by | Status |
+|---|--------|------------|--------|
+| 01 | Observability Infrastructure | None | ready-for-agent |
+| 02 | HTTP Instrumentation | 01 | ready-for-agent |
+| 03 | Codex & AI Chat Instrumentation | 01 | ready-for-agent |
+| 04 | Canvas Operation Instrumentation | 01 | ready-for-agent |
+| 05 | Monitor API and SSE | 01–04 | ready-for-agent |
+| 06 | Monitor Frontend Page | 05 | ready-for-agent |
 
-## Next Work: Ticket 01 — Project Scaffold
+## Architecture at a glance
 
-**Frontier:** Ticket 01 and Ticket 07 have no blockers and can start immediately.
+```
+daemon ──► SQLite (agent_logs table)
+    │
+    ├── ObservabilityLogger (singleton, trace/span API)
+    │   ├── AgentLogRepository (SQLite CRUD)
+    │   └── ObservabilityEvents (pub/sub → SSE)
+    │
+    ├── Instrumentation
+    │   ├── codex-runner.ts (spawn/delta/complete/error)
+    │   ├── routes.ai.ts (prompt → action → SSE)
+    │   ├── service.ts (canvas mutations)
+    │   └── server.ts (HTTP hook)
+    │
+    └── Monitor Routes
+        ├── GET /monitor/logs (paginated query)
+        ├── GET /monitor/traces/:traceId (trace tree)
+        ├── GET /monitor/stats (aggregates)
+        └── GET /monitor/events (SSE)
 
-**Recommended starting point:** Ticket 01 (Project Scaffold), because it is a prerequisite for almost everything else.
+web ──► MonitorPage
+    ├── LogList (filterable table)
+    ├── TraceView (expandable tree)
+    ├── StatsPanel (real-time metrics)
+    └── SSE subscription to /monitor/events
+```
 
-**Ticket 01 acceptance criteria:**
-- `pnpm-workspace.yaml` defines `apps/*` and `packages/*` workspaces
-- `apps/daemon/` is a working Fastify + TypeScript server (`pnpm dev`)
-- `apps/web/` is a working React + Vite + TypeScript app (`pnpm dev`)
-- `packages/protocol/` has shared TypeScript types
-- Root `package.json` has common dev scripts
-- `apps/web` includes Fabric.js and can render a blank canvas
-
-## Suggested Skills for Next Agent
+## Suggested skills
 
 Call the Skill tool for:
 
-- **`implement`** — To implement the current ticket based on its spec. The next agent should start with Ticket 01.
-- **`tdd`** — If the next agent wants to build test-first (recommended for the Command Dispatcher and Service state machine).
-- **`diagnosing-bugs`** — If build/runtime issues arise during implementation.
-- **`code-review`** — After completing a ticket, review the changes against the spec.
+- **`implement`** or **`implement-spec`** — to start coding the 6 tickets. Start with 01 (Infrastructure), then 02–04 can be parallel.
+- **`tdd`** — if you want to build the observability module test-first.
+- **`code-review`** — once tickets 01–06 are implemented.
+- **`handoff`** — if you need to pass this work to another agent mid-implementation.
 
-## Notes
+## Context pointers
 
-- **No code exists yet.** The repo only has `docs/` and `.scratch/` directories.
-- **Issue tracker:** Local markdown under `.scratch/phase-1-mvp/issues/`.
-- **Triage labels:** Standard five (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`) configured in `docs/agents/triage-labels.md`.
-- **GitHub remote:** `https://github.com/wangdd2008/PaintCodex.git`
-- **OS:** Windows 11 (23H2), PowerShell
+| Need | Read |
+|---|---|
+| Behaviour, API, acceptance criteria | `.scratch/agent-observability/spec.md` |
+| Ticket breakdown | `.scratch/agent-observability/issues/01-` through `06-` |
+| Architectural rationale | `docs/adr/0006-agent-observability.md` |
+| Phase 1 baseline | `.scratch/phase-1-mvp/spec.md` |
+| Domain vocabulary | `GLOSSARY.md` |
+| Agent workflow / issue tracker | `AGENTS.md`, `docs/agents/` |
+
+## Gotchas
+
+- `agent_logs` grows unbounded until a cleanup strategy is added (deferred).
+- High-frequency events (SSE heartbeats) are intentionally **not** logged to avoid I/O pressure.
+- The monitoring page uses query-param-based view switching (`?page=monitor`), not `react-router`.
+- `ObservabilityLogger` is a singleton; ensure it's not accidentally instantiated multiple times in tests.
+- Start here:
+  ```bash
+  pnpm install
+  pnpm dev        # web :5173, daemon :3210
+  pnpm -r test
+  pnpm build
+  ```

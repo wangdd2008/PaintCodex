@@ -41,3 +41,14 @@ The native serialization format of Fabric.js objects. Stored in the `json` field
 
 ### .aipaint (File Format)
 The proprietary workspace file format (deferred to Phase 2). Will contain the full canvas document including layers, history, and metadata.
+
+## UX Concepts
+
+### Chat Step
+AI Chat 流式响应中的进度步骤事件。后端在关键处理节点（`prompt_built`、`codex_exec`、`action_parse`、`action_apply`）通过 SSE 推送 `step` 消息，前端展示对应的用户可见文案（如 "AI 正在思考…"）。用于替代静态的 "Thinking…" 状态，提升用户对后台进度的感知。
+
+### Clear Input
+AI Chat 输入框旁的快捷功能。点击后清空当前 `textarea` 的草稿内容，按钮随即变为「撤销」，可恢复刚才的内容（仅支持撤销一次）。仅影响界面，不改变已发送的对话历史。
+
+### Abort / Cancel
+用户在 AI 处理过程中主动终止请求的机制。前端通过 `AbortController` 中断 SSE 连接，后端终止 Codex CLI 子进程。取消后 Assistant 消息区域显示「已取消」。
