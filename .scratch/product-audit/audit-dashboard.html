@@ -1,0 +1,274 @@
+<style>
+  :root {
+    --ink: #17181c;
+    --muted: #626776;
+    --faint: #8b90a0;
+    --line: #e4e2dc;
+    --paper: #f7f5ef;
+    --card: #fffdf8;
+    --accent: #3157c8;
+    --accent-soft: #e8edfb;
+    --p0: #b42318;
+    --p0-soft: #fdecea;
+    --p1: #a15c00;
+    --p1-soft: #fff3dd;
+    --p2: #4d5b70;
+    --p2-soft: #eef1f5;
+    --ok: #1f6b4a;
+    --ok-soft: #e7f3ec;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1200px 500px at 85% -10%, #e9edf9 0%, transparent 60%),
+      radial-gradient(900px 420px at 0% 0%, #f2eadb 0%, transparent 55%),
+      var(--paper);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    line-height: 1.6;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 48px 28px 80px; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--muted); font-weight: 650;
+  }
+  .eyebrow::before { content: ""; width: 22px; height: 2px; background: var(--accent); }
+  h1 { font-size: clamp(30px, 4.6vw, 52px); line-height: 1.08; letter-spacing: -.03em; margin: 14px 0 12px; max-width: 900px; }
+  h2 { font-size: clamp(22px, 2.6vw, 30px); letter-spacing: -.02em; margin: 0 0 6px; }
+  h3 { font-size: 17px; margin: 0 0 6px; letter-spacing: -.01em; }
+  p { margin: 0 0 12px; }
+  .lede { font-size: clamp(15px, 1.7vw, 18px); color: #3c4150; max-width: 860px; }
+  .hero {
+    display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .9fr);
+    gap: 28px; align-items: end; padding-bottom: 34px; border-bottom: 1px solid var(--line);
+  }
+  .stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .stat {
+    background: rgba(255,253,248,.72); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px; backdrop-filter: blur(6px);
+  }
+  .stat b { display: block; font-size: 26px; line-height: 1.1; letter-spacing: -.03em; }
+  .stat span { font-size: 12px; color: var(--muted); }
+  section { padding-top: 42px; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-bottom: 18px; }
+  .section-head p { color: var(--muted); max-width: 720px; margin: 0; font-size: 14px; }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .fake {
+    position: relative; background: var(--card); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 20px; overflow: hidden;
+  }
+  .fake::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--p0); }
+  .fake .tag { font-size: 11px; font-weight: 700; letter-spacing: .1em; color: var(--p0); }
+  .fake h3 { margin-top: 8px; }
+  .fake p { font-size: 13.5px; color: #4c5262; margin-bottom: 10px; }
+  .fake code { font-size: 12px; background: #f2efe7; padding: 2px 6px; border-radius: 5px; }
+  .callout {
+    margin-top: 16px; background: var(--accent-soft); border: 1px solid #cfd9f5;
+    border-radius: 12px; padding: 14px 16px; font-size: 14px; color: #243a70;
+  }
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0 12px; }
+  .filter {
+    border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    border-radius: 999px; padding: 7px 14px; font: inherit; font-size: 13px; cursor: pointer;
+  }
+  .filter[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .filter:focus-visible, .card-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .table-shell { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+  table { width: 100%; border-collapse: collapse; min-width: 820px; }
+  caption { text-align: left; padding: 14px 16px; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--line); }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid #ece9e1; vertical-align: top; font-size: 13.5px; }
+  th { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); background: #fbf9f3; position: sticky; top: 0; }
+  tr:last-child td { border-bottom: 0; }
+  td.id { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+  td.ev { color: #5a6070; font-size: 12.5px; }
+  .badge { display: inline-block; border-radius: 999px; padding: 2px 9px; font-size: 11px; font-weight: 750; letter-spacing: .04em; white-space: nowrap; }
+  .p0 { background: var(--p0-soft); color: var(--p0); }
+  .p1 { background: var(--p1-soft); color: var(--p1); }
+  .p2 { background: var(--p2-soft); color: var(--p2); }
+  .eff { font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .waves { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+  .wave { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .wave .n { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--accent); font-weight: 700; }
+  .wave h3 { font-size: 14px; margin: 6px 0 8px; }
+  .wave ul { margin: 0; padding-left: 17px; color: #4e5464; font-size: 12.5px; }
+  .wave li { margin-bottom: 4px; }
+  .split { display: grid; grid-template-columns: 1.05fr .95fr; gap: 18px; }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; }
+  .panel ul { margin: 8px 0 0; padding-left: 18px; }
+  .panel li { margin-bottom: 6px; font-size: 13.5px; color: #454b5b; }
+  .ok li::marker { color: var(--ok); }
+  .no li::marker { color: var(--p0); }
+  .foot { margin-top: 42px; padding-top: 18px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+  .foot code { color: #343a48; background: #efece4; padding: 2px 6px; border-radius: 5px; }
+  @media (max-width: 980px) {
+    .hero, .split { grid-template-columns: 1fr; }
+    .three { grid-template-columns: 1fr; }
+    .waves { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 620px) {
+    .wrap { padding: 32px 16px 56px; }
+    .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .waves { grid-template-columns: 1fr; }
+    th { position: static; }
+  }
+</style>
+
+<div class="wrap">
+  <header class="hero">
+    <div>
+      <div class="eyebrow">Product Audit · Phase 1</div>
+      <h1>PaintCodex 产品体验审计</h1>
+      <p class="lede">四个产品经理会话并行走查真实系统。结论很集中：功能已经能跑通，但界面给出了三个错误信号——假画布、假 100%、假保存。本轮不加大板块，只把现有能力补到“敢让用户用”。</p>
+      <div class="callout"><strong>统一原则：</strong>系统状态必须诚实、可见、可行动。保存、连接、选中、缩放、错误、操作结果，都要有可信的落点。</div>
+    </div>
+    <div class="stats" aria-label="审计统计">
+      <div class="stat"><b>3</b><span>P0 必须修</span></div>
+      <div class="stat"><b>17</b><span>P1 本轮应修</span></div>
+      <div class="stat"><b>6</b><span>P2 收口项</span></div>
+      <div class="stat"><b>8–10d</b><span>单人工程估算</span></div>
+    </div>
+  </header>
+
+  <section aria-labelledby="fakes">
+    <div class="section-head">
+      <div><div class="eyebrow">The Three Illusions</div><h2 id="fakes">三个最伤信任的假象</h2></div>
+      <p>都不是“功能少”，而是界面在错误地表示成功。它们出现在首次会话最关键的几分钟里。</p>
+    </div>
+    <div class="three">
+      <article class="fake">
+        <div class="tag">P0 · UX-01</div>
+        <h3>假画布</h3>
+        <p>没有画布时，白色画布已经渲染、画笔可以点，但画出的线会被静默删除。现场画一笔后 <code>layers:0</code>、<code>nonWhitePixels:0</code>、<code>error:null</code>。</p>
+        <p><strong>用户会认为：</strong>浏览器/触控/这个应用不支持画画。</p>
+      </article>
+      <article class="fake">
+        <div class="tag">P0 · UX-02</div>
+        <h3>假保存</h3>
+        <p>停笔 30 秒自动下载 <code>Untitled.json</code>，看起来像保存；真正的保存状态不可见，保存失败时笔画会被移除，只剩顶栏 12px 红字。</p>
+        <p><strong>用户会认为：</strong>保存了；或者根本不知道作品丢了。</p>
+      </article>
+      <article class="fake">
+        <div class="tag">P1 · UX-08 / P0 · UX-03</div>
+        <h3>假 100%</h3>
+        <p>画布实际显示缩放 44.8%，状态栏写“缩放: 100%”；监控同一张卡写“错误率 0.0%”和“1 个错误”，因为两个数字用了不同分母。</p>
+        <p><strong>用户会认为：</strong>自己在 100% 下作画；系统没有错误。</p>
+      </article>
+    </div>
+  </section>
+
+  <section aria-labelledby="priority">
+    <div class="section-head">
+      <div><div class="eyebrow">Unified Backlog</div><h2 id="priority">统一优先级清单</h2></div>
+      <p>已合并四份报告的重叠项。每条都能追溯到现场证据与源码；完整验收标准见 <code>report.md</code> 与四份 findings。</p>
+    </div>
+    <div class="filters" role="group" aria-label="按严重度筛选">
+      <button class="filter" data-sev="all" aria-pressed="true">全部 26</button>
+      <button class="filter" data-sev="p0" aria-pressed="false">P0 · 3</button>
+      <button class="filter" data-sev="p1" aria-pressed="false">P1 · 17</button>
+      <button class="filter" data-sev="p2" aria-pressed="false">P2 · 6</button>
+    </div>
+    <div class="table-shell">
+      <table>
+        <caption>优先级按“影响面 × 可恢复性 × 替代路径”排序；工作量为 PM 粗估，需工程复核。</caption>
+        <thead>
+          <tr><th scope="col">ID</th><th scope="col">问题</th><th scope="col">级别</th><th scope="col">工作量</th><th scope="col">关键现场证据</th></tr>
+        </thead>
+        <tbody id="rows">
+          <tr data-sev="p0"><td class="id">UX-01</td><td>无画布时画布可交互，笔画静默丢弃</td><td><span class="badge p0">P0</span></td><td class="eff">S</td><td class="ev">画一笔后 layers 0 / nonWhitePixels 0 / error null</td></tr>
+          <tr data-sev="p0"><td class="id">UX-02</td><td>30 秒自动下载 JSON 伪装保存；无保存状态，失败移除笔画</td><td><span class="badge p0">P0</span></td><td class="eff">M</td><td class="ev">空闲 33 秒拦截到 1 次 Untitled.json 下载</td></tr>
+          <tr data-sev="p0"><td class="id">UX-03</td><td>监控“错误率 0.0%”与“1 个错误”自相矛盾</td><td><span class="badge p0">P0</span></td><td class="eff">S</td><td class="ev">错误率只算 HTTP，错误数算全部分类</td></tr>
+          <tr data-sev="p1"><td class="id">UX-04</td><td>首次进入无主 CTA；AI 承诺作画但没有画布</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">唯一入口在右上角；提示“尚未加载画布”</td></tr>
+          <tr data-sev="p1"><td class="id">UX-05</td><td>新建画布无确认，旧画布从 UI 不可达</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">replaceState 覆盖；history.back 离开应用</td></tr>
+          <tr data-sev="p1"><td class="id">UX-06</td><td>所有画布叫 Untitled，不能重命名，导出互相覆盖</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">导出 Untitled.png / Untitled.json</td></tr>
+          <tr data-sev="p1"><td class="id">UX-07</td><td>删除中间图层后新笔画重名</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">删除 Stroke 4 再画，出现两个 Stroke 8</td></tr>
+          <tr data-sev="p1"><td class="id">UX-08</td><td>状态栏假 100%；名称/尺寸重复三次</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">实际 858/1920 = 44.8%，状态栏写 100%</td></tr>
+          <tr data-sev="p1"><td class="id">UX-09</td><td>“当前图层”空转；图层行键盘不可选</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">activeLayerId 只用于面板高亮；行 tabIndex -1</td></tr>
+          <tr data-sev="p1"><td class="id">UX-10</td><td>图层可见性 7×11、删除 16×16；语义混用</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">实测包围盒；动作标签 + 状态 pressed</td></tr>
+          <tr data-sev="p1"><td class="id">UX-11</td><td>图层增长挤压 AI 对话，侧栏整体滚动</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">8 层：聊天区 467 → 186.75px</td></tr>
+          <tr data-sev="p1"><td class="id">UX-12</td><td>删除用原生 confirm，删除后无恢复条</td><td><span class="badge p1">P1</span></td><td class="eff">S/M</td><td class="ev">删除可撤销（9→8→9 补测），但无提示</td></tr>
+          <tr data-sev="p1"><td class="id">UX-13</td><td>名称/透明度/类型已有数据能力未暴露</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">协议支持 name/opacity；界面只有可见性/删除</td></tr>
+          <tr data-sev="p1"><td class="id">UX-14</td><td>AI 等待约 20 秒无反馈；成功无落地确认</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">steps 完成即清空；layerCreated 被前端丢弃</td></tr>
+          <tr data-sev="p1"><td class="id">UX-15</td><td>AI 错误不可恢复：无重试、草稿不回、英文错误</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">Failed to fetch 原样显示；无重试按钮</td></tr>
+          <tr data-sev="p1"><td class="id">UX-16</td><td>主动取消被算作 AI 失败；1 样本显示 0.0%</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">0/1 chats = 0.0%，唯一样本是取消</td></tr>
+          <tr data-sev="p1"><td class="id">UX-17</td><td>画布 SSE 断线无感知</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">onError 未接入；监控页却有完整 live 状态</td></tr>
+          <tr data-sev="p1"><td class="id">UX-18</td><td>390px 下画布 34×18，页面横向溢出 50px</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">body scrollWidth 440；侧栏固定 300</td></tr>
+          <tr data-sev="p1"><td class="id">UX-19</td><td>8 处本地化遗漏 + html lang=en</td><td><span class="badge p1">P1</span></td><td class="eff">S</td><td class="ev">Untitled / Blank / vector / AI chat / Logs: 等</td></tr>
+          <tr data-sev="p1"><td class="id">UX-20</td><td>画笔固定黑色 4px，无颜色/粗细</td><td><span class="badge p1">P1</span></td><td class="eff">M</td><td class="ev">屏幕约 1.8px；AI 可彩色，用户只能细黑线</td></tr>
+          <tr data-sev="p2"><td class="id">UX-21</td><td>对比度 3.82:1、无全局 focus-visible、读屏语义</td><td><span class="badge p2">P2</span></td><td class="eff">S/M</td><td class="ev">空状态 13px 文本低于 AA 4.5:1</td></tr>
+          <tr data-sev="p2"><td class="id">UX-22</td><td>监控固定 200 条无分页；暂停时统计仍刷新</td><td><span class="badge p2">P2</span></td><td class="eff">S</td><td class="ev">200 of 200；API 已有 limit/offset</td></tr>
+          <tr data-sev="p2"><td class="id">UX-23</td><td>导出无反馈；JSON 被误认为可恢复工程文件</td><td><span class="badge p2">P2</span></td><td class="eff">S</td><td class="ev">无 toast；JSON 无导入入口</td></tr>
+          <tr data-sev="p2"><td class="id">UX-24</td><td>刷新丢对话与草稿；持久化边界未定义</td><td><span class="badge p2">P2</span></td><td class="eff">S</td><td class="ev">AI 图层保留，对话清空</td></tr>
+          <tr data-sev="p2"><td class="id">UX-25</td><td>圆角/高度/禁用透明度/灰色/标点漂移</td><td><span class="badge p2">P2</span></td><td class="eff">S</td><td class="ev">同类按钮 6/8 圆角；五种禁用透明度</td></tr>
+          <tr data-sev="p2"><td class="id">UX-26</td><td>图层顺序与主流相反；操作无 pending 反馈</td><td><span class="badge p2">P2</span></td><td class="eff">S</td><td class="ev">最新图层在最下；连点可能重复请求</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section aria-labelledby="waves">
+    <div class="section-head">
+      <div><div class="eyebrow">Sequencing</div><h2 id="waves">实施路线</h2></div>
+      <p>先止血，再建立信任，再补 AI/连接，最后做能力与打磨。每波都有可脚本化的出口条件。</p>
+    </div>
+    <div class="waves">
+      <article class="wave"><div class="n">WAVE 0 · ~1d</div><h3>止血</h3><ul><li>无画布门禁</li><li>删除自动下载</li><li>监控口径</li><li>图层命名唯一</li><li>命中区 ≥24</li></ul></article>
+      <article class="wave"><div class="n">WAVE 1 · ~2d</div><h3>信任与首次体验</h3><ul><li>保存/失败/重试</li><li>空状态主 CTA</li><li>新建可返回</li><li>真实缩放</li><li>删除恢复条</li><li>图层独立滚动</li></ul></article>
+      <article class="wave"><div class="n">WAVE 2 · ~2d</div><h3>AI 与连接</h3><ul><li>计时与终态</li><li>layerCreated 落地</li><li>错误重试</li><li>取消不计失败</li><li>连接状态</li><li>画布重命名</li></ul></article>
+      <article class="wave"><div class="n">WAVE 3 · ~2–3d</div><h3>能力完善</h3><ul><li>图层选中语义</li><li>键盘可达</li><li>重命名/透明度</li><li>画笔颜色/粗细</li><li>窄屏可用</li></ul></article>
+      <article class="wave"><div class="n">WAVE 4 · ~1–2d</div><h3>打磨收口</h3><ul><li>对比度/焦点</li><li>监控分页</li><li>导出反馈</li><li>草稿保留</li><li>一致性</li></ul></article>
+    </div>
+  </section>
+
+  <section aria-labelledby="scope">
+    <div class="section-head">
+      <div><div class="eyebrow">Scope Discipline</div><h2 id="scope">做什么，不做什么</h2></div>
+      <p>“优化到极致”不等于扩功能。本轮只完善已有能力；下列新模块明确留到后续。</p>
+    </div>
+    <div class="split">
+      <div class="panel">
+        <h3>已验证可用，不要重做</h3>
+        <ul class="ok">
+          <li>画布/图层刷新持久化，服务端逐次 mutation 保存</li>
+          <li>多标签同步：1.2 秒内 8→9 层</li>
+          <li>Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z；隐藏/删除可撤销</li>
+          <li>PNG/JSON 导出；PNG 1920×1080</li>
+          <li>AI 生成图层、取消恢复、错误 role=alert</li>
+          <li>监控 live 状态、trace、分类/级别/时间过滤</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>本轮明确不做</h3>
+        <ul class="no">
+          <li>画布列表/画廊、模板/教程、JSON 导入</li>
+          <li>完整缩放/平移、图层重排/合并/锁定/搜索</li>
+          <li>笔刷硬度/压感/纹理、完整移动端</li>
+          <li>i18n 框架、设计系统、主题、组件库</li>
+          <li>对话历史 DB/多轮记忆、离线队列、手动重连</li>
+          <li>监控告警/保留清理/虚拟滚动/全站 WCAG</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <div>完整报告：<code>.scratch/product-audit/report.md</code> · 四份领域报告：<code>findings/01–04</code> · 现场证据：<code>evidence/01–07</code></div>
+    <div>审计日期 2026-10-26 · 无用户访谈，用户影响均为假设</div>
+  </footer>
+</div>
+
+<script>
+  const buttons = [...document.querySelectorAll('.filter')];
+  const rows = [...document.querySelectorAll('#rows tr')];
+  for (const button of buttons) {
+    button.addEventListener('click', () => {
+      const sev = button.dataset.sev;
+      for (const b of buttons) b.setAttribute('aria-pressed', String(b === button));
+      for (const row of rows) {
+        row.hidden = sev !== 'all' && row.dataset.sev !== sev;
+      }
+    });
+  }
+</script>
