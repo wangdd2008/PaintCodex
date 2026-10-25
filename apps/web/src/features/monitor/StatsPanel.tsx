@@ -9,7 +9,7 @@ interface StatsPanelProps {
 export function StatsPanel({ stats, error }: StatsPanelProps) {
   if (stats === null) {
     return (
-      <section className="stats-panel" aria-label="Monitor stats">
+      <section className="stats-panel" aria-label="监控统计">
         <div className="stats-panel__header">
           <h2 className="monitor-heading">概览</h2>
         </div>

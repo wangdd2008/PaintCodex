@@ -82,7 +82,7 @@ export function LogList({
   }
 
   return (
-    <section className="log-list" aria-label="Agent logs">
+    <section className="log-list" aria-label="日志">
       <div className="log-list__header">
         <h2 className="monitor-heading">日志</h2>
         <span className="monitor-muted">

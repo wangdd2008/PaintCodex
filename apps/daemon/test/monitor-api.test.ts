@@ -524,7 +524,7 @@ describe('GET /monitor/traces/:traceId', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({
-      error: { code: 'trace_not_found', message: 'Trace not found' },
+      error: { code: 'trace_not_found', message: '追踪不存在' },
     });
   });
 });

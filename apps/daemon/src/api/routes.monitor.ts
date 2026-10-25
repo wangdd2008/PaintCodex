@@ -48,7 +48,7 @@ export function registerMonitorRoutes(
 
       if (logs.length === 0) {
         return reply.code(404).send({
-          error: { code: 'trace_not_found', message: 'Trace not found' },
+          error: { code: 'trace_not_found', message: '追踪不存在' },
         });
       }
 
@@ -308,7 +308,7 @@ function parseEnumList<T extends string>(
   }
 
   if (typeof value !== 'string') {
-    return { ok: false, message: `${name} must be a single comma-separated value` };
+    return { ok: false, message: `${name} 必须是逗号分隔的值` };
   }
 
   const items = value.split(',').map((item) => item.trim());
@@ -317,7 +317,7 @@ function parseEnumList<T extends string>(
   if (invalid !== undefined) {
     return {
       ok: false,
-      message: `Unknown ${name}: ${invalid === '' ? '(empty)' : invalid}`,
+      message: `未知的 ${name}: ${invalid === '' ? '(空)' : invalid}`,
     };
   }
 
@@ -330,7 +330,7 @@ function parseOptionalString(value: unknown, name: string): Parsed<string | unde
   }
 
   if (typeof value !== 'string') {
-    return { ok: false, message: `${name} must be a single string value` };
+    return { ok: false, message: `${name} 必须是字符串` };
   }
 
   return { ok: true, value };
@@ -349,7 +349,7 @@ function parseOptionalInteger(
   const parsed = toInteger(value);
 
   if (parsed === null) {
-    return { ok: false, message: `${name} must be an integer` };
+    return { ok: false, message: `${name} 必须是整数` };
   }
 
   if (parsed < min || parsed > max) {
@@ -357,8 +357,8 @@ function parseOptionalInteger(
       ok: false,
       message:
         max === Number.MAX_SAFE_INTEGER
-          ? `${name} must be an integer >= ${min}`
-          : `${name} must be an integer between ${min} and ${max}`,
+          ? `${name} 必须是大于等于 ${min} 的整数`
+          : `${name} 必须是 ${min} 到 ${max} 之间的整数`,
     };
   }
 

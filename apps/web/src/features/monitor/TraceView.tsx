@@ -87,7 +87,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
   }
 
   return (
-    <section className="trace-view" aria-label="Trace detail">
+    <section className="trace-view" aria-label="追踪详情">
       <div className="trace-view__header">
         <h2 className="monitor-heading">追踪</h2>
         {traceId ? (
