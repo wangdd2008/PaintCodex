@@ -4,12 +4,12 @@
 
 **Blocked by:** None（可立即开始）
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Acceptance Criteria
 
-- [ ] `errors.ts` 中文化：画布不存在、图层不存在、版本冲突等错误消息
-- [ ] `routes.paint.ts` 中文化：验证错误信息（宽高范围、图层类型、必填字段等）
-- [ ] `routes.ai.ts` 中文化：AI 聊天相关错误信息
-- [ ] 后端测试同步更新（`ai-chat.test.ts`、`canvas.test.ts` 等）
-- [ ] `pnpm -r typecheck` 和 `pnpm -r test` 通过
+- [x] `errors.ts` 中文化：画布不存在、图层不存在、版本冲突等错误消息
+- [x] `routes.paint.ts` 中文化：验证错误信息（宽高范围、图层类型、必填字段等）
+- [x] `routes.ai.ts` 中文化：AI 聊天相关错误信息
+- [x] 后端测试同步更新（`ai-chat.test.ts`、`canvas.test.ts` 等）
+- [x] `pnpm -r typecheck` 和 `pnpm -r test` 通过

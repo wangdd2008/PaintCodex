@@ -4,11 +4,11 @@
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** done
 
 ## Acceptance Criteria
 
-- [ ] `App.tsx` 添加 `useEffect` + `setInterval`，每 30 秒自动触发 JSON 导出
-- [ ] 仅当画布存在时触发自动保存
-- [ ] 自动保存静默执行，不打扰用户（无弹窗/通知）
-- [ ] `pnpm -r typecheck` 和 `pnpm -r test` 通过
+- [x] `App.tsx` 添加 `useEffect` + `setInterval`，每 30 秒自动触发 JSON 导出
+- [x] 仅当画布存在时触发自动保存
+- [x] 自动保存静默执行，不打扰用户（无弹窗/通知）
+- [x] `pnpm -r typecheck` 和 `pnpm -r test` 通过
