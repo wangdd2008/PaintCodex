@@ -171,7 +171,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     } catch (error) {
       set({
         status: 'error',
-        error: error instanceof Error ? error.message : 'Could not create canvas',
+        error: error instanceof Error ? error.message : '无法创建画布',
       });
     }
   },
@@ -196,7 +196,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({
         canvas: null,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Could not load canvas',
+        error: error instanceof Error ? error.message : '无法加载画布',
       });
     }
   },
@@ -217,7 +217,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       });
     } catch (error) {
       set({
-        error: error instanceof Error ? error.message : 'Could not refresh canvas',
+        error: error instanceof Error ? error.message : '无法刷新画布',
       });
     }
   },
@@ -236,7 +236,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           activeLayerId: created?.id ?? get().activeLayerId,
         });
       },
-      'Could not save layer',
+      '无法保存图层',
     );
 
     return created;
@@ -260,7 +260,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         );
         set({ canvas: updated, status: 'ready' });
       },
-      'Could not update layer',
+      '无法更新图层',
     );
   },
 
@@ -282,7 +282,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
         });
       },
-      'Could not delete layer',
+      '无法删除图层',
     );
   },
 
@@ -304,7 +304,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
           });
         },
-        'Could not undo',
+        '无法撤销',
       );
     } catch {
       // runMutation already surfaced the error.
@@ -329,7 +329,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
           });
         },
-        'Could not redo',
+        '无法重做',
       );
     } catch {
       // runMutation already surfaced the error.

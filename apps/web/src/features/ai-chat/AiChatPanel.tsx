@@ -15,7 +15,7 @@ interface ChatMessage {
 type ChatStep = NonNullable<StreamPayload['step']>;
 
 const FALLBACK_ERROR =
-  'The AI assistant could not respond. Check that the Codex CLI is installed and signed in.';
+  'AI 助手无法响应。请检查 Codex CLI 是否已安装并已登录。';
 
 /** The runner's timeout text is machine-facing; users get an actionable line. */
 function userFacingError(message: string): string {
@@ -261,7 +261,7 @@ export function AiChatPanel() {
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
       >
-        AI Chat {open ? '▾' : '▸'}
+        AI 对话 {open ? '▾' : '▸'}
       </button>
 
       {open ? (
@@ -274,7 +274,7 @@ export function AiChatPanel() {
           >
             {messages.length === 0 ? (
               <p className="ai-chat__empty">
-                Ask the painting assistant about composition, color, or what to paint next.
+                向绘画助手咨询构图、配色，或者下一步该画什么。
               </p>
             ) : (
               messages.map((message) => {
@@ -287,7 +287,7 @@ export function AiChatPanel() {
                     className={`ai-chat__message ai-chat__message--${message.role}`}
                   >
                     <span className="ai-chat__role">
-                      {message.role === 'user' ? 'You' : 'AI'}
+                      {message.role === 'user' ? '你' : 'AI 助手'}
                     </span>
                     <p className="ai-chat__text">
                       {step ? (
@@ -299,7 +299,7 @@ export function AiChatPanel() {
                       {text.length > 0
                         ? text
                         : inFlight && message.role === 'assistant' && !step
-                          ? 'Thinking…'
+                          ? '思考中…'
                           : ''}
                       {message.cancelled ? (
                         <span className="ai-chat__cancelled">已取消</span>
@@ -320,7 +320,7 @@ export function AiChatPanel() {
           <form className="ai-chat__composer" onSubmit={(event) => void send(event)}>
             <textarea
               className="ai-chat__input"
-              placeholder="Describe what to paint…"
+              placeholder="描述你想画的内容…"
               rows={3}
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}
@@ -349,7 +349,7 @@ export function AiChatPanel() {
                   className="ai-chat__send"
                   disabled={input.trim().length === 0}
                 >
-                  Send
+                  发送
                 </button>
               )}
             </div>

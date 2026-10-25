@@ -6,6 +6,7 @@ import { MonitorPage } from '../features/monitor/MonitorPage';
 import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
+import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export';
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
@@ -131,17 +132,49 @@ export function App() {
       const dataUrl = exportActiveCanvasPng();
 
       if (!dataUrl) {
-        throw new Error('Canvas is not ready to export');
+        throw new Error('画布尚未准备好导出');
       }
 
       downloadPng(dataUrl, canvasPngFilename(canvas.name));
       setExportError(null);
     } catch (caught) {
       setExportError(
-        caught instanceof Error ? caught.message : 'Could not export PNG',
+        caught instanceof Error ? caught.message : '无法导出 PNG',
       );
     }
   }
+
+  function handleExportJson() {
+    if (!canvas) {
+      return;
+    }
+
+    try {
+      downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
+      setExportError(null);
+    } catch (caught) {
+      setExportError(
+        caught instanceof Error ? caught.message : '无法导出 JSON',
+      );
+    }
+  }
+
+  // Auto-save: export JSON every 30 seconds when a canvas is active
+  useEffect(() => {
+    if (!canvas) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      try {
+        downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
+      } catch {
+        // Silent failure for auto-save
+      }
+    }, 30_000);
+
+    return () => window.clearInterval(interval);
+  }, [canvas]);
 
   const menuMessage = error ?? exportError;
 
@@ -164,7 +197,7 @@ export function App() {
               onClick={() => void createNewCanvas()}
               disabled={status === 'loading'}
             >
-              {status === 'loading' ? 'Working…' : 'New Canvas'}
+              {status === 'loading' ? '处理中…' : '新建画布'}
             </button>
             <button
               type="button"
@@ -172,7 +205,15 @@ export function App() {
               onClick={handleExportPng}
               disabled={!canvas}
             >
-              Export PNG
+              导出 PNG
+            </button>
+            <button
+              type="button"
+              className="menu-button"
+              onClick={handleExportJson}
+              disabled={!canvas}
+            >
+              导出 JSON
             </button>
           </>
         ) : null}
@@ -182,7 +223,7 @@ export function App() {
           onClick={() => navigate(view === 'monitor' ? 'canvas' : 'monitor')}
           aria-current={view === 'monitor' ? 'page' : undefined}
         >
-          {view === 'monitor' ? 'Back to Canvas' : 'Monitor'}
+          {view === 'monitor' ? '返回画布' : '监控'}
         </button>
       </header>
 
@@ -209,9 +250,9 @@ export function App() {
 
       {view === 'canvas' ? (
         <footer className="status-bar">
-          <span>{canvas ? `${canvas.width} × ${canvas.height}` : 'No canvas'}</span>
-          <span>Zoom: 100%</span>
-          <span>{tool === 'brush' ? 'Brush' : 'Select'}</span>
+          <span>{canvas ? `${canvas.width} × ${canvas.height}` : '无画布'}</span>
+          <span>缩放: 100%</span>
+          <span>{tool === 'brush' ? '画笔' : '选择'}</span>
         </footer>
       ) : null}
     </div>

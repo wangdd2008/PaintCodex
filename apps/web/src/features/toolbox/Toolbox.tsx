@@ -12,42 +12,42 @@ export function Toolbox() {
   const redo = useCanvasStore((state) => state.redo);
 
   return (
-    <nav className="toolbox" aria-label="Tools">
+    <nav className="toolbox" aria-label="工具">
       <button
         type="button"
         className={tool === 'brush' ? 'tool-button tool-button--active' : 'tool-button'}
-        title="Brush"
+        title="画笔"
         aria-pressed={tool === 'brush'}
         onClick={() => setTool('brush')}
       >
-        Brush
+        画笔
       </button>
       <button
         type="button"
         className={tool === 'select' ? 'tool-button tool-button--active' : 'tool-button'}
-        title="Select and move AI layers"
+        title="选择和移动 AI 图层"
         aria-pressed={tool === 'select'}
         onClick={() => setTool('select')}
       >
-        Select
+        选择
       </button>
       <button
         type="button"
         className="tool-button"
-        title="Undo (Ctrl+Z)"
+        title="撤销 (Ctrl+Z)"
         disabled={!canUndo || saving}
         onClick={() => void undo()}
       >
-        Undo
+        撤销
       </button>
       <button
         type="button"
         className="tool-button"
-        title="Redo (Ctrl+Y)"
+        title="重做 (Ctrl+Y)"
         disabled={!canRedo || saving}
         onClick={() => void redo()}
       >
-        Redo
+        重做
       </button>
     </nav>
   );

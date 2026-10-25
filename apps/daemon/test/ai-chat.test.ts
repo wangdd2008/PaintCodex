@@ -138,7 +138,7 @@ describe('POST /paint/ai/chat', () => {
     expect(response.json()).toEqual({
       error: {
         code: 'invalid_request',
-        message: 'message is required',
+        message: 'message 不能为空',
       },
     });
     expect(called).toBe(false);

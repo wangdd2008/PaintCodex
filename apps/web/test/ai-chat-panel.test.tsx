@@ -42,10 +42,10 @@ function stubFetch(body: ReadableStream<Uint8Array>): void {
 }
 
 async function sendMessage(text: string): Promise<void> {
-  fireEvent.change(screen.getByPlaceholderText('Describe what to paint…'), {
+  fireEvent.change(screen.getByPlaceholderText('描述你想画的内容…'), {
     target: { value: text },
   });
-  fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  fireEvent.click(screen.getByRole('button', { name: '发送' }));
   // Yield so the request starts and the first frames are consumed.
   await screen.findByText(text);
 }
@@ -122,13 +122,13 @@ describe('AiChatPanel clear input', () => {
     fireEvent.click(screen.getByRole('button', { name: '清空' }));
 
     fireEvent.change(input, { target: { value: 'second message' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
     expect(await screen.findByText('second message')).toBeTruthy();
 
     stream.push({ done: true });
     stream.close();
 
-    expect(await screen.findByRole('button', { name: 'Send' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '发送' })).toBeTruthy();
     expect(input.value).toBe('');
     expect(screen.queryByRole('button', { name: '撤销' })).toBeNull();
   });
@@ -140,12 +140,12 @@ describe('AiChatPanel clear input', () => {
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
 
     fireEvent.change(input, { target: { value: 'first message' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: '发送' }));
     expect(await screen.findByText('first message')).toBeTruthy();
 
     stream.push({ done: true });
     stream.close();
-    expect(await screen.findByRole('button', { name: 'Send' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: '发送' })).toBeTruthy();
 
     fireEvent.change(input, { target: { value: 'draft to clear' } });
     fireEvent.click(screen.getByRole('button', { name: '清空' }));
@@ -177,7 +177,7 @@ describe('AiChatPanel step progress', () => {
 });
 
 describe('AiChatPanel cancel', () => {
-  it('replaces Send with 取消, aborts the request and marks the bubble 已取消', async () => {
+  it('replaces 发送 with 取消, aborts the request and marks the bubble 已取消', async () => {
     const stream = controlledStream();
     let aborted = false;
 
@@ -199,14 +199,14 @@ describe('AiChatPanel cancel', () => {
     render(<AiChatPanel />);
     await sendMessage('Paint a cat');
 
-    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '发送' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '取消' }));
 
     expect(await screen.findByText('已取消')).toBeTruthy();
     expect(aborted).toBe(true);
     // Cancelling is a user action, not a failure.
     expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Send' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '发送' })).toBeTruthy();
   });
 });
 

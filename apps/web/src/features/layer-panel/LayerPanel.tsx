@@ -11,19 +11,19 @@ export function LayerPanel() {
   const deleteLayer = useCanvasStore((state) => state.deleteLayer);
 
   function handleDelete(layer: Layer) {
-    if (window.confirm(`Delete layer "${layer.name}"?`)) {
+    if (window.confirm(`删除图层 "${layer.name}"?`)) {
       void deleteLayer(layer.id).catch(() => undefined);
     }
   }
 
   return (
-    <section className="layer-panel" aria-label="Layers">
-      <h2 className="panel-title">Layers</h2>
+    <section className="layer-panel" aria-label="图层">
+      <h2 className="panel-title">图层</h2>
 
       {!canvas ? (
-        <p className="panel-empty">No canvas loaded yet.</p>
+        <p className="panel-empty">尚未加载画布。</p>
       ) : canvas.layers.length === 0 ? (
-        <p className="panel-empty">No layers yet.</p>
+        <p className="panel-empty">暂无图层。</p>
       ) : (
         <ul className="layer-list">
           {canvas.layers.map((layer) => (
@@ -37,7 +37,7 @@ export function LayerPanel() {
               <button
                 type="button"
                 className="layer-item__visibility"
-                aria-label={layer.visible ? `Hide ${layer.name}` : `Show ${layer.name}`}
+                aria-label={layer.visible ? `隐藏 ${layer.name}` : `显示 ${layer.name}`}
                 aria-pressed={layer.visible}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -61,7 +61,7 @@ export function LayerPanel() {
               <button
                 type="button"
                 className="layer-item__delete"
-                aria-label={`Delete ${layer.name}`}
+                aria-label={`删除 ${layer.name}`}
                 disabled={saving}
                 onClick={(event) => {
                   event.stopPropagation();

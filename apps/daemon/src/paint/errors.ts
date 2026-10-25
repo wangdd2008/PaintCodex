@@ -1,13 +1,13 @@
 export class CanvasNotFoundError extends Error {
   constructor() {
-    super('Canvas not found');
+    super('画布不存在');
     this.name = 'CanvasNotFoundError';
   }
 }
 
 export class LayerNotFoundError extends Error {
   constructor() {
-    super('Layer not found');
+    super('图层不存在');
     this.name = 'LayerNotFoundError';
   }
 }
@@ -18,7 +18,7 @@ export class RevisionConflictError extends Error {
     readonly currentRevision: number,
   ) {
     super(
-      `Canvas revision ${currentRevision} does not match expected revision ${expectedRevision}`,
+      `画布版本 ${currentRevision} 与预期版本 ${expectedRevision} 不一致`,
     );
     this.name = 'RevisionConflictError';
   }
@@ -26,14 +26,14 @@ export class RevisionConflictError extends Error {
 
 export class NothingToUndoError extends Error {
   constructor() {
-    super('Nothing to undo');
+    super('没有可撤销的操作');
     this.name = 'NothingToUndoError';
   }
 }
 
 export class NothingToRedoError extends Error {
   constructor() {
-    super('Nothing to redo');
+    super('没有可重做的操作');
     this.name = 'NothingToRedoError';
   }
 }

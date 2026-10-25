@@ -57,7 +57,7 @@ export function MonitorPage() {
       }
     } catch (cause) {
       if (!disposed.current) {
-        setStatsError(cause instanceof Error ? cause.message : 'Could not load stats');
+        setStatsError(cause instanceof Error ? cause.message : '无法加载统计数据');
       }
     } finally {
       statsInFlight.current = false;
@@ -97,7 +97,7 @@ export function MonitorPage() {
       setLogsError(null);
     } catch (cause) {
       if (!disposed.current) {
-        setLogsError(cause instanceof Error ? cause.message : 'Could not load logs');
+        setLogsError(cause instanceof Error ? cause.message : '无法加载日志');
       }
     } finally {
       if (!disposed.current) {
@@ -161,12 +161,12 @@ export function MonitorPage() {
   }
 
   const liveLabel = paused
-    ? 'Paused'
+    ? '已暂停'
     : liveState === 'live'
-      ? 'Live'
+      ? '实时中'
       : liveState === 'error'
-        ? 'Reconnecting…'
-        : 'Connecting…';
+        ? '重新连接中…'
+        : '连接中…';
 
   return (
     <div className="monitor-page">
@@ -179,7 +179,7 @@ export function MonitorPage() {
           <span className="monitor-live__dot" aria-hidden="true" />
           {liveLabel}
         </span>
-        <span className="monitor-muted">{logs.length} logs buffered</span>
+        <span className="monitor-muted">{logs.length} 条日志已缓存</span>
         <span className="monitor-spacer" />
         <button
           type="button"
@@ -187,7 +187,7 @@ export function MonitorPage() {
           onClick={handleRefresh}
           disabled={loadingLogs}
         >
-          {loadingLogs ? 'Refreshing…' : 'Refresh'}
+          {loadingLogs ? '刷新中…' : '刷新'}
         </button>
         <button
           type="button"
@@ -195,7 +195,7 @@ export function MonitorPage() {
           onClick={() => setPaused((value) => !value)}
           aria-pressed={paused}
         >
-          {paused ? 'Resume live' : 'Pause live'}
+          {paused ? '继续实时' : '暂停实时'}
         </button>
       </div>
 

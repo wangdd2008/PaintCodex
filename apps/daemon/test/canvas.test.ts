@@ -86,7 +86,7 @@ describe('canvas API', () => {
 
     expect(response.statusCode).toBe(404);
     expect(response.json()).toEqual({
-      error: { code: 'canvas_not_found', message: 'Canvas not found' },
+      error: { code: 'canvas_not_found', message: '画布不存在' },
     });
 
     await app.close();

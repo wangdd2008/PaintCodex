@@ -50,7 +50,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
 
     if (!canvas) {
       return reply.code(404).send({
-        error: { code: 'canvas_not_found', message: 'Canvas not found' },
+        error: { code: 'canvas_not_found', message: '画布不存在' },
       });
     }
 
@@ -125,7 +125,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       return reply.code(400).send({
         error: {
           code: 'invalid_revision',
-          message: 'expectedRevision must be an integer',
+          message: 'expectedRevision 必须是整数',
         },
       });
     }
@@ -203,13 +203,13 @@ function sendPaintError(reply: FastifyReply, error: unknown) {
   if (error instanceof CanvasNotFoundError) {
     return reply
       .code(404)
-      .send({ error: { code: 'canvas_not_found', message: 'Canvas not found' } });
+      .send({ error: { code: 'canvas_not_found', message: '画布不存在' } });
   }
 
   if (error instanceof LayerNotFoundError) {
     return reply
       .code(404)
-      .send({ error: { code: 'layer_not_found', message: 'Layer not found' } });
+      .send({ error: { code: 'layer_not_found', message: '图层不存在' } });
   }
 
   if (error instanceof RevisionConflictError) {
@@ -222,13 +222,13 @@ function sendPaintError(reply: FastifyReply, error: unknown) {
   if (error instanceof NothingToUndoError) {
     return reply
       .code(409)
-      .send({ error: { code: 'nothing_to_undo', message: 'Nothing to undo' } });
+      .send({ error: { code: 'nothing_to_undo', message: '没有可撤销的操作' } });
   }
 
   if (error instanceof NothingToRedoError) {
     return reply
       .code(409)
-      .send({ error: { code: 'nothing_to_redo', message: 'Nothing to redo' } });
+      .send({ error: { code: 'nothing_to_redo', message: '没有可重做的操作' } });
   }
 
   throw error;
@@ -238,18 +238,18 @@ function invalidRevision(reply: FastifyReply) {
   return reply.code(400).send({
     error: {
       code: 'invalid_revision',
-      message: 'expectedRevision must be an integer',
+      message: 'expectedRevision 必须是整数',
     },
   });
 }
 
 function validateCreateCanvas(input: CreateCanvasRequest): string | null {
   if (input.width !== undefined && !isValidDimension(input.width)) {
-    return `width must be an integer between 1 and ${MAX_CANVAS_DIMENSION}`;
+    return `宽度必须是 1 到 ${MAX_CANVAS_DIMENSION} 之间的整数`;
   }
 
   if (input.height !== undefined && !isValidDimension(input.height)) {
-    return `height must be an integer between 1 and ${MAX_CANVAS_DIMENSION}`;
+    return `高度必须是 1 到 ${MAX_CANVAS_DIMENSION} 之间的整数`;
   }
 
   return null;
@@ -257,30 +257,30 @@ function validateCreateCanvas(input: CreateCanvasRequest): string | null {
 
 function validateCreateLayer(input: LayerCreateBody | undefined): string | null {
   if (!input) {
-    return 'layer payload is required';
+    return '图层数据不能为空';
   }
 
   if (typeof input.name !== 'string' || input.name.trim() === '') {
-    return 'name is required';
+    return '图层名称不能为空';
   }
 
   if (!isLayerType(input.type)) {
-    return 'type must be raster, vector or ai-generated';
+    return '图层类型必须是 raster、vector 或 ai-generated';
   }
 
   if (!isLayerContent(input.content)) {
-    return 'content must be a fabric or svg payload';
+    return '图层内容必须是 fabric 或 svg 格式';
   }
 
   if (input.visible !== undefined && typeof input.visible !== 'boolean') {
-    return 'visible must be a boolean';
+    return 'visible 必须是布尔值';
   }
 
   if (
     input.opacity !== undefined &&
     (typeof input.opacity !== 'number' || input.opacity < 0 || input.opacity > 1)
   ) {
-    return 'opacity must be a number between 0 and 1';
+    return 'opacity 必须是 0 到 1 之间的数字';
   }
 
   return null;
@@ -288,22 +288,22 @@ function validateCreateLayer(input: LayerCreateBody | undefined): string | null 
 
 function validateUpdateLayer(input: LayerUpdateBody): string | null {
   if (input.name !== undefined && typeof input.name !== 'string') {
-    return 'name must be a string';
+    return 'name 必须是字符串';
   }
 
   if (input.visible !== undefined && typeof input.visible !== 'boolean') {
-    return 'visible must be a boolean';
+    return 'visible 必须是布尔值';
   }
 
   if (
     input.opacity !== undefined &&
     (typeof input.opacity !== 'number' || input.opacity < 0 || input.opacity > 1)
   ) {
-    return 'opacity must be a number between 0 and 1';
+    return 'opacity 必须是 0 到 1 之间的数字';
   }
 
   if (input.content !== undefined && !isLayerContent(input.content)) {
-    return 'content must be a fabric or svg payload';
+    return 'content 必须是 fabric 或 svg 格式';
   }
 
   return null;
@@ -311,24 +311,24 @@ function validateUpdateLayer(input: LayerUpdateBody): string | null {
 
 function validateApplyAction(input: ApplyActionRequest | undefined): string | null {
   if (!input) {
-    return 'action payload is required';
+    return '操作数据不能为空';
   }
 
   if (input.actor !== 'user' && input.actor !== 'agent') {
-    return 'actor must be user or agent';
+    return 'actor 必须是 user 或 agent';
   }
 
   if (
     input.expectedRevision !== undefined &&
     !Number.isInteger(input.expectedRevision)
   ) {
-    return 'expectedRevision must be an integer';
+    return 'expectedRevision 必须是整数';
   }
 
   const action = input.action as unknown;
 
   if (!action || typeof action !== 'object') {
-    return 'action is required';
+    return 'action 不能为空';
   }
 
   const candidate = action as {
@@ -344,7 +344,7 @@ function validateApplyAction(input: ApplyActionRequest | undefined): string | nu
 
     case 'canvas_update_layer': {
       if (typeof candidate.layerId !== 'string' || candidate.layerId.length === 0) {
-        return 'layerId is required';
+        return 'layerId 不能为空';
       }
 
       return validateUpdateLayer((candidate.patch ?? {}) as LayerUpdateBody);
@@ -352,13 +352,13 @@ function validateApplyAction(input: ApplyActionRequest | undefined): string | nu
 
     case 'canvas_delete_layer':
       if (typeof candidate.layerId !== 'string' || candidate.layerId.length === 0) {
-        return 'layerId is required';
+        return 'layerId 不能为空';
       }
 
       return null;
 
     default:
-      return 'action.type must be canvas_create_layer, canvas_update_layer or canvas_delete_layer';
+      return 'action.type 必须是 canvas_create_layer、canvas_update_layer 或 canvas_delete_layer';
   }
 }
 

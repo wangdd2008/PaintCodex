@@ -37,7 +37,7 @@ export function registerAiChatRoute(
       return reply.code(400).send({
         error: {
           code: 'invalid_request',
-          message: 'message is required',
+          message: 'message 不能为空',
         },
       });
     }
@@ -169,7 +169,7 @@ export function registerAiChatRoute(
         if (!canvas) {
           sendError(
             'canvas_required',
-            'Open a canvas before asking the AI to draw.',
+            '请先打开画布再让 AI 绘制。'
           );
         } else {
           // The span is only finished on success so `action_apply` always
@@ -207,7 +207,7 @@ export function registerAiChatRoute(
       } else if (assistantText.includes(CANVAS_ACTION_MARKER)) {
         sendError(
           'ai_canvas_action_invalid',
-          'The AI returned an invalid canvas action.',
+          'AI 返回了无效的画布操作。'
         );
       }
 
@@ -336,6 +336,6 @@ function isAiChatRequest(value: unknown): value is AiChatRequest {
 }
 
 function errorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : 'AI chat request failed';
+  const message = error instanceof Error ? error.message : 'AI 对话请求失败';
   return message.slice(0, 1000);
 }
