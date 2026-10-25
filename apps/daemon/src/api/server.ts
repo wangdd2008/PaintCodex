@@ -3,7 +3,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerEventRoutes } from './routes.events.js';
 import { registerPaintRoutes } from './routes.paint.js';
 import { PaintEvents } from '../paint/events.js';
-import { CanvasRepository, LayerRepository } from '../paint/repository.js';
+import {
+  CanvasRepository,
+  LayerRepository,
+  SnapshotRepository,
+} from '../paint/repository.js';
 import { PaintService } from '../paint/service.js';
 import { openDatabase } from '../storage/database.js';
 
@@ -22,6 +26,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const service = new PaintService(
     new CanvasRepository(db),
     new LayerRepository(db),
+    new SnapshotRepository(db),
     events,
   );
   const app = Fastify({ logger: options.logger ?? false });

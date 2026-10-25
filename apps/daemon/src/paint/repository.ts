@@ -1,4 +1,5 @@
 import type {
+  Actor,
   Canvas,
   Layer,
   LayerContent,
@@ -15,8 +16,13 @@ export interface NewCanvasRecord {
   height: number;
   backgroundColor: string;
   revision: number;
+  undoCursorRevision: number | null;
   createdAt: number;
   updatedAt: number;
+}
+
+export interface CanvasRecord extends Canvas {
+  undoCursorRevision: number | null;
 }
 
 export interface NewLayerRecord {
@@ -32,6 +38,18 @@ export interface NewLayerRecord {
   createdAt: number;
 }
 
+export interface NewSnapshotRecord {
+  id: string;
+  canvasId: string;
+  revision: number;
+  state: string;
+  actor: Actor;
+  action: string;
+  timestamp: number;
+}
+
+export type SnapshotRecord = NewSnapshotRecord;
+
 interface LayerRow {
   id: string;
   canvasId: string;
@@ -45,38 +63,48 @@ interface LayerRow {
   createdAt: number;
 }
 
+const CANVAS_COLUMNS =
+  'id, name, width, height, backgroundColor, revision, undoCursorRevision, createdAt, updatedAt';
+
+const SNAPSHOT_COLUMNS =
+  'id, canvasId, revision, state, actor, action, timestamp';
+
 export class CanvasRepository {
   constructor(private readonly db: DatabaseConnection) {}
 
-  create(record: NewCanvasRecord): Canvas {
+  create(record: NewCanvasRecord): CanvasRecord {
     this.db
       .prepare(
-        `INSERT INTO canvases (id, name, width, height, backgroundColor, revision, createdAt, updatedAt)
-         VALUES (@id, @name, @width, @height, @backgroundColor, @revision, @createdAt, @updatedAt)`,
+        `INSERT INTO canvases (id, name, width, height, backgroundColor, revision, undoCursorRevision, createdAt, updatedAt)
+         VALUES (@id, @name, @width, @height, @backgroundColor, @revision, @undoCursorRevision, @createdAt, @updatedAt)`,
       )
       .run(record);
 
     return record;
   }
 
-  findById(id: string): Canvas | null {
+  findById(id: string): CanvasRecord | null {
     const row = this.db
-      .prepare<[string], Canvas>(
-        `SELECT id, name, width, height, backgroundColor, revision, createdAt, updatedAt
-         FROM canvases
-         WHERE id = ?`,
+      .prepare<[string], CanvasRecord>(
+        `SELECT ${CANVAS_COLUMNS} FROM canvases WHERE id = ?`,
       )
       .get(id);
 
     return row ?? null;
   }
 
-  bumpRevision(id: string): Canvas | null {
+  bumpRevision(id: string): CanvasRecord | null {
     this.db
       .prepare(`UPDATE canvases SET revision = revision + 1, updatedAt = ? WHERE id = ?`)
       .run(Date.now(), id);
 
     return this.findById(id);
+  }
+
+  setUndoCursor(id: string, revision: number | null): void {
+    this.db
+      .prepare(`UPDATE canvases SET undoCursorRevision = ? WHERE id = ?`)
+      .run(revision, id);
   }
 }
 
@@ -170,6 +198,110 @@ export class LayerRepository {
       .get(canvasId);
 
     return (row?.maxZIndex ?? -1) + 1;
+  }
+
+  replaceAll(canvasId: string, layers: Layer[]): void {
+    const replace = this.db.transaction((id: string, entries: Layer[]) => {
+      this.db.prepare(`DELETE FROM layers WHERE canvasId = ?`).run(id);
+
+      for (const layer of entries) {
+        this.insert({
+          id: layer.id,
+          canvasId: id,
+          name: layer.name,
+          type: layer.type,
+          zIndex: layer.zIndex,
+          visible: layer.visible,
+          opacity: layer.opacity,
+          content: layer.content,
+          metadata: layer.metadata,
+          createdAt: layer.createdAt,
+        });
+      }
+    });
+
+    replace(canvasId, layers);
+  }
+}
+
+export class SnapshotRepository {
+  constructor(private readonly db: DatabaseConnection) {}
+
+  insert(record: NewSnapshotRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO snapshots (id, canvasId, revision, state, actor, action, timestamp)
+         VALUES (@id, @canvasId, @revision, @state, @actor, @action, @timestamp)`,
+      )
+      .run(record);
+  }
+
+  latest(canvasId: string): SnapshotRecord | null {
+    const row = this.db
+      .prepare<[string], SnapshotRecord>(
+        `SELECT ${SNAPSHOT_COLUMNS}
+         FROM snapshots
+         WHERE canvasId = ?
+         ORDER BY revision DESC
+         LIMIT 1`,
+      )
+      .get(canvasId);
+
+    return row ?? null;
+  }
+
+  before(canvasId: string, revision: number): SnapshotRecord | null {
+    const row = this.db
+      .prepare<[string, number], SnapshotRecord>(
+        `SELECT ${SNAPSHOT_COLUMNS}
+         FROM snapshots
+         WHERE canvasId = ? AND revision < ?
+         ORDER BY revision DESC
+         LIMIT 1`,
+      )
+      .get(canvasId, revision);
+
+    return row ?? null;
+  }
+
+  after(canvasId: string, revision: number): SnapshotRecord | null {
+    const row = this.db
+      .prepare<[string, number], SnapshotRecord>(
+        `SELECT ${SNAPSHOT_COLUMNS}
+         FROM snapshots
+         WHERE canvasId = ? AND revision > ?
+         ORDER BY revision ASC
+         LIMIT 1`,
+      )
+      .get(canvasId, revision);
+
+    return row ?? null;
+  }
+
+  truncateAfter(canvasId: string, revision: number): void {
+    this.db
+      .prepare(`DELETE FROM snapshots WHERE canvasId = ? AND revision > ?`)
+      .run(canvasId, revision);
+  }
+
+  trim(canvasId: string, keep: number): void {
+    const revisions = this.db
+      .prepare<[string, number], { revision: number }>(
+        `SELECT revision
+         FROM snapshots
+         WHERE canvasId = ?
+         ORDER BY revision DESC
+         LIMIT ?`,
+      )
+      .all(canvasId, keep);
+
+    const oldest = revisions[revisions.length - 1]?.revision;
+
+    if (oldest !== undefined) {
+      this.db
+        .prepare(`DELETE FROM snapshots WHERE canvasId = ? AND revision < ?`)
+        .run(canvasId, oldest);
+    }
   }
 }
 

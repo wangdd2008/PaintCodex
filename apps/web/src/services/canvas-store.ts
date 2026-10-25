@@ -11,6 +11,8 @@ import {
   createLayer as createLayerRequest,
   deleteLayer as deleteLayerRequest,
   getCanvas,
+  redoCanvas,
+  undoCanvas,
   updateLayer as updateLayerRequest,
 } from './api';
 
@@ -30,6 +32,8 @@ interface CanvasState {
   createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
   updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
   deleteLayer: (layerId: string) => Promise<void>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
   setActiveLayer: (layerId: string | null) => void;
 }
 
@@ -239,6 +243,72 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         error: error instanceof Error ? error.message : 'Could not delete layer',
       });
       throw error;
+    }
+  },
+
+  undo: async () => {
+    set({ saving: true, error: null });
+
+    try {
+      await enqueueMutation(async () => {
+        const current = get().canvas;
+
+        if (!current) {
+          throw new Error('No canvas loaded');
+        }
+
+        const updated = await undoCanvas(current.id, current.revision);
+        const activeLayerId = get().activeLayerId;
+        const keepActive =
+          activeLayerId !== null &&
+          updated.layers.some((layer) => layer.id === activeLayerId);
+
+        set({
+          canvas: updated,
+          status: 'ready',
+          activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
+        });
+      });
+
+      set({ saving: false });
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : 'Could not undo',
+      });
+    }
+  },
+
+  redo: async () => {
+    set({ saving: true, error: null });
+
+    try {
+      await enqueueMutation(async () => {
+        const current = get().canvas;
+
+        if (!current) {
+          throw new Error('No canvas loaded');
+        }
+
+        const updated = await redoCanvas(current.id, current.revision);
+        const activeLayerId = get().activeLayerId;
+        const keepActive =
+          activeLayerId !== null &&
+          updated.layers.some((layer) => layer.id === activeLayerId);
+
+        set({
+          canvas: updated,
+          status: 'ready',
+          activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
+        });
+      });
+
+      set({ saving: false });
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : 'Could not redo',
+      });
     }
   },
 

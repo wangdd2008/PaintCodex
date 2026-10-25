@@ -26,6 +26,7 @@ function migrate(db: DatabaseConnection): void {
       height INTEGER NOT NULL,
       backgroundColor TEXT NOT NULL,
       revision INTEGER NOT NULL,
+      undoCursorRevision INTEGER,
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
@@ -45,5 +46,26 @@ function migrate(db: DatabaseConnection): void {
     );
 
     CREATE INDEX IF NOT EXISTS layers_canvas_zindex ON layers(canvasId, zIndex);
+
+    CREATE TABLE IF NOT EXISTS snapshots (
+      id TEXT PRIMARY KEY,
+      canvasId TEXT NOT NULL,
+      revision INTEGER NOT NULL,
+      state TEXT NOT NULL,
+      actor TEXT NOT NULL CHECK(actor IN ('user', 'agent')),
+      action TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS snapshots_canvas_revision ON snapshots(canvasId, revision);
   `);
+
+  const canvasColumns = db
+    .prepare<[], { name: string }>('PRAGMA table_info(canvases)')
+    .all();
+
+  if (!canvasColumns.some((column) => column.name === 'undoCursorRevision')) {
+    db.exec('ALTER TABLE canvases ADD COLUMN undoCursorRevision INTEGER');
+  }
 }

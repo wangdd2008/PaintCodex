@@ -43,8 +43,17 @@ export interface Canvas {
   updatedAt: number;
 }
 
-export interface CanvasDocument extends Canvas {
+export interface CanvasHistoryState {
+  canUndo: boolean;
+  canRedo: boolean;
+}
+
+export interface CanvasState extends Canvas {
   layers: Layer[];
+}
+
+export interface CanvasDocument extends CanvasState {
+  history: CanvasHistoryState;
 }
 
 export interface CreateLayerInput {
@@ -72,6 +81,10 @@ export type PaintAction =
 export interface ApplyActionRequest {
   actor: Actor;
   action: PaintAction;
+  expectedRevision?: number;
+}
+
+export interface HistoryRequest {
   expectedRevision?: number;
 }
 

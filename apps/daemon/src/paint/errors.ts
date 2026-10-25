@@ -23,3 +23,17 @@ export class RevisionConflictError extends Error {
     this.name = 'RevisionConflictError';
   }
 }
+
+export class NothingToUndoError extends Error {
+  constructor() {
+    super('Nothing to undo');
+    this.name = 'NothingToUndoError';
+  }
+}
+
+export class NothingToRedoError extends Error {
+  constructor() {
+    super('Nothing to redo');
+    this.name = 'NothingToRedoError';
+  }
+}

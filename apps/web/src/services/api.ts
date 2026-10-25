@@ -92,3 +92,25 @@ export function deleteLayer(
     { method: 'DELETE' },
   );
 }
+
+export function undoCanvas(
+  canvasId: string,
+  expectedRevision?: number,
+): Promise<CanvasDocument> {
+  return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(canvasId)}/undo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision }),
+  });
+}
+
+export function redoCanvas(
+  canvasId: string,
+  expectedRevision?: number,
+): Promise<CanvasDocument> {
+  return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(canvasId)}/redo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expectedRevision }),
+  });
+}

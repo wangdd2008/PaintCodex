@@ -45,6 +45,48 @@ export function App() {
     });
   }, [canvasId, refreshCanvas]);
 
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const store = useCanvasStore.getState();
+
+      if (!store.canvas) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (key === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        void store.undo();
+        return;
+      }
+
+      if (key === 'y' || (key === 'z' && event.shiftKey)) {
+        event.preventDefault();
+        void store.redo();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <div className="app-shell">
       <header className="menu-bar">

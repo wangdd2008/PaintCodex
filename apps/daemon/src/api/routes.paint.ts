@@ -4,6 +4,7 @@ import type {
   ApplyActionRequest,
   CreateCanvasRequest,
   CreateLayerInput,
+  HistoryRequest,
   LayerContent,
   LayerType,
   UpdateLayerPatch,
@@ -12,6 +13,8 @@ import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import {
   CanvasNotFoundError,
   LayerNotFoundError,
+  NothingToRedoError,
+  NothingToUndoError,
   RevisionConflictError,
 } from '../paint/errors.js';
 import { MAX_CANVAS_DIMENSION, type PaintService } from '../paint/service.js';
@@ -160,6 +163,40 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
     },
   );
+
+  app.post<{ Params: { id: string }; Body: HistoryRequest }>(
+    '/paint/canvas/:id/undo',
+    async (request, reply) => {
+      const expectedRevision = parseBodyRevision(request.body?.expectedRevision);
+
+      if (expectedRevision === null) {
+        return invalidRevision(reply);
+      }
+
+      try {
+        return service.undo(request.params.id, expectedRevision);
+      } catch (error) {
+        return sendPaintError(reply, error);
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string }; Body: HistoryRequest }>(
+    '/paint/canvas/:id/redo',
+    async (request, reply) => {
+      const expectedRevision = parseBodyRevision(request.body?.expectedRevision);
+
+      if (expectedRevision === null) {
+        return invalidRevision(reply);
+      }
+
+      try {
+        return service.redo(request.params.id, expectedRevision);
+      } catch (error) {
+        return sendPaintError(reply, error);
+      }
+    },
+  );
 }
 
 function sendPaintError(reply: FastifyReply, error: unknown) {
@@ -182,7 +219,28 @@ function sendPaintError(reply: FastifyReply, error: unknown) {
     });
   }
 
+  if (error instanceof NothingToUndoError) {
+    return reply
+      .code(409)
+      .send({ error: { code: 'nothing_to_undo', message: 'Nothing to undo' } });
+  }
+
+  if (error instanceof NothingToRedoError) {
+    return reply
+      .code(409)
+      .send({ error: { code: 'nothing_to_redo', message: 'Nothing to redo' } });
+  }
+
   throw error;
+}
+
+function invalidRevision(reply: FastifyReply) {
+  return reply.code(400).send({
+    error: {
+      code: 'invalid_revision',
+      message: 'expectedRevision must be an integer',
+    },
+  });
 }
 
 function validateCreateCanvas(input: CreateCanvasRequest): string | null {
@@ -286,6 +344,14 @@ function parseExpectedRevision(raw: string | undefined): number | undefined | nu
   const parsed = Number(raw);
 
   return Number.isInteger(parsed) ? parsed : null;
+}
+
+function parseBodyRevision(value: unknown): number | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return Number.isInteger(value) ? (value as number) : null;
 }
 
 function isValidDimension(value: unknown): value is number {
