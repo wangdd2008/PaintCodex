@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type { LogLevel } from '@paintcodex/protocol';
 import { registerAiChatRoute } from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
 import { registerPaintRoutes } from './routes.paint.js';
@@ -14,7 +15,10 @@ import {
 import { PaintService } from '../paint/service.js';
 import { openDatabase } from '../storage/database.js';
 import {
+  clearRequestSpan,
   createObservability,
+  getRequestSpan,
+  setRequestSpan,
   type ObservabilityLogger,
 } from '../observability/index.js';
 
@@ -53,6 +57,38 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.decorate('observability', observability.logger);
 
+  app.addHook('onRequest', async (request) => {
+    if (!shouldLogHttpRequest(request.url)) {
+      return;
+    }
+
+    const span = app.observability.startTrace({
+      category: 'http',
+      message: 'http_request',
+      payload: { method: request.method, path: request.url },
+    });
+
+    setRequestSpan(request, span);
+  });
+
+  app.addHook('onResponse', async (request, reply) => {
+    const span = getRequestSpan(request);
+
+    if (!span) {
+      return;
+    }
+
+    span.finish({
+      level: levelForStatus(reply.statusCode),
+      payload: {
+        method: request.method,
+        path: request.url,
+        statusCode: reply.statusCode,
+      },
+    });
+    clearRequestSpan(request);
+  });
+
   app.addHook('onClose', async () => {
     db.close();
   });
@@ -63,4 +99,30 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerAiChatRoute(app, runner, dispatcher, service);
 
   return app;
+}
+
+const MONITOR_EVENTS_PATH = '/monitor/events';
+
+/**
+ * The monitor SSE stream is long-lived, so logging its request would create a
+ * span that only finishes when the client disconnects.
+ */
+export function shouldLogHttpRequest(url: string): boolean {
+  const queryIndex = url.indexOf('?');
+  const path = queryIndex === -1 ? url : url.slice(0, queryIndex);
+
+  return path !== MONITOR_EVENTS_PATH;
+}
+
+/** Maps an HTTP status code onto the log level used for its request record. */
+function levelForStatus(statusCode: number): LogLevel {
+  if (statusCode >= 500) {
+    return 'error';
+  }
+
+  if (statusCode >= 400) {
+    return 'warn';
+  }
+
+  return 'info';
 }
