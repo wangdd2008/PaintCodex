@@ -1,4 +1,9 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import type { LogLevel } from '@paintcodex/protocol';
+import type {
+  ObservabilityLogger,
+  TraceContext,
+} from '../../observability/logger.js';
 
 /**
  * Narrow seam over the Codex CLI. The daemon depends on this interface so tests
@@ -9,6 +14,7 @@ export interface CodexRunner {
     prompt: string,
     onDelta: (text: string) => void,
     signal?: AbortSignal,
+    trace?: TraceContext,
   ): Promise<string>;
 }
 
@@ -19,6 +25,8 @@ export interface CodexRunnerOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
+  /** Sink for `codex-runner` lifecycle events. Logging is skipped when omitted. */
+  logger?: ObservabilityLogger;
 }
 
 const DEFAULT_ARGS = [
@@ -84,9 +92,40 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
     : null;
 
   return {
-    run(prompt, onDelta, signal) {
+    run(prompt, onDelta, signal, trace) {
       return new Promise<string>((resolve, reject) => {
+        const logger = options.logger;
+        const startedAt = logger ? logger.now() : 0;
+
+        const logEvent = (
+          level: LogLevel,
+          message: string,
+          details: {
+            payload?: unknown;
+            error?: unknown;
+            durationMs?: number;
+          } = {},
+        ) => {
+          if (!logger) {
+            return;
+          }
+
+          logger.log({
+            category: 'codex-runner',
+            level,
+            message,
+            payload: details.payload,
+            error: details.error,
+            durationMs: details.durationMs ?? null,
+            traceId: trace?.traceId ?? null,
+            parentId: trace?.spanId ?? null,
+          });
+        };
+
+        const elapsedMs = () => (logger ? logger.now() - startedAt : 0);
+
         if (signal?.aborted) {
+          logEvent('warn', 'codex_abort');
           reject(createAbortError());
           return;
         }
@@ -108,9 +147,23 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
                   spawnOptions,
                 );
         } catch (error) {
-          reject(error instanceof Error ? error : new Error(String(error)));
+          const failure =
+            error instanceof Error ? error : new Error(String(error));
+          logEvent('error', 'codex_error', {
+            error: failure,
+            durationMs: elapsedMs(),
+          });
+          reject(failure);
           return;
         }
+
+        logEvent('info', 'codex_spawn', {
+          payload: {
+            command,
+            argCount: args.length,
+            promptLength: prompt.length,
+          },
+        });
 
         let settled = false;
         let output = '';
@@ -133,12 +186,25 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
 
         const onAbort = () => {
           terminate(child);
-          finish(() => reject(createAbortError()));
+          finish(() => {
+            logEvent('warn', 'codex_abort');
+            reject(createAbortError());
+          });
         };
 
         const timer = setTimeout(() => {
           terminate(child);
-          finish(() => reject(new Error(`Codex CLI timed out after ${timeoutMs}ms`)));
+          const failure = new Error(
+            `Codex CLI timed out after ${timeoutMs}ms`,
+          );
+          finish(() => {
+            logEvent('error', 'codex_timeout', {
+              payload: { timeoutMs },
+              error: failure,
+              durationMs: elapsedMs(),
+            });
+            reject(failure);
+          });
         }, timeoutMs);
 
         signal?.addEventListener('abort', onAbort, { once: true });
@@ -148,13 +214,20 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
             return;
           }
           output += text;
+          logEvent('debug', 'codex_delta', { payload: { delta: text } });
           try {
             onDelta(text);
           } catch (error) {
             terminate(child);
-            finish(() =>
-              reject(error instanceof Error ? error : new Error(String(error))),
-            );
+            const failure =
+              error instanceof Error ? error : new Error(String(error));
+            finish(() => {
+              logEvent('error', 'codex_error', {
+                error: failure,
+                durationMs: elapsedMs(),
+              });
+              reject(failure);
+            });
           }
         };
 
@@ -201,7 +274,13 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
         });
 
         child.on('error', (error) => {
-          finish(() => reject(error));
+          finish(() => {
+            logEvent('error', 'codex_error', {
+              error,
+              durationMs: elapsedMs(),
+            });
+            reject(error);
+          });
         });
 
         child.on('close', (code) => {
@@ -211,17 +290,25 @@ export function createCodexRunner(options: CodexRunnerOptions = {}): CodexRunner
           }
           finish(() => {
             if (code === 0) {
+              logEvent('info', 'codex_complete', {
+                payload: { exitCode: 0, outputLength: output.length },
+                durationMs: elapsedMs(),
+              });
               resolve(output);
               return;
             }
             const detail = stderr.trim();
-            reject(
-              new Error(
-                `Codex CLI exited with code ${code === null ? 'null' : String(code)}${
-                  detail.length > 0 ? `: ${detail}` : ''
-                }`,
-              ),
+            const failure = new Error(
+              `Codex CLI exited with code ${code === null ? 'null' : String(code)}${
+                detail.length > 0 ? `: ${detail}` : ''
+              }`,
             );
+            logEvent('error', 'codex_error', {
+              payload: { exitCode: code },
+              error: failure,
+              durationMs: elapsedMs(),
+            });
+            reject(failure);
           });
         });
 

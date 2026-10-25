@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { AiChatRequest, Layer } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import { RevisionConflictError } from '../paint/errors.js';
@@ -10,6 +10,11 @@ import {
   parseCanvasAction,
   type CanvasAction,
 } from '../paint/agent/canvas-action.js';
+import type {
+  ObservabilitySpan,
+  SpanFinishInput,
+} from '../observability/logger.js';
+import { getRequestSpan } from '../observability/request-context.js';
 
 export function registerAiChatRoute(
   app: FastifyInstance,
@@ -30,6 +35,11 @@ export function registerAiChatRoute(
     }
 
     const canvas = body.canvasId ? service.getCanvas(body.canvasId) : null;
+    const chatSpan = startChatSpan(app, request, body.canvasId, canvas !== null);
+    let deltaCount = 0;
+    let actionApplied = false;
+    let failure: string | null = null;
+    let errorSent = false;
 
     reply.hijack();
     const response = reply.raw;
@@ -61,42 +71,98 @@ export function registerAiChatRoute(
       }
     };
 
+    const sendError = (code: string, message: string) => {
+      failure = message;
+      errorSent = true;
+      send({ error: { code, message } });
+    };
+
     let assistantText = '';
 
     try {
-      await runner.run(
-        buildAiChatPrompt(body.message, {
-          canvasId: body.canvasId,
-          canvas: canvas
-            ? {
-                id: canvas.id,
-                width: canvas.width,
-                height: canvas.height,
-                layers: canvas.layers.map((layer) => ({
-                  name: layer.name,
-                  type: layer.type,
-                })),
-              }
-            : undefined,
-        }),
-        (delta) => {
-          assistantText += delta;
-          send({ delta });
+      const prompt = buildAiChatPrompt(body.message, {
+        canvasId: body.canvasId,
+        canvas: canvas
+          ? {
+              id: canvas.id,
+              width: canvas.width,
+              height: canvas.height,
+              layers: canvas.layers.map((layer) => ({
+                name: layer.name,
+                type: layer.type,
+              })),
+            }
+          : undefined,
+      });
+
+      chatSpan.log({
+        level: 'debug',
+        message: 'prompt_built',
+        payload: {
+          promptLength: prompt.length,
+          hasCanvas: canvas !== null,
+          layerCount: canvas?.layers.length ?? 0,
         },
-        controller.signal,
-      );
+      });
+
+      const codexSpan = chatSpan.startSpan({
+        category: 'ai-chat',
+        message: 'codex_exec',
+        payload: { promptLength: prompt.length },
+      });
+
+      try {
+        await runner.run(
+          prompt,
+          (delta) => {
+            deltaCount += 1;
+            assistantText += delta;
+            send({ delta });
+          },
+          controller.signal,
+          codexSpan,
+        );
+      } catch (error) {
+        codexSpan.finish({ level: 'error', error });
+        throw error;
+      }
+
+      codexSpan.finish({
+        level: 'info',
+        payload: {
+          deltaCount,
+          outputLength: assistantText.length,
+        },
+      });
 
       const action = parseCanvasAction(assistantText);
 
+      chatSpan.log({
+        level: 'debug',
+        message: 'action_parse',
+        payload: {
+          hasAction: action !== null,
+          actionName: action?.name,
+          invalidMarker:
+            action === null && assistantText.includes(CANVAS_ACTION_MARKER),
+        },
+      });
+
       if (action) {
         if (!canvas) {
-          send({
-            error: {
-              code: 'canvas_required',
-              message: 'Open a canvas before asking the AI to draw.',
-            },
-          });
+          sendError(
+            'canvas_required',
+            'Open a canvas before asking the AI to draw.',
+          );
         } else {
+          // The span is only finished on success so `action_apply` always
+          // carries the id of the layer that was actually created.
+          const applySpan = chatSpan.startSpan({
+            category: 'ai-chat',
+            message: 'action_apply',
+            payload: { actionName: action.name, canvasId: canvas.id },
+          });
+
           try {
             const layer = applyCanvasAction(
               dispatcher,
@@ -105,43 +171,84 @@ export function registerAiChatRoute(
               action,
               body.message,
             );
+            applySpan.finish({
+              level: 'info',
+              payload: { layerId: layer.id, actionName: action.name },
+            });
+            actionApplied = true;
             send({ layerCreated: { id: layer.id, name: layer.name } });
           } catch (error) {
-            send({
-              error: {
-                code: 'ai_canvas_action_failed',
-                message: errorMessage(error),
-              },
-            });
+            sendError('ai_canvas_action_failed', errorMessage(error));
           }
         }
       } else if (assistantText.includes(CANVAS_ACTION_MARKER)) {
-        send({
-          error: {
-            code: 'ai_canvas_action_invalid',
-            message: 'The AI returned an invalid canvas action.',
-          },
-        });
+        sendError(
+          'ai_canvas_action_invalid',
+          'The AI returned an invalid canvas action.',
+        );
       }
 
       send({ done: true });
     } catch (error) {
       if (!controller.signal.aborted) {
-        send({
-          error: {
-            code: 'ai_chat_failed',
-            message: errorMessage(error),
-          },
-        });
+        sendError('ai_chat_failed', errorMessage(error));
       }
     } finally {
       response.off('close', onClose);
 
+      const aborted = controller.signal.aborted;
+
+      chatSpan.log({
+        level: aborted ? 'warn' : 'info',
+        message: 'sse_complete',
+        payload: {
+          deltaCount,
+          assistantLength: assistantText.length,
+          actionApplied,
+          aborted,
+        },
+      });
+
       if (!response.writableEnded && !response.destroyed) {
         response.end();
       }
+
+      const finishInput: SpanFinishInput = {
+        level: aborted ? 'warn' : errorSent ? 'error' : 'info',
+        message: 'chat_completed',
+        payload: {
+          deltaCount,
+          assistantLength: assistantText.length,
+          actionApplied,
+          ...(aborted ? { aborted: true } : {}),
+        },
+      };
+
+      if (!aborted && errorSent) {
+        finishInput.error = failure;
+      }
+
+      chatSpan.finish(finishInput);
     }
   });
+}
+
+function startChatSpan(
+  app: FastifyInstance,
+  request: FastifyRequest,
+  canvasId: string | undefined,
+  hasCanvas: boolean,
+): ObservabilitySpan {
+  const start = {
+    category: 'ai-chat' as const,
+    message: 'ai_chat',
+    payload: { hasCanvas },
+    canvasId: canvasId ?? null,
+    actor: 'agent' as const,
+  };
+  const parent = getRequestSpan(request);
+
+  return parent ? parent.startSpan(start) : app.observability.startTrace(start);
 }
 
 const MAX_ACTION_RETRIES = 1;
