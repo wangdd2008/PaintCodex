@@ -1,0 +1,33 @@
+.toolbox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 8px;
+  border-right: 1px solid #2c2d33;
+  background: #1b1c21;
+}
+
+.tool-button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #b9bcc8;
+  padding: 10px 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.tool-button:hover:not(:disabled) {
+  background: #26272e;
+}
+
+.tool-button--active {
+  border-color: #5b8def;
+  background: #23314f;
+  color: #e8f0ff;
+}
+
+.tool-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}

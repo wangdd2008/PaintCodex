@@ -1,0 +1,17 @@
+{
+  "name": "paintcodex",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @paintcodex/daemon --filter @paintcodex/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}

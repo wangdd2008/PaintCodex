@@ -1,0 +1,19 @@
+.layer-panel {
+  padding: 14px;
+  border-bottom: 1px solid #2c2d33;
+}
+
+.panel-title {
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #9a9daa;
+}
+
+.panel-empty {
+  margin: 0;
+  color: #747785;
+  font-size: 13px;
+}
