@@ -8,6 +8,7 @@ export default defineConfig({
     proxy: {
       '/paint': 'http://127.0.0.1:3210',
       '/health': 'http://127.0.0.1:3210',
+      '/monitor': 'http://127.0.0.1:3210',
     },
   },
 });
