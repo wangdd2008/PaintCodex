@@ -163,17 +163,18 @@ export class LayerRepository {
       name: patch.name ?? existing.name,
       visible: patch.visible ?? existing.visible,
       opacity: patch.opacity ?? existing.opacity,
-      zIndex: patch.zIndex ?? existing.zIndex,
+      content: patch.content ?? existing.content,
     };
 
     this.db
       .prepare(
         `UPDATE layers
-         SET name = @name, visible = @visible, opacity = @opacity, zIndex = @zIndex
+         SET name = @name, visible = @visible, opacity = @opacity, content = @content
          WHERE canvasId = @canvasId AND id = @id`,
       )
       .run({
         ...next,
+        content: JSON.stringify(next.content),
         visible: next.visible ? 1 : 0,
         canvasId,
         id: layerId,

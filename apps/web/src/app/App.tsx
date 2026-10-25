@@ -7,6 +7,7 @@ import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
+import { useToolStore } from '../services/tool-store';
 
 export function App() {
   const canvas = useCanvasStore((state) => state.canvas);
@@ -15,6 +16,7 @@ export function App() {
   const createNewCanvas = useCanvasStore((state) => state.createNewCanvas);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
+  const tool = useToolStore((state) => state.tool);
   const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -152,7 +154,7 @@ export function App() {
       <footer className="status-bar">
         <span>{canvas ? `${canvas.width} × ${canvas.height}` : 'No canvas'}</span>
         <span>Zoom: 100%</span>
-        <span>Brush</span>
+        <span>{tool === 'brush' ? 'Brush' : 'Select'}</span>
       </footer>
     </div>
   );

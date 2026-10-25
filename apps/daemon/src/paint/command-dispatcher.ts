@@ -1,4 +1,8 @@
-import type { ApplyActionRequest, CanvasDocument } from '@paintcodex/protocol';
+import type {
+  ApplyActionRequest,
+  CanvasDocument,
+  CreateCanvasRequest,
+} from '@paintcodex/protocol';
 import type { PaintService } from './service.js';
 
 /**
@@ -7,7 +11,19 @@ import type { PaintService } from './service.js';
 export class CommandDispatcher {
   constructor(private readonly service: PaintService) {}
 
+  createCanvas(input: CreateCanvasRequest = {}): CanvasDocument {
+    return this.service.createCanvas(input);
+  }
+
   dispatch(canvasId: string, request: ApplyActionRequest): CanvasDocument {
     return this.service.applyAction(canvasId, request);
+  }
+
+  undo(canvasId: string, expectedRevision?: number): CanvasDocument {
+    return this.service.undo(canvasId, expectedRevision);
+  }
+
+  redo(canvasId: string, expectedRevision?: number): CanvasDocument {
+    return this.service.redo(canvasId, expectedRevision);
   }
 }

@@ -16,6 +16,11 @@ const FALLBACK_WIDTH = 1920;
 const FALLBACK_HEIGHT = 1080;
 const BRUSH_COLOR = '#111111';
 const BRUSH_WIDTH = 4;
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+function layerSignature(layer: PaintLayer): string {
+  return JSON.stringify(layer.content);
+}
 
 export function CanvasStage() {
   const canvasDocument = useCanvasStore((state) => state.canvas);
@@ -23,6 +28,7 @@ export function CanvasStage() {
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const objectsRef = useRef(new Map<string, FabricObject>());
+  const signaturesRef = useRef(new Map<string, string>());
   const pendingJsonRef = useRef(new Set<string>());
   const syncTokenRef = useRef(0);
   const [ready, setReady] = useState(false);
@@ -31,6 +37,16 @@ export function CanvasStage() {
   const height = canvasDocument?.height ?? FALLBACK_HEIGHT;
   const backgroundColor = canvasDocument?.backgroundColor ?? '#ffffff';
   const layers = canvasDocument?.layers;
+
+  function findLayerId(target: FabricObject): string | null {
+    for (const [layerId, object] of objectsRef.current) {
+      if (object === target) {
+        return layerId;
+      }
+    }
+
+    return null;
+  }
 
   useEffect(() => {
     const element = canvasElementRef.current;
@@ -81,6 +97,10 @@ export function CanvasStage() {
 
           if (created) {
             objectsRef.current.set(created.id, path);
+            signaturesRef.current.set(
+              created.id,
+              JSON.stringify({ kind: 'fabric', json }),
+            );
           }
         })
         .catch(() => {
@@ -90,26 +110,74 @@ export function CanvasStage() {
         });
     };
 
+    const handleObjectModified = (event: { target?: FabricObject }) => {
+      const target = event.target;
+
+      if (!target) {
+        return;
+      }
+
+      const layerId = findLayerId(target);
+
+      if (!layerId) {
+        return;
+      }
+
+      const state = useCanvasStore.getState();
+      const layer = state.canvas?.layers.find((entry) => entry.id === layerId);
+
+      if (!layer || layer.type !== 'ai-generated') {
+        return;
+      }
+
+      const svg = `<svg xmlns="${SVG_NAMESPACE}" viewBox="0 0 ${width} ${height}">${target.toSVG()}</svg>`;
+      signaturesRef.current.set(layerId, JSON.stringify({ kind: 'svg', svg }));
+
+      void state
+        .updateLayer(layerId, { content: { kind: 'svg', svg } })
+        .catch(() => undefined);
+    };
+
     canvas.on('path:created', handlePathCreated);
+    canvas.on('object:modified', handleObjectModified);
     setReady(true);
 
     return () => {
       setReady(false);
       syncTokenRef.current += 1;
       objectsRef.current.clear();
+      signaturesRef.current.clear();
       pendingJsonRef.current.clear();
       fabricRef.current = null;
       setActiveCanvas(null);
       canvas.off('path:created', handlePathCreated);
+      canvas.off('object:modified', handleObjectModified);
       void canvas.dispose();
     };
   }, [width, height, backgroundColor]);
 
   useEffect(() => {
-    if (fabricRef.current) {
-      fabricRef.current.isDrawingMode = tool === 'brush';
+    const canvas = fabricRef.current;
+
+    if (!canvas) {
+      return;
     }
-  }, [tool]);
+
+    canvas.isDrawingMode = tool === 'brush';
+    const selectMode = tool === 'select';
+
+    for (const [layerId, object] of objectsRef.current) {
+      const layer = layers?.find((entry) => entry.id === layerId);
+      const selectable = selectMode && layer?.type === 'ai-generated';
+      object.set({ selectable, evented: selectable });
+    }
+
+    if (!selectMode) {
+      canvas.discardActiveObject();
+    }
+
+    canvas.requestRenderAll();
+  }, [tool, layers]);
 
   useEffect(() => {
     const canvas = fabricRef.current;
@@ -120,17 +188,25 @@ export function CanvasStage() {
 
     const token = ++syncTokenRef.current;
     const objects = objectsRef.current;
+    const signatures = signaturesRef.current;
 
     void (async () => {
       const seen = new Set<string>();
 
       for (const layer of layers) {
         seen.add(layer.id);
+        const signature = layerSignature(layer);
         const existing = objects.get(layer.id);
 
         if (existing) {
-          existing.set({ visible: layer.visible, opacity: layer.opacity });
-          continue;
+          if (signatures.get(layer.id) === signature) {
+            existing.set({ visible: layer.visible, opacity: layer.opacity });
+            continue;
+          }
+
+          canvas.remove(existing);
+          objects.delete(layer.id);
+          signatures.delete(layer.id);
         }
 
         if (
@@ -148,6 +224,7 @@ export function CanvasStage() {
 
         if (object) {
           objects.set(layer.id, object);
+          signatures.set(layer.id, signature);
           canvas.add(object);
         }
       }
@@ -160,6 +237,7 @@ export function CanvasStage() {
         if (!seen.has(layerId)) {
           canvas.remove(object);
           objects.delete(layerId);
+          signatures.delete(layerId);
         }
       }
 
@@ -196,9 +274,12 @@ async function createFabricObject(layer: PaintLayer): Promise<FabricObject | nul
       object = nonEmpty.length > 0 ? util.groupSVGElements(nonEmpty, options) : null;
     }
 
+    const selectable =
+      layer.type === 'ai-generated' && useToolStore.getState().tool === 'select';
+
     object?.set({
-      selectable: false,
-      evented: false,
+      selectable,
+      evented: selectable,
       visible: layer.visible,
       opacity: layer.opacity,
     });

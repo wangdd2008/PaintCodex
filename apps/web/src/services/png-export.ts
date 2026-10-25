@@ -6,16 +6,6 @@ const PNG_EXTENSION = /\.png$/i;
 const FALLBACK_BASENAME = 'paintcodex';
 const DEFAULT_MEDIA_TYPE = 'application/octet-stream';
 
-declare global {
-  interface Window {
-    __paintcodexPngExport?: {
-      dataUrl: string;
-      filename: string;
-      byteLength: number;
-    };
-  }
-}
-
 /**
  * Turns a canvas name into a safe `<name>.png` download name. Characters that
  * Windows rejects, plus whitespace, are normalised away; empty names fall back
@@ -86,12 +76,4 @@ export function downloadPng(dataUrl: string, filename: string): void {
   anchor.remove();
 
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-
-  if (import.meta.env.DEV) {
-    window.__paintcodexPngExport = {
-      dataUrl,
-      filename,
-      byteLength: blob.size,
-    };
-  }
 }

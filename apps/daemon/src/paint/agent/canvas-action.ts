@@ -76,7 +76,7 @@ export function isSafeSvg(svg: string): boolean {
     return false;
   }
 
-  if (lower.includes('<image')) {
+  if (lower.includes('<image') || lower.includes('<style')) {
     return false;
   }
 
@@ -89,6 +89,14 @@ export function isSafeSvg(svg: string): boolean {
   }
 
   if (/(?:href|src)\s*=\s*["'](?:https?:)?\/\//i.test(svg)) {
+    return false;
+  }
+
+  if (/url\s*\(\s*["']?(?:https?:)?\/\//i.test(svg)) {
+    return false;
+  }
+
+  if (/url\s*\(\s*["']?data:/i.test(svg)) {
     return false;
   }
 

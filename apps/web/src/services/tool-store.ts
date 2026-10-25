@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Tool = 'brush';
+export type Tool = 'brush' | 'select';
 
 interface ToolState {
   tool: Tool;

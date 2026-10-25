@@ -42,7 +42,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       });
     }
 
-    return reply.code(201).send(service.createCanvas(body));
+    return reply.code(201).send(dispatcher.createCanvas(body));
   });
 
   app.get<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
@@ -174,7 +174,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return service.undo(request.params.id, expectedRevision);
+        return dispatcher.undo(request.params.id, expectedRevision);
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -191,7 +191,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return service.redo(request.params.id, expectedRevision);
+        return dispatcher.redo(request.params.id, expectedRevision);
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -272,6 +272,17 @@ function validateCreateLayer(input: LayerCreateBody | undefined): string | null 
     return 'content must be a fabric or svg payload';
   }
 
+  if (input.visible !== undefined && typeof input.visible !== 'boolean') {
+    return 'visible must be a boolean';
+  }
+
+  if (
+    input.opacity !== undefined &&
+    (typeof input.opacity !== 'number' || input.opacity < 0 || input.opacity > 1)
+  ) {
+    return 'opacity must be a number between 0 and 1';
+  }
+
   return null;
 }
 
@@ -291,8 +302,8 @@ function validateUpdateLayer(input: LayerUpdateBody): string | null {
     return 'opacity must be a number between 0 and 1';
   }
 
-  if (input.zIndex !== undefined && !Number.isInteger(input.zIndex)) {
-    return 'zIndex must be an integer';
+  if (input.content !== undefined && !isLayerContent(input.content)) {
+    return 'content must be a fabric or svg payload';
   }
 
   return null;
@@ -307,11 +318,48 @@ function validateApplyAction(input: ApplyActionRequest | undefined): string | nu
     return 'actor must be user or agent';
   }
 
-  if (!input.action || typeof input.action.type !== 'string') {
-    return 'action.type is required';
+  if (
+    input.expectedRevision !== undefined &&
+    !Number.isInteger(input.expectedRevision)
+  ) {
+    return 'expectedRevision must be an integer';
   }
 
-  return null;
+  const action = input.action as unknown;
+
+  if (!action || typeof action !== 'object') {
+    return 'action is required';
+  }
+
+  const candidate = action as {
+    type?: unknown;
+    layer?: unknown;
+    layerId?: unknown;
+    patch?: unknown;
+  };
+
+  switch (candidate.type) {
+    case 'canvas_create_layer':
+      return validateCreateLayer(candidate.layer as LayerCreateBody | undefined);
+
+    case 'canvas_update_layer': {
+      if (typeof candidate.layerId !== 'string' || candidate.layerId.length === 0) {
+        return 'layerId is required';
+      }
+
+      return validateUpdateLayer((candidate.patch ?? {}) as LayerUpdateBody);
+    }
+
+    case 'canvas_delete_layer':
+      if (typeof candidate.layerId !== 'string' || candidate.layerId.length === 0) {
+        return 'layerId is required';
+      }
+
+      return null;
+
+    default:
+      return 'action.type must be canvas_create_layer, canvas_update_layer or canvas_delete_layer';
+  }
 }
 
 function isLayerType(value: unknown): value is LayerType {

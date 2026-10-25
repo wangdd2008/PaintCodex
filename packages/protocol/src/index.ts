@@ -64,7 +64,6 @@ export interface CreateLayerInput {
   content: LayerContent;
   visible?: boolean;
   opacity?: number;
-  zIndex?: number;
   metadata?: Partial<LayerMetadata>;
 }
 
@@ -72,7 +71,7 @@ export interface UpdateLayerPatch {
   name?: string;
   visible?: boolean;
   opacity?: number;
-  zIndex?: number;
+  content?: LayerContent;
 }
 
 export type PaintAction =
@@ -88,20 +87,6 @@ export interface ApplyActionRequest {
 
 export interface HistoryRequest {
   expectedRevision?: number;
-}
-
-export interface ApplyActionResponse {
-  canvas: CanvasDocument;
-}
-
-export interface CanvasSnapshot {
-  id: string;
-  canvasId: string;
-  revision: number;
-  actor: Actor;
-  action: string;
-  timestamp: number;
-  state: string;
 }
 
 export interface SnapshotChangedEvent {
@@ -120,11 +105,6 @@ export interface CreateCanvasRequest {
 export interface AiChatRequest {
   canvasId?: string;
   message: string;
-}
-
-export interface AiChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
 }
 
 export interface ApiErrorBody {

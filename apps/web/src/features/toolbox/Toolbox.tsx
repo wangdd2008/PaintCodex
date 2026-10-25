@@ -24,6 +24,15 @@ export function Toolbox() {
       </button>
       <button
         type="button"
+        className={tool === 'select' ? 'tool-button tool-button--active' : 'tool-button'}
+        title="Select and move AI layers"
+        aria-pressed={tool === 'select'}
+        onClick={() => setTool('select')}
+      >
+        Select
+      </button>
+      <button
+        type="button"
         className="tool-button"
         title="Undo (Ctrl+Z)"
         disabled={!canUndo || saving}

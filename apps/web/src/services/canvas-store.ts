@@ -37,6 +37,9 @@ interface CanvasState {
   setActiveLayer: (layerId: string | null) => void;
 }
 
+type SetState = (partial: Partial<CanvasState>) => void;
+type GetState = () => CanvasState;
+
 let mutationQueue: Promise<unknown> = Promise.resolve();
 
 /**
@@ -50,6 +53,25 @@ function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
     () => undefined,
   );
   return result;
+}
+
+async function runMutation(
+  set: SetState,
+  task: () => Promise<void>,
+  fallbackError: string,
+): Promise<void> {
+  set({ saving: true, error: null });
+
+  try {
+    await enqueueMutation(task);
+    set({ saving: false });
+  } catch (error) {
+    set({
+      saving: false,
+      error: error instanceof Error ? error.message : fallbackError,
+    });
+    throw error;
+  }
 }
 
 function rememberCanvas(id: string | null): void {
@@ -73,6 +95,58 @@ export function readRememberedCanvasId(): string | null {
 
 function topLayerId(canvas: CanvasDocument): string | null {
   return canvas.layers.length > 0 ? canvas.layers[canvas.layers.length - 1]!.id : null;
+}
+
+function mergeActiveLayer(
+  canvas: CanvasDocument,
+  activeLayerId: string | null,
+): string | null {
+  return activeLayerId !== null &&
+    canvas.layers.some((layer) => layer.id === activeLayerId)
+    ? activeLayerId
+    : topLayerId(canvas);
+}
+
+/**
+ * A stroke drawn while another tab saved must not be dropped. Refresh the
+ * canvas on a revision conflict and retry once with the authoritative revision.
+ */
+async function createLayerWithRetry(
+  get: GetState,
+  set: SetState,
+  input: CreateLayerInput,
+): Promise<CanvasDocument> {
+  let attempt = 0;
+
+  for (;;) {
+    const current = get().canvas;
+
+    if (!current) {
+      throw new Error('No canvas loaded');
+    }
+
+    try {
+      return await createLayerRequest(current.id, input, current.revision);
+    } catch (error) {
+      const canRetry =
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.code === 'revision_conflict' &&
+        attempt === 0;
+
+      if (!canRetry) {
+        throw error;
+      }
+
+      attempt += 1;
+      const fresh = await getCanvas(current.id);
+      set({
+        canvas: fresh,
+        status: 'ready',
+        activeLayerId: mergeActiveLayer(fresh, get().activeLayerId),
+      });
+    }
+  }
 }
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
@@ -136,15 +210,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     try {
       const updated = await getCanvas(current.id);
-      const activeLayerId = get().activeLayerId;
-      const keepActive =
-        activeLayerId !== null &&
-        updated.layers.some((layer) => layer.id === activeLayerId);
-
       set({
         canvas: updated,
         status: 'ready',
-        activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
+        activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
       });
     } catch (error) {
       set({
@@ -154,43 +223,29 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   createLayer: async (input: CreateLayerInput) => {
-    set({ saving: true, error: null });
+    let created: Layer | null = null;
 
-    try {
-      let created: Layer | null = null;
-
-      await enqueueMutation(async () => {
-        const current = get().canvas;
-
-        if (!current) {
-          throw new Error('No canvas loaded');
-        }
-
-        const updated = await createLayerRequest(current.id, input, current.revision);
+    await runMutation(
+      set,
+      async () => {
+        const updated = await createLayerWithRetry(get, set, input);
         created = updated.layers[updated.layers.length - 1] ?? null;
         set({
           canvas: updated,
           status: 'ready',
           activeLayerId: created?.id ?? get().activeLayerId,
         });
-      });
+      },
+      'Could not save layer',
+    );
 
-      set({ saving: false });
-      return created;
-    } catch (error) {
-      set({
-        saving: false,
-        error: error instanceof Error ? error.message : 'Could not save layer',
-      });
-      throw error;
-    }
+    return created;
   },
 
   updateLayer: async (layerId: string, patch: UpdateLayerPatch) => {
-    set({ saving: true, error: null });
-
-    try {
-      await enqueueMutation(async () => {
+    await runMutation(
+      set,
+      async () => {
         const current = get().canvas;
 
         if (!current) {
@@ -204,23 +259,15 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           current.revision,
         );
         set({ canvas: updated, status: 'ready' });
-      });
-
-      set({ saving: false });
-    } catch (error) {
-      set({
-        saving: false,
-        error: error instanceof Error ? error.message : 'Could not update layer',
-      });
-      throw error;
-    }
+      },
+      'Could not update layer',
+    );
   },
 
   deleteLayer: async (layerId: string) => {
-    set({ saving: true, error: null });
-
-    try {
-      await enqueueMutation(async () => {
+    await runMutation(
+      set,
+      async () => {
         const current = get().canvas;
 
         if (!current) {
@@ -234,81 +281,58 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           activeLayerId:
             get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
         });
-      });
-
-      set({ saving: false });
-    } catch (error) {
-      set({
-        saving: false,
-        error: error instanceof Error ? error.message : 'Could not delete layer',
-      });
-      throw error;
-    }
+      },
+      'Could not delete layer',
+    );
   },
 
   undo: async () => {
-    set({ saving: true, error: null });
-
     try {
-      await enqueueMutation(async () => {
-        const current = get().canvas;
+      await runMutation(
+        set,
+        async () => {
+          const current = get().canvas;
 
-        if (!current) {
-          throw new Error('No canvas loaded');
-        }
+          if (!current) {
+            throw new Error('No canvas loaded');
+          }
 
-        const updated = await undoCanvas(current.id, current.revision);
-        const activeLayerId = get().activeLayerId;
-        const keepActive =
-          activeLayerId !== null &&
-          updated.layers.some((layer) => layer.id === activeLayerId);
-
-        set({
-          canvas: updated,
-          status: 'ready',
-          activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
-        });
-      });
-
-      set({ saving: false });
-    } catch (error) {
-      set({
-        saving: false,
-        error: error instanceof Error ? error.message : 'Could not undo',
-      });
+          const updated = await undoCanvas(current.id, current.revision);
+          set({
+            canvas: updated,
+            status: 'ready',
+            activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+          });
+        },
+        'Could not undo',
+      );
+    } catch {
+      // runMutation already surfaced the error.
     }
   },
 
   redo: async () => {
-    set({ saving: true, error: null });
-
     try {
-      await enqueueMutation(async () => {
-        const current = get().canvas;
+      await runMutation(
+        set,
+        async () => {
+          const current = get().canvas;
 
-        if (!current) {
-          throw new Error('No canvas loaded');
-        }
+          if (!current) {
+            throw new Error('No canvas loaded');
+          }
 
-        const updated = await redoCanvas(current.id, current.revision);
-        const activeLayerId = get().activeLayerId;
-        const keepActive =
-          activeLayerId !== null &&
-          updated.layers.some((layer) => layer.id === activeLayerId);
-
-        set({
-          canvas: updated,
-          status: 'ready',
-          activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
-        });
-      });
-
-      set({ saving: false });
-    } catch (error) {
-      set({
-        saving: false,
-        error: error instanceof Error ? error.message : 'Could not redo',
-      });
+          const updated = await redoCanvas(current.id, current.revision);
+          set({
+            canvas: updated,
+            status: 'ready',
+            activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+          });
+        },
+        'Could not redo',
+      );
+    } catch {
+      // runMutation already surfaced the error.
     }
   },
 

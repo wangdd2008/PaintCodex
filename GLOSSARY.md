@@ -6,7 +6,7 @@
 The primary drawing surface. In PaintCodex, a canvas has fixed dimensions (1920×1080 by default), a background color, and a stack of layers.
 
 ### Layer
-An individual drawable element within a canvas. Layers can be raster (imported images), vector (SVG), or AI-generated (SVG code produced by Codex). Each layer has properties like opacity, visibility, and z-index.
+An individual drawable element within a canvas. Layers can be raster (imported images), vector (Fabric.js brush paths and other vector objects), or AI-generated (SVG code produced by Codex). Each layer has properties like opacity, visibility, and z-index.
 
 ### Actor
 The entity that initiates an action. Either `user` (human) or `agent` (AI). Both actors use the same `applyAction` interface — this is the "human-machine equality" principle.
@@ -32,12 +32,12 @@ The local OpenAI Codex command-line tool invoked as a child process by the daemo
 The component that serializes the current canvas state (dimensions, layers, selected region) into a JSON structure consumed by Codex as context.
 
 ### AI-Generated Layer
-A layer whose content is SVG code produced by Codex. Distinguished by `type: 'ai-generated'` and includes metadata about the original prompt.
+A layer whose content is SVG code produced by Codex. Distinguished by `type: 'ai-generated'` and includes metadata about the original prompt. AI layers can be selected, moved, and scaled with the Select tool; transforms are written back as SVG content.
 
 ## Data Concepts
 
 ### Fabric JSON
-The native serialization format of Fabric.js objects. Stored directly in the database (`content` field of layers and snapshots) to avoid translation overhead.
+The native serialization format of Fabric.js objects. Stored in the `json` field of a layer's `LayerContent`; snapshots embed the serialized canvas document.
 
 ### .aipaint (File Format)
 The proprietary workspace file format (deferred to Phase 2). Will contain the full canvas document including layers, history, and metadata.

@@ -86,7 +86,7 @@ export class PaintService {
           canvasId,
           name: input.name,
           type: input.type,
-          zIndex: input.zIndex ?? this.layers.nextZIndex(canvasId),
+          zIndex: this.layers.nextZIndex(canvasId),
           visible: input.visible ?? true,
           opacity: input.opacity ?? 1,
           content: input.content,
