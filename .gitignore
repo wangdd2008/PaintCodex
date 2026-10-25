@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+*.tsbuildinfo
+
+# local databases
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# tooling state
+.qwen/tmp/
+.qwen/worktrees/
+.env
+.env.*
+.DS_Store
