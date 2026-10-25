@@ -29,6 +29,12 @@ export const DEFAULT_CANVAS_HEIGHT = 1080;
 export const MAX_CANVAS_DIMENSION = 8192;
 export const SNAPSHOT_LIMIT = 20;
 
+const ACTION_LOG_MESSAGES = {
+  canvas_create_layer: 'layer_create',
+  canvas_update_layer: 'layer_update',
+  canvas_delete_layer: 'layer_delete',
+} as const;
+
 export class PaintService {
   constructor(
     private readonly canvases: CanvasRepository,
@@ -154,7 +160,7 @@ export class PaintService {
     );
     this.events.publishSnapshot(canvasId, bumped.revision);
     this.logCanvasAction({
-      message: actionLogMessage(request.action.type),
+      message: ACTION_LOG_MESSAGES[request.action.type],
       canvasId,
       revision: bumped.revision,
       actor: request.actor,
@@ -334,19 +340,6 @@ export class PaintService {
     if (expectedRevision !== undefined && expectedRevision !== canvas.revision) {
       throw new RevisionConflictError(expectedRevision, canvas.revision);
     }
-  }
-}
-
-function actionLogMessage(
-  type: 'canvas_create_layer' | 'canvas_update_layer' | 'canvas_delete_layer',
-): string {
-  switch (type) {
-    case 'canvas_create_layer':
-      return 'layer_create';
-    case 'canvas_update_layer':
-      return 'layer_update';
-    case 'canvas_delete_layer':
-      return 'layer_delete';
   }
 }
 

@@ -9,10 +9,15 @@ import {
   fetchStats,
   subscribeToLogs,
 } from './monitor-api';
-import { mergeLogs } from './monitor-format';
+import {
+  DEFAULT_LOG_FILTERS,
+  mergeLogs,
+  rangeToSince,
+  type LogFilterState,
+} from './monitor-format';
 import './monitor.css';
 
-const INITIAL_LOG_LIMIT = 100;
+const LOG_FETCH_LIMIT = 200;
 const STATS_WINDOW_MS = DEFAULT_STATS_WINDOW_MS;
 const STATS_REFRESH_MS = 5_000;
 const STATS_MIN_INTERVAL_MS = 2_000;
@@ -21,6 +26,7 @@ type LiveState = 'connecting' | 'live' | 'error';
 
 export function MonitorPage() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
+  const [filters, setFilters] = useState<LogFilterState>(DEFAULT_LOG_FILTERS);
   const [stats, setStats] = useState<MonitorStats | null>(null);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
@@ -73,15 +79,21 @@ export function MonitorPage() {
     }, wait);
   }, [loadStats]);
 
-  const loadLogs = useCallback(async () => {
+  const loadLogs = useCallback(async (nextFilters: LogFilterState) => {
     try {
-      const page = await fetchLogs({ limit: INITIAL_LOG_LIMIT });
+      const page = await fetchLogs({
+        limit: LOG_FETCH_LIMIT,
+        category: nextFilters.category === 'all' ? undefined : nextFilters.category,
+        level: nextFilters.level === 'all' ? undefined : nextFilters.level,
+        since: rangeToSince(nextFilters.range),
+      });
 
       if (disposed.current) {
         return;
       }
 
-      setLogs((current) => mergeLogs(current, page.items));
+      // Replace rather than merge so the list reflects server-side filters.
+      setLogs(page.items);
       setLogsError(null);
     } catch (cause) {
       if (!disposed.current) {
@@ -108,9 +120,12 @@ export function MonitorPage() {
   }, []);
 
   useEffect(() => {
-    void loadLogs();
+    void loadLogs(filters);
+  }, [filters, loadLogs]);
+
+  useEffect(() => {
     void loadStats();
-  }, [loadLogs, loadStats]);
+  }, [loadStats]);
 
   useEffect(() => {
     const timer = window.setInterval(() => void loadStats(), STATS_REFRESH_MS);
@@ -141,7 +156,7 @@ export function MonitorPage() {
     setLoadingLogs(true);
     setLogsError(null);
     setStatsError(null);
-    void loadLogs();
+    void loadLogs(filters);
     void loadStats();
   }
 
@@ -196,8 +211,10 @@ export function MonitorPage() {
         <div className="monitor-grid__logs">
           <LogList
             logs={logs}
+            filters={filters}
             selectedTraceId={selectedTraceId}
             loading={loadingLogs}
+            onFiltersChange={setFilters}
             onSelectTrace={setSelectedTraceId}
           />
         </div>

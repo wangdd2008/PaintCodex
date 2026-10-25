@@ -176,12 +176,16 @@ export interface MonitorCategoryStats {
 export interface MonitorStats {
   windowMs: number;
   totalLogs: number;
+  /** Every error-level record in the window, across all categories. */
   errorCount: number;
+  /** Failed HTTP request ratio (warn/error HTTP records over HTTP requests). */
   errorRate: number;
   requestCount: number;
   requestsPerSecond: number;
+  /** Mean duration of HTTP requests that recorded a duration. */
   avgDurationMs: number;
   aiChatCount: number;
+  /** Completed AI chats at info level; aborted chats do not count as success. */
   aiChatSuccessCount: number;
   aiChatSuccessRate: number;
   categoryCounts: MonitorCategoryStats[];

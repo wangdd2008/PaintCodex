@@ -51,8 +51,10 @@ Categories: `codex-runner`, `ai-chat`, `canvas-action`, `http`, `sse`, `system`.
 A new `src/observability/` module in the daemon provides:
 
 - **`AgentLogRepository`** — SQLite read/write for `agent_logs`.
-- **`ObservabilityLogger`** — singleton with trace/span API (`startTrace`, `childSpan`, `log`, `finish`).
+- **`ObservabilityLogger`** — per-daemon logger with trace/span API (`startTrace`, `startSpan`, `log`, `finish`).
 - **`ObservabilityEvents`** — in-process pub/sub for pushing new logs to SSE subscribers.
+
+`buildServer` creates a unique logger for each daemon instance; it is a singleton only within that process.
 
 ### 3. Instrumentation points
 
@@ -60,7 +62,7 @@ A new `src/observability/` module in the daemon provides:
 |----------|----------|---------------|
 | `codex-runner` | `codex-runner.ts` | spawn, delta, complete, error (timeout/abort/exit code) |
 | `ai-chat` | `routes.ai.ts` | prompt-built, codex-exec, action-parse, action-apply, sse-complete |
-| `canvas-action` | `service.ts`, `command-dispatcher.ts` | create, update, delete, undo, redo (with actor + revision) |
+| `canvas-action` | `service.ts` | create, update, delete, undo, redo (with actor + revision) |
 | `http` | `server.ts` (Fastify hooks) | all requests: method, path, status, duration |
 | `sse` | `routes.events.ts` | subscribe, publish, disconnect |
 | `system` | `main.ts` | startup, DB migration |

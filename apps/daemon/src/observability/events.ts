@@ -30,8 +30,4 @@ export class ObservabilityEvents {
   listenerCount(): number {
     return this.listeners.size;
   }
-
-  clear(): void {
-    this.listeners.clear();
-  }
 }

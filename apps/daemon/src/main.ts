@@ -5,6 +5,12 @@ const host = process.env.HOST ?? '127.0.0.1';
 
 const app = buildServer();
 
+app.observability.log({
+  category: 'system',
+  message: 'db_migrated',
+  payload: { ready: true },
+});
+
 async function shutdown(signal: string) {
   app.log.info(`received ${signal}, shutting down`);
   app.observability.log({

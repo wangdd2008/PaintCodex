@@ -178,6 +178,11 @@ export function registerAiChatRoute(
             actionApplied = true;
             send({ layerCreated: { id: layer.id, name: layer.name } });
           } catch (error) {
+            applySpan.finish({
+              level: 'error',
+              error,
+              payload: { actionName: action.name, canvasId: canvas.id },
+            });
             sendError('ai_canvas_action_failed', errorMessage(error));
           }
         }
@@ -197,16 +202,17 @@ export function registerAiChatRoute(
       response.off('close', onClose);
 
       const aborted = controller.signal.aborted;
+      const summary = {
+        deltaCount,
+        assistantLength: assistantText.length,
+        actionApplied,
+        aborted,
+      };
 
       chatSpan.log({
         level: aborted ? 'warn' : 'info',
         message: 'sse_complete',
-        payload: {
-          deltaCount,
-          assistantLength: assistantText.length,
-          actionApplied,
-          aborted,
-        },
+        payload: summary,
       });
 
       if (!response.writableEnded && !response.destroyed) {
@@ -216,12 +222,7 @@ export function registerAiChatRoute(
       const finishInput: SpanFinishInput = {
         level: aborted ? 'warn' : errorSent ? 'error' : 'info',
         message: 'chat_completed',
-        payload: {
-          deltaCount,
-          assistantLength: assistantText.length,
-          actionApplied,
-          ...(aborted ? { aborted: true } : {}),
-        },
+        payload: summary,
       };
 
       if (!aborted && errorSent) {

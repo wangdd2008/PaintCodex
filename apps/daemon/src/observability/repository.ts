@@ -130,7 +130,9 @@ export class AgentLogRepository {
       .prepare(
         `SELECT category,
                 COUNT(*) AS count,
-                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count
+                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count,
+                SUM(CASE WHEN category = 'http' AND level IN ('warn', 'error')
+                         THEN 1 ELSE 0 END) AS http_failure_count
          FROM agent_logs
          WHERE timestamp >= ?
          GROUP BY category`,
@@ -139,6 +141,7 @@ export class AgentLogRepository {
       category: LogCategory;
       count: number;
       error_count: number;
+      http_failure_count: number;
     }>;
 
     const counts = new Map(
@@ -149,20 +152,24 @@ export class AgentLogRepository {
       (sum, row) => sum + row.error_count,
       0,
     );
+    const httpFailureCount = categoryRows.reduce(
+      (sum, row) => sum + row.http_failure_count,
+      0,
+    );
     const requestCount = counts.get('http')?.count ?? 0;
 
     const durationRow = this.db
       .prepare(
         `SELECT AVG(duration_ms) AS average
          FROM agent_logs
-         WHERE timestamp >= ? AND duration_ms IS NOT NULL`,
+         WHERE timestamp >= ? AND category = 'http' AND duration_ms IS NOT NULL`,
       )
       .get(since) as { average: number | null } | undefined;
 
     const aiRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count,
-                SUM(CASE WHEN level <> 'error' THEN 1 ELSE 0 END) AS success
+                SUM(CASE WHEN level = 'info' THEN 1 ELSE 0 END) AS success
          FROM agent_logs
          WHERE timestamp >= ? AND category = 'ai-chat' AND message = 'chat_completed'`,
       )
@@ -175,7 +182,7 @@ export class AgentLogRepository {
       windowMs,
       totalLogs,
       errorCount,
-      errorRate: ratio(errorCount, totalLogs),
+      errorRate: ratio(httpFailureCount, requestCount),
       requestCount,
       requestsPerSecond: round(requestCount / (windowMs / 1000)),
       avgDurationMs: round(durationRow?.average ?? 0),

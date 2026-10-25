@@ -24,6 +24,11 @@ export const LOG_RANGE_MS: Record<Exclude<LogRange, 'all'>, number> = {
   '1h': 60 * 60_000,
 };
 
+/** Converts a relative range into the absolute `since` timestamp for the API. */
+export function rangeToSince(range: LogRange, now = Date.now()): number | undefined {
+  return range === 'all' ? undefined : now - LOG_RANGE_MS[range];
+}
+
 export type LogSortField = 'timestamp' | 'durationMs';
 
 export type SortDirection = 'asc' | 'desc';

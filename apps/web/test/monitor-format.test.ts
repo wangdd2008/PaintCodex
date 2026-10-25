@@ -8,6 +8,7 @@ import {
   formatPercent,
   formatTimestamp,
   mergeLogs,
+  rangeToSince,
   shortenId,
   sortLogs,
 } from '../src/features/monitor/monitor-format';
@@ -138,6 +139,20 @@ describe('filterLogs', () => {
     expect(
       filterLogs([boundary], { ...DEFAULT_LOG_FILTERS, range: '5m' }, now),
     ).toHaveLength(1);
+  });
+});
+
+describe('rangeToSince', () => {
+  const now = 1_000_000;
+
+  it('returns undefined for the all-time range', () => {
+    expect(rangeToSince('all', now)).toBeUndefined();
+  });
+
+  it('converts each relative range into an absolute timestamp', () => {
+    expect(rangeToSince('5m', now)).toBe(now - 5 * 60_000);
+    expect(rangeToSince('15m', now)).toBe(now - 15 * 60_000);
+    expect(rangeToSince('1h', now)).toBe(now - 60 * 60_000);
   });
 });
 
