@@ -38,7 +38,7 @@ async function createLayer(
 async function applyAction(
   app: FastifyInstance,
   canvasId: string,
-  payload: unknown,
+  payload: object,
 ) {
   return app.inject({
     method: 'POST',

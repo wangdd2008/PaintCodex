@@ -7,6 +7,11 @@ const app = buildServer();
 
 async function shutdown(signal: string) {
   app.log.info(`received ${signal}, shutting down`);
+  app.observability.log({
+    category: 'system',
+    message: 'daemon_stopped',
+    payload: { signal },
+  });
   await app.close();
   process.exit(0);
 }
@@ -16,6 +21,11 @@ process.on('SIGTERM', () => void shutdown('SIGTERM'));
 
 try {
   await app.listen({ port, host });
+  app.observability.log({
+    category: 'system',
+    message: 'daemon_started',
+    payload: { port, host },
+  });
 } catch (error) {
   app.log.error(error);
   process.exit(1);

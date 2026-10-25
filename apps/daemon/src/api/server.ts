@@ -13,6 +13,16 @@ import {
 } from '../paint/repository.js';
 import { PaintService } from '../paint/service.js';
 import { openDatabase } from '../storage/database.js';
+import {
+  createObservability,
+  type ObservabilityLogger,
+} from '../observability/index.js';
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    observability: ObservabilityLogger;
+  }
+}
 
 export interface ServerOptions {
   dbPath?: string;
@@ -26,17 +36,22 @@ export function defaultDbPath(): string {
 }
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
-  const db = openDatabase(options.dbPath ?? defaultDbPath());
+  const dbPath = options.dbPath ?? defaultDbPath();
+  const db = openDatabase(dbPath);
   const events = new PaintEvents();
+  const observability = createObservability(db);
   const service = new PaintService(
     new CanvasRepository(db),
     new LayerRepository(db),
     new SnapshotRepository(db),
     events,
+    observability.logger,
   );
   const app = Fastify({ logger: options.logger ?? false });
   const runner = options.runner ?? createCodexRunner();
   const dispatcher = new CommandDispatcher(service);
+
+  app.decorate('observability', observability.logger);
 
   app.addHook('onClose', async () => {
     db.close();

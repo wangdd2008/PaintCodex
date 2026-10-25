@@ -59,6 +59,28 @@ function migrate(db: DatabaseConnection): void {
     );
 
     CREATE INDEX IF NOT EXISTS snapshots_canvas_revision ON snapshots(canvasId, revision);
+
+    CREATE TABLE IF NOT EXISTS agent_logs (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      trace_id      TEXT,
+      span_id       TEXT,
+      parent_id     TEXT,
+      timestamp     INTEGER NOT NULL,
+      level         TEXT CHECK(level IN ('debug','info','warn','error')),
+      category      TEXT NOT NULL,
+      message       TEXT NOT NULL,
+      payload       TEXT,
+      duration_ms   INTEGER,
+      error         TEXT,
+      canvas_id     TEXT,
+      revision      INTEGER,
+      actor         TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS agent_logs_timestamp ON agent_logs(timestamp DESC);
+    CREATE INDEX IF NOT EXISTS agent_logs_trace ON agent_logs(trace_id, timestamp);
+    CREATE INDEX IF NOT EXISTS agent_logs_category_timestamp
+      ON agent_logs(category, timestamp DESC);
   `);
 
   const canvasColumns = db

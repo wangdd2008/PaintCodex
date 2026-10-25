@@ -113,3 +113,76 @@ export interface ApiErrorBody {
     message: string;
   };
 }
+
+export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
+
+export type LogLevel = (typeof LOG_LEVELS)[number];
+
+export const LOG_CATEGORIES = [
+  'codex-runner',
+  'ai-chat',
+  'canvas-action',
+  'http',
+  'sse',
+  'system',
+] as const;
+
+export type LogCategory = (typeof LOG_CATEGORIES)[number];
+
+/**
+ * One structured observability record. A record either describes a finished
+ * span (`durationMs` set) or a point event emitted inside a span.
+ */
+export interface AgentLog {
+  id: number;
+  traceId: string | null;
+  spanId: string | null;
+  parentId: string | null;
+  timestamp: number;
+  level: LogLevel;
+  category: LogCategory;
+  message: string;
+  payload: unknown;
+  durationMs: number | null;
+  error: string | null;
+  canvasId: string | null;
+  revision: number | null;
+  actor: Actor | null;
+}
+
+export interface AgentLogPage {
+  items: AgentLog[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface AgentTraceNode {
+  log: AgentLog;
+  children: AgentTraceNode[];
+}
+
+export interface AgentTrace {
+  traceId: string;
+  roots: AgentTraceNode[];
+}
+
+export interface MonitorCategoryStats {
+  category: LogCategory;
+  count: number;
+  errorCount: number;
+}
+
+export interface MonitorStats {
+  windowMs: number;
+  totalLogs: number;
+  errorCount: number;
+  errorRate: number;
+  requestCount: number;
+  requestsPerSecond: number;
+  avgDurationMs: number;
+  aiChatCount: number;
+  aiChatSuccessCount: number;
+  aiChatSuccessRate: number;
+  categoryCounts: MonitorCategoryStats[];
+}

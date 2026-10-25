@@ -14,6 +14,7 @@ import {
   NothingToUndoError,
   RevisionConflictError,
 } from './errors.js';
+import type { ObservabilityLogger } from '../observability/logger.js';
 import type { PaintEvents } from './events.js';
 import {
   CanvasRepository,
@@ -34,6 +35,7 @@ export class PaintService {
     private readonly layers: LayerRepository,
     private readonly snapshots: SnapshotRepository,
     private readonly events: PaintEvents,
+    private readonly observability?: ObservabilityLogger,
   ) {}
 
   createCanvas(input: CreateCanvasRequest = {}): CanvasDocument {
