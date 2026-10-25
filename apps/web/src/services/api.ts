@@ -2,6 +2,7 @@ import type {
   CanvasDocument,
   CreateCanvasRequest,
   CreateLayerInput,
+  UpdateLayerPatch,
 } from '@paintcodex/protocol';
 
 interface ErrorBody {
@@ -60,4 +61,34 @@ export function createLayer(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ...input, expectedRevision }),
   });
+}
+
+export function updateLayer(
+  canvasId: string,
+  layerId: string,
+  patch: UpdateLayerPatch,
+  expectedRevision?: number,
+): Promise<CanvasDocument> {
+  return request<CanvasDocument>(
+    `/paint/canvas/${encodeURIComponent(canvasId)}/layers/${encodeURIComponent(layerId)}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...patch, expectedRevision }),
+    },
+  );
+}
+
+export function deleteLayer(
+  canvasId: string,
+  layerId: string,
+  expectedRevision?: number,
+): Promise<CanvasDocument> {
+  const query =
+    expectedRevision === undefined ? '' : `?expectedRevision=${expectedRevision}`;
+
+  return request<CanvasDocument>(
+    `/paint/canvas/${encodeURIComponent(canvasId)}/layers/${encodeURIComponent(layerId)}${query}`,
+    { method: 'DELETE' },
+  );
 }
