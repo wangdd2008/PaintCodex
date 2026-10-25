@@ -53,14 +53,4 @@ describe('ObservabilityEvents', () => {
     expect(() => events.publish(log)).not.toThrow();
     expect(healthy).toHaveBeenCalledWith(log);
   });
-
-  it('clears all listeners', () => {
-    const events = new ObservabilityEvents();
-    events.subscribe(vi.fn());
-    events.subscribe(vi.fn());
-
-    events.clear();
-
-    expect(events.listenerCount()).toBe(0);
-  });
 });

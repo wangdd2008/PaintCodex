@@ -2,7 +2,6 @@ import type { AgentLog } from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import {
-  DEFAULT_LOG_FILTERS,
   DEFAULT_LOG_SORT,
   filterLogs,
   formatDuration,
@@ -19,8 +18,10 @@ import {
 
 interface LogListProps {
   logs: readonly AgentLog[];
+  filters: LogFilterState;
   selectedTraceId: string | null;
   loading: boolean;
+  onFiltersChange: (filters: LogFilterState) => void;
   onSelectTrace: (traceId: string) => void;
 }
 
@@ -31,8 +32,14 @@ const RANGE_OPTIONS: readonly { value: LogRange; label: string }[] = [
   { value: 'all', label: 'All time' },
 ];
 
-export function LogList({ logs, selectedTraceId, loading, onSelectTrace }: LogListProps) {
-  const [filters, setFilters] = useState<LogFilterState>(DEFAULT_LOG_FILTERS);
+export function LogList({
+  logs,
+  filters,
+  selectedTraceId,
+  loading,
+  onFiltersChange,
+  onSelectTrace,
+}: LogListProps) {
   const [sort, setSort] = useState<LogSort>(DEFAULT_LOG_SORT);
 
   const visibleLogs = useMemo(
@@ -91,10 +98,10 @@ export function LogList({ logs, selectedTraceId, loading, onSelectTrace }: LogLi
           <select
             value={filters.category}
             onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
+              onFiltersChange({
+                ...filters,
                 category: event.target.value as LogCategoryFilter,
-              }))
+              })
             }
           >
             <option value="all">All categories</option>
@@ -111,10 +118,10 @@ export function LogList({ logs, selectedTraceId, loading, onSelectTrace }: LogLi
           <select
             value={filters.level}
             onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
+              onFiltersChange({
+                ...filters,
                 level: event.target.value as LogLevelFilter,
-              }))
+              })
             }
           >
             <option value="all">All levels</option>
@@ -131,10 +138,10 @@ export function LogList({ logs, selectedTraceId, loading, onSelectTrace }: LogLi
           <select
             value={filters.range}
             onChange={(event) =>
-              setFilters((current) => ({
-                ...current,
+              onFiltersChange({
+                ...filters,
                 range: event.target.value as LogRange,
-              }))
+              })
             }
           >
             {RANGE_OPTIONS.map((option) => (

@@ -181,6 +181,12 @@ describe('AgentLogRepository', () => {
       message: 'chat_completed',
     });
     repository.insert({
+      timestamp: 45_000,
+      level: 'warn',
+      category: 'ai-chat',
+      message: 'chat_completed',
+    });
+    repository.insert({
       timestamp: 50_000,
       level: 'info',
       category: 'codex-runner',
@@ -196,19 +202,19 @@ describe('AgentLogRepository', () => {
 
     expect(stats).toMatchObject({
       windowMs: 50_000,
-      totalLogs: 5,
+      totalLogs: 6,
       errorCount: 2,
-      errorRate: 0.4,
+      errorRate: 0.5,
       requestCount: 2,
       requestsPerSecond: 0.04,
-      avgDurationMs: 46.667,
-      aiChatCount: 2,
+      avgDurationMs: 20,
+      aiChatCount: 3,
       aiChatSuccessCount: 1,
-      aiChatSuccessRate: 0.5,
+      aiChatSuccessRate: 0.333,
     });
     expect(stats.categoryCounts).toEqual([
       { category: 'codex-runner', count: 1, errorCount: 0 },
-      { category: 'ai-chat', count: 2, errorCount: 1 },
+      { category: 'ai-chat', count: 3, errorCount: 1 },
       { category: 'canvas-action', count: 0, errorCount: 0 },
       { category: 'http', count: 2, errorCount: 1 },
       { category: 'sse', count: 0, errorCount: 0 },
