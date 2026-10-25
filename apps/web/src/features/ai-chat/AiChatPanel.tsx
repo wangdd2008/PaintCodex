@@ -1,4 +1,4 @@
-import { CANVAS_ACTION_MARKER } from '@paintcodex/protocol';
+import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useCanvasStore } from '../../services/canvas-store';
 import './ai-chat.css';
@@ -7,16 +7,22 @@ interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
+  /** Set on the pending reply when the user cancels it. */
+  cancelled?: boolean;
 }
 
-interface StreamPayload {
-  delta?: unknown;
-  done?: unknown;
-  error?: { code?: unknown; message?: unknown };
-}
+/** The protocol owns the step shape so frontend and daemon cannot drift. */
+type ChatStep = NonNullable<StreamPayload['step']>;
 
 const FALLBACK_ERROR =
   'The AI assistant could not respond. Check that the Codex CLI is installed and signed in.';
+
+/** The runner's timeout text is machine-facing; users get an actionable line. */
+function userFacingError(message: string): string {
+  return /Codex CLI timed out after \d+ms/.test(message)
+    ? '请求超时，请重试'
+    : message;
+}
 
 /** Hides the machine-readable canvas action from the chat bubble. */
 function visibleAssistantText(content: string): string {
@@ -54,6 +60,7 @@ export function AiChatPanel() {
   const [lastInput, setLastInput] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentStep, setCurrentStep] = useState<ChatStep | null>(null);
 
   const nextId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -82,6 +89,20 @@ export function AiChatPanel() {
     });
   };
 
+  const markAssistantCancelled = () => {
+    setMessages((previous) => {
+      const last = previous[previous.length - 1];
+      if (!last || last.role !== 'assistant') {
+        return previous;
+      }
+      return [...previous.slice(0, -1), { ...last, cancelled: true }];
+    });
+  };
+
+  const cancel = () => {
+    abortRef.current?.abort();
+  };
+
   const handleFrame = (frame: string) => {
     const payload = parseFrame(frame);
     if (!payload) {
@@ -91,6 +112,14 @@ export function AiChatPanel() {
     if (typeof payload.delta === 'string') {
       appendToAssistant(payload.delta);
       return;
+    }
+
+    if (payload.step) {
+      const { id, label } = payload.step;
+      if (typeof id === 'string' && typeof label === 'string') {
+        setCurrentStep({ id, label });
+        return;
+      }
     }
 
     if (payload.done === true) {
@@ -116,6 +145,7 @@ export function AiChatPanel() {
 
     setInput('');
     setError(null);
+    setCurrentStep(null);
     setInFlight(true);
 
     const userMessage: ChatMessage = {
@@ -181,13 +211,17 @@ export function AiChatPanel() {
       }
     } catch (cause) {
       if (controller.signal.aborted) {
+        markAssistantCancelled();
         return;
       }
-      setError(cause instanceof Error ? cause.message : FALLBACK_ERROR);
+      setError(
+        userFacingError(cause instanceof Error ? cause.message : FALLBACK_ERROR),
+      );
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
+      setCurrentStep(null);
       setInFlight(false);
     }
   };
@@ -236,23 +270,33 @@ export function AiChatPanel() {
                 Ask the painting assistant about composition, color, or what to paint next.
               </p>
             ) : (
-              messages.map((message) => (
-                <article
-                  key={message.id}
-                  className={`ai-chat__message ai-chat__message--${message.role}`}
-                >
-                  <span className="ai-chat__role">
-                    {message.role === 'user' ? 'You' : 'AI'}
-                  </span>
-                  <p className="ai-chat__text">
-                    {visibleAssistantText(message.content).length > 0
-                      ? visibleAssistantText(message.content)
-                      : inFlight && message.role === 'assistant'
-                        ? 'Thinking…'
-                        : ''}
-                  </p>
-                </article>
-              ))
+              messages.map((message) => {
+                const text = visibleAssistantText(message.content);
+                const stepLabel =
+                  inFlight && message.role === 'assistant' ? currentStep?.label : undefined;
+
+                return (
+                  <article
+                    key={message.id}
+                    className={`ai-chat__message ai-chat__message--${message.role}`}
+                  >
+                    <span className="ai-chat__role">
+                      {message.role === 'user' ? 'You' : 'AI'}
+                    </span>
+                    <p className="ai-chat__text">
+                      {stepLabel ? <span className="ai-chat__step">{stepLabel}</span> : null}
+                      {text.length > 0
+                        ? text
+                        : inFlight && message.role === 'assistant' && !stepLabel
+                          ? 'Thinking…'
+                          : ''}
+                      {message.cancelled ? (
+                        <span className="ai-chat__cancelled">已取消</span>
+                      ) : null}
+                    </p>
+                  </article>
+                );
+              })
             )}
           </div>
 
@@ -273,22 +317,30 @@ export function AiChatPanel() {
               disabled={inFlight}
             />
             <div className="ai-chat__actions">
-              {lastInput !== null ? (
+              {/* Draft actions stay hidden while a request runs, so the cancel
+                  button never toggles the clear/undo state. */}
+              {!inFlight && lastInput !== null ? (
                 <button type="button" className="ai-chat__clear" onClick={undoClear}>
                   撤销
                 </button>
-              ) : input.length > 0 ? (
+              ) : !inFlight && input.length > 0 ? (
                 <button type="button" className="ai-chat__clear" onClick={clearInput}>
                   清空
                 </button>
               ) : null}
-              <button
-                type="submit"
-                className="ai-chat__send"
-                disabled={inFlight || input.trim().length === 0}
-              >
-                {inFlight ? 'Thinking…' : 'Send'}
-              </button>
+              {inFlight ? (
+                <button type="button" className="ai-chat__cancel" onClick={cancel}>
+                  取消
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  className="ai-chat__send"
+                  disabled={input.trim().length === 0}
+                >
+                  Send
+                </button>
+              )}
             </div>
           </form>
         </div>

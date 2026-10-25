@@ -104,12 +104,16 @@ export function registerAiChatRoute(
           layerCount: canvas?.layers.length ?? 0,
         },
       });
+      send({ step: { id: 'prompt_built', label: '正在构建请求…' } });
 
       const codexSpan = chatSpan.startSpan({
         category: 'ai-chat',
         message: 'codex_exec',
         payload: { promptLength: prompt.length },
       });
+      // Emitted as the span starts: the CLI is a black box, so this is the
+      // only progress signal until it exits.
+      send({ step: { id: 'codex_exec', label: 'AI 正在思考…' } });
 
       try {
         await runner.run(
@@ -147,6 +151,7 @@ export function registerAiChatRoute(
             action === null && assistantText.includes(CANVAS_ACTION_MARKER),
         },
       });
+      send({ step: { id: 'action_parse', label: '正在解析结果…' } });
 
       if (action) {
         if (!canvas) {
@@ -162,6 +167,7 @@ export function registerAiChatRoute(
             message: 'action_apply',
             payload: { actionName: action.name, canvasId: canvas.id },
           });
+          send({ step: { id: 'action_apply', label: '正在应用到画布…' } });
 
           try {
             const layer = applyCanvasAction(
