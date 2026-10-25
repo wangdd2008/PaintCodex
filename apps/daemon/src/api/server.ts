@@ -48,7 +48,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
     observability.logger,
   );
   const app = Fastify({ logger: options.logger ?? false });
-  const runner = options.runner ?? createCodexRunner();
+  const runner =
+    options.runner ?? createCodexRunner({ logger: observability.logger });
   const dispatcher = new CommandDispatcher(service);
 
   app.decorate('observability', observability.logger);
