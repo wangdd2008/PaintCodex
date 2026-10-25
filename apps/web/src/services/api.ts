@@ -1,4 +1,8 @@
-import type { CanvasDocument, CreateCanvasRequest } from '@paintcodex/protocol';
+import type {
+  CanvasDocument,
+  CreateCanvasRequest,
+  CreateLayerInput,
+} from '@paintcodex/protocol';
 
 interface ErrorBody {
   error?: {
@@ -44,4 +48,16 @@ export function createCanvas(input: CreateCanvasRequest = {}): Promise<CanvasDoc
 
 export function getCanvas(id: string): Promise<CanvasDocument> {
   return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(id)}`);
+}
+
+export function createLayer(
+  canvasId: string,
+  input: CreateLayerInput,
+  expectedRevision?: number,
+): Promise<CanvasDocument> {
+  return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(canvasId)}/layers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, expectedRevision }),
+  });
 }

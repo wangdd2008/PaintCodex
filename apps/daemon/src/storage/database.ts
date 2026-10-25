@@ -29,5 +29,21 @@ function migrate(db: DatabaseConnection): void {
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS layers (
+      id TEXT PRIMARY KEY,
+      canvasId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('raster', 'vector', 'ai-generated')),
+      zIndex INTEGER NOT NULL,
+      visible INTEGER NOT NULL DEFAULT 1,
+      opacity REAL NOT NULL DEFAULT 1.0,
+      content TEXT NOT NULL,
+      metadata TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS layers_canvas_zindex ON layers(canvasId, zIndex);
   `);
 }

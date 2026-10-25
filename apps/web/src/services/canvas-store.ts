@@ -1,6 +1,11 @@
 import { create } from 'zustand';
-import type { CanvasDocument } from '@paintcodex/protocol';
-import { ApiError, createCanvas, getCanvas } from './api';
+import type { CanvasDocument, CreateLayerInput } from '@paintcodex/protocol';
+import {
+  ApiError,
+  createCanvas,
+  createLayer as createLayerRequest,
+  getCanvas,
+} from './api';
 
 const STORAGE_KEY = 'paintcodex.canvasId';
 
@@ -10,8 +15,25 @@ interface CanvasState {
   canvas: CanvasDocument | null;
   status: CanvasStatus;
   error: string | null;
+  saving: boolean;
   createNewCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
+  createLayer: (input: CreateLayerInput) => Promise<void>;
+}
+
+let mutationQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Serialises canvas mutations so rapid brush strokes always send the revision
+ * produced by the previous save.
+ */
+function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
+  const result = mutationQueue.then(task, task);
+  mutationQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
 }
 
 function rememberCanvas(id: string | null): void {
@@ -33,10 +55,11 @@ export function readRememberedCanvasId(): string | null {
   return fromUrl ?? window.localStorage.getItem(STORAGE_KEY);
 }
 
-export const useCanvasStore = create<CanvasState>((set) => ({
+export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvas: null,
   status: 'idle',
   error: null,
+  saving: false,
 
   createNewCanvas: async () => {
     set({ status: 'loading', error: null });
@@ -70,6 +93,31 @@ export const useCanvasStore = create<CanvasState>((set) => ({
         status: 'error',
         error: error instanceof Error ? error.message : 'Could not load canvas',
       });
+    }
+  },
+
+  createLayer: async (input: CreateLayerInput) => {
+    set({ saving: true, error: null });
+
+    try {
+      await enqueueMutation(async () => {
+        const current = get().canvas;
+
+        if (!current) {
+          throw new Error('No canvas loaded');
+        }
+
+        const updated = await createLayerRequest(current.id, input, current.revision);
+        set({ canvas: updated, status: 'ready' });
+      });
+
+      set({ saving: false });
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : 'Could not save layer',
+      });
+      throw error;
     }
   },
 }));

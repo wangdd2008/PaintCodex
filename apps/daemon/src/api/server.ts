@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerPaintRoutes } from './routes.paint.js';
-import { CanvasRepository } from '../paint/repository.js';
+import { CanvasRepository, LayerRepository } from '../paint/repository.js';
 import { PaintService } from '../paint/service.js';
 import { openDatabase } from '../storage/database.js';
 
@@ -16,7 +16,10 @@ export function defaultDbPath(): string {
 
 export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const db = openDatabase(options.dbPath ?? defaultDbPath());
-  const service = new PaintService(new CanvasRepository(db));
+  const service = new PaintService(
+    new CanvasRepository(db),
+    new LayerRepository(db),
+  );
   const app = Fastify({ logger: options.logger ?? false });
 
   app.addHook('onClose', async () => {
