@@ -1,10 +1,17 @@
 import { create } from 'zustand';
-import type { CanvasDocument, CreateLayerInput } from '@paintcodex/protocol';
+import type {
+  CanvasDocument,
+  CreateLayerInput,
+  Layer,
+  UpdateLayerPatch,
+} from '@paintcodex/protocol';
 import {
   ApiError,
   createCanvas,
   createLayer as createLayerRequest,
+  deleteLayer as deleteLayerRequest,
   getCanvas,
+  updateLayer as updateLayerRequest,
 } from './api';
 
 const STORAGE_KEY = 'paintcodex.canvasId';
@@ -16,9 +23,13 @@ interface CanvasState {
   status: CanvasStatus;
   error: string | null;
   saving: boolean;
+  activeLayerId: string | null;
   createNewCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
-  createLayer: (input: CreateLayerInput) => Promise<void>;
+  createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
+  updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
+  deleteLayer: (layerId: string) => Promise<void>;
+  setActiveLayer: (layerId: string | null) => void;
 }
 
 let mutationQueue: Promise<unknown> = Promise.resolve();
@@ -55,11 +66,16 @@ export function readRememberedCanvasId(): string | null {
   return fromUrl ?? window.localStorage.getItem(STORAGE_KEY);
 }
 
+function topLayerId(canvas: CanvasDocument): string | null {
+  return canvas.layers.length > 0 ? canvas.layers[canvas.layers.length - 1]!.id : null;
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvas: null,
   status: 'idle',
   error: null,
   saving: false,
+  activeLayerId: null,
 
   createNewCanvas: async () => {
     set({ status: 'loading', error: null });
@@ -67,7 +83,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       const canvas = await createCanvas();
       rememberCanvas(canvas.id);
-      set({ canvas, status: 'ready', error: null });
+      set({
+        canvas,
+        status: 'ready',
+        error: null,
+        activeLayerId: topLayerId(canvas),
+      });
     } catch (error) {
       set({
         status: 'error',
@@ -82,7 +103,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     try {
       const canvas = await getCanvas(id);
       rememberCanvas(canvas.id);
-      set({ canvas, status: 'ready', error: null });
+      set({
+        canvas,
+        status: 'ready',
+        error: null,
+        activeLayerId: topLayerId(canvas),
+      });
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
         rememberCanvas(null);
@@ -100,6 +126,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({ saving: true, error: null });
 
     try {
+      let created: Layer | null = null;
+
       await enqueueMutation(async () => {
         const current = get().canvas;
 
@@ -108,10 +136,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         }
 
         const updated = await createLayerRequest(current.id, input, current.revision);
-        set({ canvas: updated, status: 'ready' });
+        created = updated.layers[updated.layers.length - 1] ?? null;
+        set({
+          canvas: updated,
+          status: 'ready',
+          activeLayerId: created?.id ?? get().activeLayerId,
+        });
       });
 
       set({ saving: false });
+      return created;
     } catch (error) {
       set({
         saving: false,
@@ -119,5 +153,69 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       });
       throw error;
     }
+  },
+
+  updateLayer: async (layerId: string, patch: UpdateLayerPatch) => {
+    set({ saving: true, error: null });
+
+    try {
+      await enqueueMutation(async () => {
+        const current = get().canvas;
+
+        if (!current) {
+          throw new Error('No canvas loaded');
+        }
+
+        const updated = await updateLayerRequest(
+          current.id,
+          layerId,
+          patch,
+          current.revision,
+        );
+        set({ canvas: updated, status: 'ready' });
+      });
+
+      set({ saving: false });
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : 'Could not update layer',
+      });
+      throw error;
+    }
+  },
+
+  deleteLayer: async (layerId: string) => {
+    set({ saving: true, error: null });
+
+    try {
+      await enqueueMutation(async () => {
+        const current = get().canvas;
+
+        if (!current) {
+          throw new Error('No canvas loaded');
+        }
+
+        const updated = await deleteLayerRequest(current.id, layerId, current.revision);
+        set({
+          canvas: updated,
+          status: 'ready',
+          activeLayerId:
+            get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
+        });
+      });
+
+      set({ saving: false });
+    } catch (error) {
+      set({
+        saving: false,
+        error: error instanceof Error ? error.message : 'Could not delete layer',
+      });
+      throw error;
+    }
+  },
+
+  setActiveLayer: (layerId: string | null) => {
+    set({ activeLayerId: layerId });
   },
 }));

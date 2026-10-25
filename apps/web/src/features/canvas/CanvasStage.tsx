@@ -1,5 +1,5 @@
 import type { Layer as PaintLayer } from '@paintcodex/protocol';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Canvas,
   PencilBrush,
@@ -22,11 +22,15 @@ export function CanvasStage() {
   const tool = useToolStore((state) => state.tool);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
-  const initialLayersRef = useRef<PaintLayer[]>(canvasDocument?.layers ?? []);
+  const objectsRef = useRef(new Map<string, FabricObject>());
+  const pendingJsonRef = useRef(new Set<string>());
+  const syncTokenRef = useRef(0);
+  const [ready, setReady] = useState(false);
 
   const width = canvasDocument?.width ?? FALLBACK_WIDTH;
   const height = canvasDocument?.height ?? FALLBACK_HEIGHT;
   const backgroundColor = canvasDocument?.backgroundColor ?? '#ffffff';
+  const layers = canvasDocument?.layers;
 
   useEffect(() => {
     const element = canvasElementRef.current;
@@ -63,42 +67,37 @@ export function CanvasStage() {
         return;
       }
 
+      const json = JSON.stringify(path.toJSON());
+      pendingJsonRef.current.add(json);
+
       void state
         .createLayer({
           name: `Stroke ${current.layers.length + 1}`,
           type: 'vector',
-          content: { kind: 'fabric', json: JSON.stringify(path.toJSON()) },
+          content: { kind: 'fabric', json },
+        })
+        .then((created) => {
+          pendingJsonRef.current.delete(json);
+
+          if (created) {
+            objectsRef.current.set(created.id, path);
+          }
         })
         .catch(() => {
+          pendingJsonRef.current.delete(json);
           canvas.remove(path);
           canvas.requestRenderAll();
         });
     };
 
     canvas.on('path:created', handlePathCreated);
-
-    let disposed = false;
-
-    void (async () => {
-      const objects = await Promise.all(
-        initialLayersRef.current.map((layer) => createFabricObject(layer)),
-      );
-
-      if (disposed) {
-        return;
-      }
-
-      for (const object of objects) {
-        if (object) {
-          canvas.add(object);
-        }
-      }
-
-      canvas.requestRenderAll();
-    })();
+    setReady(true);
 
     return () => {
-      disposed = true;
+      setReady(false);
+      syncTokenRef.current += 1;
+      objectsRef.current.clear();
+      pendingJsonRef.current.clear();
       fabricRef.current = null;
       setActiveCanvas(null);
       canvas.off('path:created', handlePathCreated);
@@ -111,6 +110,62 @@ export function CanvasStage() {
       fabricRef.current.isDrawingMode = tool === 'brush';
     }
   }, [tool]);
+
+  useEffect(() => {
+    const canvas = fabricRef.current;
+
+    if (!ready || !canvas || !layers) {
+      return;
+    }
+
+    const token = ++syncTokenRef.current;
+    const objects = objectsRef.current;
+
+    void (async () => {
+      const seen = new Set<string>();
+
+      for (const layer of layers) {
+        seen.add(layer.id);
+        const existing = objects.get(layer.id);
+
+        if (existing) {
+          existing.set({ visible: layer.visible, opacity: layer.opacity });
+          continue;
+        }
+
+        if (
+          layer.content.kind === 'fabric' &&
+          pendingJsonRef.current.has(layer.content.json)
+        ) {
+          continue;
+        }
+
+        const object = await createFabricObject(layer);
+
+        if (token !== syncTokenRef.current) {
+          return;
+        }
+
+        if (object) {
+          objects.set(layer.id, object);
+          canvas.add(object);
+        }
+      }
+
+      if (token !== syncTokenRef.current) {
+        return;
+      }
+
+      for (const [layerId, object] of Array.from(objects.entries())) {
+        if (!seen.has(layerId)) {
+          canvas.remove(object);
+          objects.delete(layerId);
+        }
+      }
+
+      canvas.requestRenderAll();
+    })();
+  }, [ready, layers]);
 
   return (
     <div className="canvas-viewport">
