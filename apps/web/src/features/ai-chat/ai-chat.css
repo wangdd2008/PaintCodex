@@ -166,10 +166,14 @@
 }
 
 /* The primary action (send or cancel) is pushed to the right of the draft actions. */
-.ai-chat__actions .ai-chat__send,
-.ai-chat__actions .ai-chat__cancel {
-  align-self: center;
+.ai-chat__send,
+.ai-chat__cancel {
   margin-left: auto;
+  border: 1px solid;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
 }
 
 .ai-chat__clear {
@@ -187,13 +191,9 @@
 }
 
 .ai-chat__send {
-  align-self: flex-end;
-  border: 1px solid #3a3c45;
-  border-radius: 6px;
+  border-color: #3a3c45;
   background: #26272e;
   color: inherit;
-  padding: 6px 12px;
-  cursor: pointer;
 }
 
 .ai-chat__send:hover:not(:disabled) {
@@ -206,13 +206,9 @@
 }
 
 .ai-chat__cancel {
-  align-self: flex-end;
-  border: 1px solid #7a3234;
-  border-radius: 6px;
+  border-color: #7a3234;
   background: #3a1f21;
   color: #f2b8b5;
-  padding: 6px 12px;
-  cursor: pointer;
 }
 
 .ai-chat__cancel:hover {

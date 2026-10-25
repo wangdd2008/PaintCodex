@@ -5,23 +5,6 @@ import { AiChatPanel } from '../src/features/ai-chat/AiChatPanel';
 
 const encoder = new TextEncoder();
 
-/** Minimal one-shot streaming response for the chat fetch boundary; no server code runs. */
-function streamingResponse(payload: string): Response {
-  let consumed = false;
-  const body = {
-    getReader: () => ({
-      read: async () => {
-        if (consumed) {
-          return { done: true, value: undefined };
-        }
-        consumed = true;
-        return { done: false, value: encoder.encode(payload) };
-      },
-    }),
-  };
-  return { ok: true, body } as unknown as Response;
-}
-
 /** A stream the test drives frame by frame, so intermediate states are observable. */
 function controlledStream() {
   let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
@@ -116,17 +99,53 @@ describe('AiChatPanel clear input', () => {
     expect(screen.getByRole('button', { name: '清空' })).toBeTruthy();
   });
 
+  it('drops the undo offer as soon as the user types a new draft', () => {
+    render(<AiChatPanel />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: 'a red sky' } });
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+
+    fireEvent.change(input, { target: { value: 'a blue sea' } });
+
+    expect(input.value).toBe('a blue sea');
+    expect(screen.getByRole('button', { name: '清空' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '撤销' })).toBeNull();
+  });
+
+  it('leaves no undo offer once the next message is sent', async () => {
+    const stream = controlledStream();
+    stubFetch(stream.body);
+    render(<AiChatPanel />);
+    const input = screen.getByRole('textbox') as HTMLTextAreaElement;
+
+    fireEvent.change(input, { target: { value: 'draft that was cleared' } });
+    fireEvent.click(screen.getByRole('button', { name: '清空' }));
+
+    fireEvent.change(input, { target: { value: 'second message' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(await screen.findByText('second message')).toBeTruthy();
+
+    stream.push({ done: true });
+    stream.close();
+
+    expect(await screen.findByRole('button', { name: 'Send' })).toBeTruthy();
+    expect(input.value).toBe('');
+    expect(screen.queryByRole('button', { name: '撤销' })).toBeNull();
+  });
+
   it('leaves the sent conversation untouched', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(streamingResponse('data: {"done":true}\n\n')),
-    );
+    const stream = controlledStream();
+    stubFetch(stream.body);
     render(<AiChatPanel />);
     const input = screen.getByRole('textbox') as HTMLTextAreaElement;
 
     fireEvent.change(input, { target: { value: 'first message' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
     expect(await screen.findByText('first message')).toBeTruthy();
+
+    stream.push({ done: true });
+    stream.close();
+    expect(await screen.findByRole('button', { name: 'Send' })).toBeTruthy();
 
     fireEvent.change(input, { target: { value: 'draft to clear' } });
     fireEvent.click(screen.getByRole('button', { name: '清空' }));

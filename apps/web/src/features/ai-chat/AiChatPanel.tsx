@@ -79,24 +79,22 @@ export function AiChatPanel() {
     }
   }, [messages, inFlight, error]);
 
-  const appendToAssistant = (delta: string) => {
+  const updateLastAssistant = (update: (message: ChatMessage) => ChatMessage) => {
     setMessages((previous) => {
       const last = previous[previous.length - 1];
       if (!last || last.role !== 'assistant') {
         return previous;
       }
-      return [...previous.slice(0, -1), { ...last, content: last.content + delta }];
+      return [...previous.slice(0, -1), update(last)];
     });
   };
 
+  const appendToAssistant = (delta: string) => {
+    updateLastAssistant((last) => ({ ...last, content: last.content + delta }));
+  };
+
   const markAssistantCancelled = () => {
-    setMessages((previous) => {
-      const last = previous[previous.length - 1];
-      if (!last || last.role !== 'assistant') {
-        return previous;
-      }
-      return [...previous.slice(0, -1), { ...last, cancelled: true }];
-    });
+    updateLastAssistant((last) => ({ ...last, cancelled: true }));
   };
 
   const cancel = () => {
@@ -144,6 +142,7 @@ export function AiChatPanel() {
     }
 
     setInput('');
+    setLastInput(null);
     setError(null);
     setCurrentStep(null);
     setInFlight(true);
@@ -238,6 +237,14 @@ export function AiChatPanel() {
     setInput('');
   };
 
+  /** Editing a new draft retires the undo offer: it only ever restores this clear. */
+  const handleInputChange = (value: string) => {
+    setInput(value);
+    if (value.length > 0) {
+      setLastInput(null);
+    }
+  };
+
   const undoClear = () => {
     if (lastInput === null) {
       return;
@@ -272,8 +279,7 @@ export function AiChatPanel() {
             ) : (
               messages.map((message) => {
                 const text = visibleAssistantText(message.content);
-                const stepLabel =
-                  inFlight && message.role === 'assistant' ? currentStep?.label : undefined;
+                const step = inFlight && message.role === 'assistant' ? currentStep : null;
 
                 return (
                   <article
@@ -284,10 +290,15 @@ export function AiChatPanel() {
                       {message.role === 'user' ? 'You' : 'AI'}
                     </span>
                     <p className="ai-chat__text">
-                      {stepLabel ? <span className="ai-chat__step">{stepLabel}</span> : null}
+                      {step ? (
+                        // Keyed by step id so every backend step replays the fade-in.
+                        <span className="ai-chat__step" key={step.id}>
+                          {step.label}
+                        </span>
+                      ) : null}
                       {text.length > 0
                         ? text
-                        : inFlight && message.role === 'assistant' && !stepLabel
+                        : inFlight && message.role === 'assistant' && !step
                           ? 'Thinking…'
                           : ''}
                       {message.cancelled ? (
@@ -312,7 +323,7 @@ export function AiChatPanel() {
               placeholder="Describe what to paint…"
               rows={3}
               value={input}
-              onChange={(event) => setInput(event.target.value)}
+              onChange={(event) => handleInputChange(event.target.value)}
               onKeyDown={handleKeyDown}
               disabled={inFlight}
             />

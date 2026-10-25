@@ -16,6 +16,14 @@ import type {
 } from '../observability/logger.js';
 import { getRequestSpan } from '../observability/request-context.js';
 
+/** User-facing progress labels; the SSE step id is the table key so the two cannot drift. */
+const AI_CHAT_STEPS = {
+  prompt_built: '正在构建请求…',
+  codex_exec: 'AI 正在思考…',
+  action_parse: '正在解析结果…',
+  action_apply: '正在应用到画布…',
+} as const;
+
 export function registerAiChatRoute(
   app: FastifyInstance,
   runner: CodexRunner,
@@ -71,6 +79,10 @@ export function registerAiChatRoute(
       }
     };
 
+    const sendStep = (id: keyof typeof AI_CHAT_STEPS) => {
+      send({ step: { id, label: AI_CHAT_STEPS[id] } });
+    };
+
     const sendError = (code: string, message: string) => {
       failure = message;
       errorSent = true;
@@ -104,7 +116,7 @@ export function registerAiChatRoute(
           layerCount: canvas?.layers.length ?? 0,
         },
       });
-      send({ step: { id: 'prompt_built', label: '正在构建请求…' } });
+      sendStep('prompt_built');
 
       const codexSpan = chatSpan.startSpan({
         category: 'ai-chat',
@@ -113,7 +125,7 @@ export function registerAiChatRoute(
       });
       // Emitted as the span starts: the CLI is a black box, so this is the
       // only progress signal until it exits.
-      send({ step: { id: 'codex_exec', label: 'AI 正在思考…' } });
+      sendStep('codex_exec');
 
       try {
         await runner.run(
@@ -151,7 +163,7 @@ export function registerAiChatRoute(
             action === null && assistantText.includes(CANVAS_ACTION_MARKER),
         },
       });
-      send({ step: { id: 'action_parse', label: '正在解析结果…' } });
+      sendStep('action_parse');
 
       if (action) {
         if (!canvas) {
@@ -167,7 +179,7 @@ export function registerAiChatRoute(
             message: 'action_apply',
             payload: { actionName: action.name, canvasId: canvas.id },
           });
-          send({ step: { id: 'action_apply', label: '正在应用到画布…' } });
+          sendStep('action_apply');
 
           try {
             const layer = applyCanvasAction(

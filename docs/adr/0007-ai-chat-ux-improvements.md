@@ -77,7 +77,7 @@ interface StreamPayload {
 | `apps/web/src/features/ai-chat/AiChatPanel.tsx` | 新增清空按钮、撤销逻辑、步骤展示、Cancel 按钮 |
 | `apps/web/src/features/ai-chat/ai-chat.css` | 新增步骤样式、清空按钮样式 |
 | `apps/daemon/src/api/routes.ai.ts` | SSE 发送中增加 `step` 事件 |
-| `packages/protocol/src/index.ts` | 扩展 `AiChatResponse` / `StreamPayload` 类型 |
+| `packages/protocol/src/index.ts` | 新增 `StreamPayload` 类型 |
 
 ## Consequences
 
