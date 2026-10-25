@@ -66,6 +66,10 @@
   font-size: 11px;
 }
 
+.layer-item__type--ai {
+  color: #b18cff;
+}
+
 .layer-item__delete {
   border: 0;
   background: transparent;

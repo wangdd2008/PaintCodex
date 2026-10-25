@@ -49,7 +49,15 @@ export function LayerPanel() {
                 {layer.visible ? '●' : '○'}
               </button>
               <span className="layer-item__name">{layer.name}</span>
-              <span className="layer-item__type">{layer.type}</span>
+              <span
+                className={
+                  layer.type === 'ai-generated'
+                    ? 'layer-item__type layer-item__type--ai'
+                    : 'layer-item__type'
+                }
+              >
+                {layer.type === 'ai-generated' ? '✦ AI' : layer.type}
+              </span>
               <button
                 type="button"
                 className="layer-item__delete"

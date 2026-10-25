@@ -1,4 +1,6 @@
+import { CANVAS_ACTION_MARKER } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { useCanvasStore } from '../../services/canvas-store';
 import './ai-chat.css';
 
 interface ChatMessage {
@@ -15,6 +17,13 @@ interface StreamPayload {
 
 const FALLBACK_ERROR =
   'The AI assistant could not respond. Check that the Codex CLI is installed and signed in.';
+
+/** Hides the machine-readable canvas action from the chat bubble. */
+function visibleAssistantText(content: string): string {
+  const markerIndex = content.indexOf(CANVAS_ACTION_MARKER);
+
+  return markerIndex >= 0 ? content.slice(0, markerIndex).trim() : content;
+}
 
 function parseFrame(frame: string): StreamPayload | null {
   const data = frame
@@ -124,10 +133,11 @@ export function AiChatPanel() {
     abortRef.current = controller;
 
     try {
+      const canvasId = useCanvasStore.getState().canvas?.id;
       const response = await fetch('/paint/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, canvasId }),
         signal: controller.signal,
       });
 
@@ -221,9 +231,9 @@ export function AiChatPanel() {
                     {message.role === 'user' ? 'You' : 'AI'}
                   </span>
                   <p className="ai-chat__text">
-                    {message.content.length > 0
-                      ? message.content
-                      : inFlight
+                    {visibleAssistantText(message.content).length > 0
+                      ? visibleAssistantText(message.content)
+                      : inFlight && message.role === 'assistant'
                         ? 'Thinking…'
                         : ''}
                   </p>

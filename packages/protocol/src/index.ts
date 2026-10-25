@@ -1,3 +1,5 @@
+export const CANVAS_ACTION_MARKER = '<<<CANVAS_ACTION>>>';
+
 export type Actor = 'user' | 'agent';
 
 export type LayerType = 'raster' | 'vector' | 'ai-generated';
