@@ -3,6 +3,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { LogLevel } from '@paintcodex/protocol';
 import { registerAiChatRoute } from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
+import { registerMonitorRoutes } from './routes.monitor.js';
 import { registerPaintRoutes } from './routes.paint.js';
 import { createCodexRunner, type CodexRunner } from '../paint/agent/codex-runner.js';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
@@ -98,6 +99,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerPaintRoutes(app, service);
   registerEventRoutes(app, service, events);
   registerAiChatRoute(app, runner, dispatcher, service);
+  registerMonitorRoutes(app, observability);
 
   return app;
 }
