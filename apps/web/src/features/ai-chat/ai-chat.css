@@ -132,6 +132,31 @@
   opacity: 0.7;
 }
 
+.ai-chat__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-chat__actions .ai-chat__send {
+  align-self: center;
+  margin-left: auto;
+}
+
+.ai-chat__clear {
+  border: 0;
+  background: transparent;
+  color: #8d90a0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__clear:hover {
+  color: #d5d7e0;
+}
+
 .ai-chat__send {
   align-self: flex-end;
   border: 1px solid #3a3c45;
