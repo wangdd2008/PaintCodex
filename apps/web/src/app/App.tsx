@@ -3,6 +3,7 @@ import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { Toolbox } from '../features/toolbox/Toolbox';
+import { subscribeToCanvas } from '../runtime/paint-sse';
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 
 export function App() {
@@ -11,6 +12,7 @@ export function App() {
   const error = useCanvasStore((state) => state.error);
   const createNewCanvas = useCanvasStore((state) => state.createNewCanvas);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
+  const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
 
   useEffect(() => {
     const canvasId = readRememberedCanvasId();
@@ -19,6 +21,29 @@ export function App() {
       void loadCanvas(canvasId);
     }
   }, [loadCanvas]);
+
+  const canvasId = canvas?.id;
+
+  useEffect(() => {
+    if (!canvasId) {
+      return;
+    }
+
+    return subscribeToCanvas(canvasId, {
+      onOpen: () => void refreshCanvas(),
+      onSnapshotChanged: (event) => {
+        const current = useCanvasStore.getState().canvas;
+
+        if (
+          current &&
+          current.id === event.canvasId &&
+          event.revision > current.revision
+        ) {
+          void refreshCanvas();
+        }
+      },
+    });
+  }, [canvasId, refreshCanvas]);
 
   return (
     <div className="app-shell">

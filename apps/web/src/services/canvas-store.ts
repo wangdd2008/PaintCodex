@@ -26,6 +26,7 @@ interface CanvasState {
   activeLayerId: string | null;
   createNewCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
+  refreshCanvas: () => Promise<void>;
   createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
   updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
   deleteLayer: (layerId: string) => Promise<void>;
@@ -118,6 +119,32 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         canvas: null,
         status: 'error',
         error: error instanceof Error ? error.message : 'Could not load canvas',
+      });
+    }
+  },
+
+  refreshCanvas: async () => {
+    const current = get().canvas;
+
+    if (!current) {
+      return;
+    }
+
+    try {
+      const updated = await getCanvas(current.id);
+      const activeLayerId = get().activeLayerId;
+      const keepActive =
+        activeLayerId !== null &&
+        updated.layers.some((layer) => layer.id === activeLayerId);
+
+      set({
+        canvas: updated,
+        status: 'ready',
+        activeLayerId: keepActive ? activeLayerId : topLayerId(updated),
+      });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : 'Could not refresh canvas',
       });
     }
   },

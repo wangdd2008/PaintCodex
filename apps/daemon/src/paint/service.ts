@@ -5,6 +5,7 @@ import type {
   CreateCanvasRequest,
 } from '@paintcodex/protocol';
 import { CanvasNotFoundError, LayerNotFoundError, RevisionConflictError } from './errors.js';
+import type { PaintEvents } from './events.js';
 import { CanvasRepository, LayerRepository } from './repository.js';
 
 export const DEFAULT_CANVAS_WIDTH = 1920;
@@ -15,6 +16,7 @@ export class PaintService {
   constructor(
     private readonly canvases: CanvasRepository,
     private readonly layers: LayerRepository,
+    private readonly events: PaintEvents,
   ) {}
 
   createCanvas(input: CreateCanvasRequest = {}): CanvasDocument {
@@ -106,6 +108,9 @@ export class PaintService {
 
     this.canvases.bumpRevision(canvasId);
 
-    return this.getCanvas(canvasId)!;
+    const updated = this.getCanvas(canvasId)!;
+    this.events.publishSnapshot(canvasId, updated.revision);
+
+    return updated;
   }
 }
