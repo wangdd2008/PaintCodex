@@ -95,6 +95,33 @@
   background: #1f2026;
 }
 
+/* Own line inside the bubble so it reads as status, not as reply text. */
+.ai-chat__step {
+  display: block;
+  margin-bottom: 4px;
+  color: #9ea3b0;
+  font-size: 11px;
+  animation: ai-chat-step-in 160ms ease-out;
+}
+
+.ai-chat__cancelled {
+  display: block;
+  margin-top: 2px;
+  color: #8f93a3;
+  font-size: 11px;
+  font-style: italic;
+}
+
+@keyframes ai-chat-step-in {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .ai-chat__error {
   margin: 0;
   padding: 8px 10px;
@@ -132,14 +159,41 @@
   opacity: 0.7;
 }
 
-.ai-chat__send {
-  align-self: flex-end;
-  border: 1px solid #3a3c45;
+.ai-chat__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The primary action (send or cancel) is pushed to the right of the draft actions. */
+.ai-chat__send,
+.ai-chat__cancel {
+  margin-left: auto;
+  border: 1px solid;
   border-radius: 6px;
+  padding: 6px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ai-chat__clear {
+  border: 0;
+  background: transparent;
+  color: #8d90a0;
+  padding: 4px 2px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__clear:hover {
+  color: #d5d7e0;
+}
+
+.ai-chat__send {
+  border-color: #3a3c45;
   background: #26272e;
   color: inherit;
-  padding: 6px 12px;
-  cursor: pointer;
 }
 
 .ai-chat__send:hover:not(:disabled) {
@@ -149,4 +203,14 @@
 .ai-chat__send:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.ai-chat__cancel {
+  border-color: #7a3234;
+  background: #3a1f21;
+  color: #f2b8b5;
+}
+
+.ai-chat__cancel:hover {
+  background: #4a2628;
 }

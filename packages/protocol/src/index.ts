@@ -107,6 +107,19 @@ export interface AiChatRequest {
   message: string;
 }
 
+/**
+ * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
+ * frame carries exactly one of the optional members.
+ */
+export interface StreamPayload {
+  delta?: unknown;
+  done?: unknown;
+  error?: { code?: unknown; message?: unknown };
+  /** Progress notification for the pending reply; `label` is UI copy. */
+  step?: { id: string; label: string };
+  layerCreated?: { id: string; name: string };
+}
+
 export interface ApiErrorBody {
   error: {
     code: string;
