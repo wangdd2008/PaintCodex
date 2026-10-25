@@ -109,6 +109,8 @@ CREATE TABLE snapshots (
 
 - `POST /paint/canvas/:id/export` — Export canvas as PNG
 
+> Phase 1 exports PNG client-side from the live Fabric canvas; `POST /paint/canvas/:id/export` is deferred per [ADR-0005](/docs/adr/0005-client-side-png-export.md).
+
 ### AI
 
 - `POST /paint/ai/chat` — Send a message to Codex, stream response
