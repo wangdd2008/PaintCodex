@@ -285,7 +285,7 @@ function applyCanvasAction(
     const current = service.getCanvas(canvasId);
 
     if (!current) {
-      throw new Error('Canvas not found');
+      throw new Error('画布不存在');
     }
 
     try {

@@ -11,12 +11,12 @@ export function StatsPanel({ stats, error }: StatsPanelProps) {
     return (
       <section className="stats-panel" aria-label="Monitor stats">
         <div className="stats-panel__header">
-          <h2 className="monitor-heading">Overview</h2>
+          <h2 className="monitor-heading">概览</h2>
         </div>
         {error ? (
           <p className="monitor-error">{error}</p>
         ) : (
-          <p className="monitor-empty">Waiting for stats…</p>
+          <p className="monitor-empty">等待统计数据…</p>
         )}
       </section>
     );
@@ -27,28 +27,28 @@ export function StatsPanel({ stats, error }: StatsPanelProps) {
   return (
     <section className="stats-panel" aria-label="Monitor stats">
       <div className="stats-panel__header">
-        <h2 className="monitor-heading">Overview</h2>
+        <h2 className="monitor-heading">概览</h2>
         <span className="monitor-muted">
-          Last {Math.max(1, Math.round(stats.windowMs / 60_000))} min
+          最近 {Math.max(1, Math.round(stats.windowMs / 60_000))} 分钟
         </span>
         <span className="monitor-spacer" />
-        <span className="monitor-muted">{stats.totalLogs} logs</span>
+        <span className="monitor-muted">{stats.totalLogs} 条日志</span>
       </div>
 
       {error ? <p className="monitor-error">{error}</p> : null}
 
       <div className="stat-cards">
-        <StatCard label="Requests / s" value={stats.requestsPerSecond.toFixed(2)} />
-        <StatCard label="Requests" value={String(stats.requestCount)} />
+        <StatCard label="请求/秒" value={stats.requestsPerSecond.toFixed(2)} />
+        <StatCard label="请求数" value={String(stats.requestCount)} />
         <StatCard
-          label="Error rate"
+          label="错误率"
           value={formatPercent(stats.errorRate)}
-          hint={`${stats.errorCount} errors`}
+          hint={`${stats.errorCount} 个错误`}
           tone={stats.errorRate > 0 ? 'danger' : undefined}
         />
-        <StatCard label="Avg duration" value={formatDuration(stats.avgDurationMs)} />
+        <StatCard label="平均耗时" value={formatDuration(stats.avgDurationMs)} />
         <StatCard
-          label="AI success"
+          label="AI 成功率"
           value={formatPercent(stats.aiChatSuccessRate)}
           hint={`${stats.aiChatSuccessCount} / ${stats.aiChatCount} chats`}
         />
@@ -64,7 +64,7 @@ export function StatsPanel({ stats, error }: StatsPanelProps) {
               <span className="category-bar__label">{entry.category}</span>
               <div
                 className="category-bar__track"
-                title={`${entry.count} logs, ${entry.errorCount} errors`}
+                title={`${entry.count} 条日志, ${entry.errorCount} 个错误`}
               >
                 <div className="category-bar__fill" style={{ width: `${width}%` }}>
                   <div className="category-bar__errors" style={{ width: `${errorShare}%` }} />
@@ -73,7 +73,7 @@ export function StatsPanel({ stats, error }: StatsPanelProps) {
               <span className="category-bar__value">
                 {entry.count}
                 {entry.errorCount > 0 ? (
-                  <span className="category-bar__error-count"> · {entry.errorCount} err</span>
+                  <span className="category-bar__error-count"> · {entry.errorCount} 错误</span>
                 ) : null}
               </span>
             </div>

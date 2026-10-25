@@ -26,10 +26,10 @@ interface LogListProps {
 }
 
 const RANGE_OPTIONS: readonly { value: LogRange; label: string }[] = [
-  { value: '5m', label: 'Last 5 min' },
-  { value: '15m', label: 'Last 15 min' },
-  { value: '1h', label: 'Last hour' },
-  { value: 'all', label: 'All time' },
+  { value: '5m', label: '最近 5 分钟' },
+  { value: '15m', label: '最近 15 分钟' },
+  { value: '1h', label: '最近 1 小时' },
+  { value: 'all', label: '全部时间' },
 ];
 
 export function LogList({
@@ -84,17 +84,17 @@ export function LogList({
   return (
     <section className="log-list" aria-label="Agent logs">
       <div className="log-list__header">
-        <h2 className="monitor-heading">Logs</h2>
+        <h2 className="monitor-heading">日志</h2>
         <span className="monitor-muted">
           {visibleLogs.length} of {logs.length}
         </span>
         <span className="monitor-spacer" />
-        {loading ? <span className="monitor-muted">Loading…</span> : null}
+        {loading ? <span className="monitor-muted">加载中…</span> : null}
       </div>
 
       <div className="log-list__filters">
         <label className="monitor-field">
-          <span>Category</span>
+          <span>分类</span>
           <select
             value={filters.category}
             onChange={(event) =>
@@ -104,7 +104,7 @@ export function LogList({
               })
             }
           >
-            <option value="all">All categories</option>
+            <option value="all">全部分类</option>
             {LOG_CATEGORIES.map((category) => (
               <option key={category} value={category}>
                 {category}
@@ -114,7 +114,7 @@ export function LogList({
         </label>
 
         <label className="monitor-field">
-          <span>Level</span>
+          <span>级别</span>
           <select
             value={filters.level}
             onChange={(event) =>
@@ -124,7 +124,7 @@ export function LogList({
               })
             }
           >
-            <option value="all">All levels</option>
+            <option value="all">全部级别</option>
             {LOG_LEVELS.map((level) => (
               <option key={level} value={level}>
                 {level}
@@ -134,7 +134,7 @@ export function LogList({
         </label>
 
         <label className="monitor-field">
-          <span>Window</span>
+          <span>时间窗口</span>
           <select
             value={filters.range}
             onChange={(event) =>
@@ -163,22 +163,22 @@ export function LogList({
                   className="log-table__sort"
                   onClick={() => toggleSort('timestamp')}
                 >
-                  Time <span aria-hidden="true">{sortIndicator('timestamp')}</span>
+                  时间 <span aria-hidden="true">{sortIndicator('timestamp')}</span>
                 </button>
               </th>
-              <th>Level</th>
-              <th>Category</th>
-              <th>Message</th>
+              <th>级别</th>
+              <th>分类</th>
+              <th>消息</th>
               <th aria-sort={ariaSort('durationMs')}>
                 <button
                   type="button"
                   className="log-table__sort"
                   onClick={() => toggleSort('durationMs')}
                 >
-                  Duration <span aria-hidden="true">{sortIndicator('durationMs')}</span>
+                  耗时 <span aria-hidden="true">{sortIndicator('durationMs')}</span>
                 </button>
               </th>
-              <th>Error / trace</th>
+              <th>错误 / 追踪</th>
             </tr>
           </thead>
           <tbody>
@@ -241,7 +241,7 @@ export function LogList({
 
         {visibleLogs.length === 0 ? (
           <p className="monitor-empty">
-            {loading ? 'Loading logs…' : 'No logs match the current filters.'}
+            {loading ? '加载日志中…' : '没有符合当前筛选条件的日志。'}
           </p>
         ) : null}
       </div>

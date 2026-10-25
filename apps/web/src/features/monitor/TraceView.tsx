@@ -62,7 +62,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
         setState({
           status: 'error',
           trace: null,
-          error: cause instanceof Error ? cause.message : 'Could not load trace',
+          error: cause instanceof Error ? cause.message : '无法加载追踪',
         });
       });
 
@@ -89,7 +89,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
   return (
     <section className="trace-view" aria-label="Trace detail">
       <div className="trace-view__header">
-        <h2 className="monitor-heading">Trace</h2>
+        <h2 className="monitor-heading">追踪</h2>
         {traceId ? (
           <span className="monitor-muted" title={traceId}>
             {shortenId(traceId, 12)}
@@ -103,7 +103,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
             onClick={() => setReloadToken((value) => value + 1)}
             disabled={state.status === 'loading'}
           >
-            Refresh
+            刷新
           </button>
         ) : null}
         {traceId ? (
@@ -111,7 +111,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
             type="button"
             className="monitor-button monitor-button--ghost"
             onClick={onClose}
-            aria-label="Close trace"
+            aria-label="关闭追踪"
           >
             ×
           </button>
@@ -120,13 +120,13 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
 
       <div className="trace-view__body">
         {traceId === null ? (
-          <p className="monitor-empty">Select a log with a trace to inspect its spans.</p>
+          <p className="monitor-empty">选择一个带有追踪的日志以查看其 spans。</p>
         ) : state.status === 'loading' ? (
-          <p className="monitor-empty">Loading trace…</p>
+          <p className="monitor-empty">加载追踪中…</p>
         ) : state.status === 'error' ? (
-          <p className="monitor-error">{state.error ?? 'Could not load trace'}</p>
+          <p className="monitor-error">{state.error ?? '无法加载追踪'}</p>
         ) : state.trace === null || state.trace.roots.length === 0 ? (
-          <p className="monitor-empty">No spans recorded for this trace.</p>
+          <p className="monitor-empty">此追踪没有记录任何 spans。</p>
         ) : (
           <ul className="trace-tree">
             {state.trace.roots.map((node) => (
@@ -166,7 +166,7 @@ function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
             type="button"
             className="trace-node__toggle"
             aria-expanded={isOpen}
-            aria-label={isOpen ? 'Collapse span' : 'Expand span'}
+            aria-label={isOpen ? '折叠 span' : '展开 span'}
             onClick={() => onToggle(log.id)}
           >
             {isOpen ? '▾' : '▸'}

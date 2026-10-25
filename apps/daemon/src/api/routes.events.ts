@@ -14,7 +14,7 @@ export function registerEventRoutes(
 
       if (!canvas) {
         return reply.code(404).send({
-          error: { code: 'canvas_not_found', message: 'Canvas not found' },
+          error: { code: 'canvas_not_found', message: '画布不存在' },
         });
       }
 
