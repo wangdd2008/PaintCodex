@@ -13,7 +13,7 @@ describe('POST /paint/ai/chat', () => {
         return 'Hello from Codex';
       },
     };
-    const app = buildServer({ runner });
+    const app = buildServer({ runner, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
@@ -41,7 +41,7 @@ describe('POST /paint/ai/chat', () => {
         return '';
       },
     };
-    const app = buildServer({ runner });
+    const app = buildServer({ runner, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
@@ -67,7 +67,7 @@ describe('POST /paint/ai/chat', () => {
         throw new Error('codex exploded');
       },
     };
-    const app = buildServer({ runner });
+    const app = buildServer({ runner, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',

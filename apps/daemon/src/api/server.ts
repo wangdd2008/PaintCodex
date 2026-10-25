@@ -1,9 +1,16 @@
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { AiChatRequest } from '@paintcodex/protocol';
+import { registerPaintRoutes } from './routes.paint.js';
 import { createCodexRunner, type CodexRunner } from '../paint/agent/codex-runner.js';
 import { buildAiChatPrompt } from '../paint/agent/prompt.js';
+import { CanvasRepository } from '../paint/repository.js';
+import { PaintService } from '../paint/service.js';
+import { openDatabase } from '../storage/database.js';
 
-export interface BuildServerOptions {
+export interface ServerOptions {
+  dbPath?: string;
+  logger?: boolean;
   /** Injectable Codex seam; tests pass a fake so no CLI is spawned. */
   runner?: CodexRunner;
 }
@@ -27,11 +34,22 @@ function errorMessage(error: unknown): string {
   return message.slice(0, 1000);
 }
 
-export function buildServer(options: BuildServerOptions = {}): FastifyInstance {
-  const app = Fastify({ logger: false });
+export function defaultDbPath(): string {
+  return process.env.PAINTCODEX_DB ?? join(process.cwd(), 'data', 'paintcodex.db');
+}
+
+export function buildServer(options: ServerOptions = {}): FastifyInstance {
+  const db = openDatabase(options.dbPath ?? defaultDbPath());
+  const service = new PaintService(new CanvasRepository(db));
+  const app = Fastify({ logger: options.logger ?? false });
   const runner = options.runner ?? createCodexRunner();
 
+  app.addHook('onClose', async () => {
+    db.close();
+  });
+
   app.get('/health', async () => ({ ok: true }));
+  registerPaintRoutes(app, service);
 
   app.post('/paint/ai/chat', async (request, reply) => {
     const body: unknown = request.body;
