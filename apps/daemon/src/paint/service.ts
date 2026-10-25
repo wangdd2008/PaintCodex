@@ -58,6 +58,13 @@ export class PaintService {
       history: { canUndo: false, canRedo: false },
     };
     this.recordSnapshot(canvas.id, canvas.revision, 'user', 'canvas_create', document);
+    this.logCanvasAction({
+      message: 'canvas_create',
+      canvasId: canvas.id,
+      revision: 0,
+      actor: 'user',
+      payload: { name: canvas.name, width: canvas.width, height: canvas.height },
+    });
 
     return document;
   }
@@ -78,13 +85,17 @@ export class PaintService {
     this.assertRevision(canvas, request.expectedRevision);
     this.prepareHistory(canvas);
 
+    let createdLayerId: string | null = null;
+
     switch (request.action.type) {
       case 'canvas_create_layer': {
         const input = request.action.layer;
         const now = Date.now();
+        const layerId = randomUUID();
 
+        createdLayerId = layerId;
         this.layers.insert({
-          id: randomUUID(),
+          id: layerId,
           canvasId,
           name: input.name,
           type: input.type,
@@ -142,6 +153,16 @@ export class PaintService {
       updated,
     );
     this.events.publishSnapshot(canvasId, bumped.revision);
+    this.logCanvasAction({
+      message: actionLogMessage(request.action.type),
+      canvasId,
+      revision: bumped.revision,
+      actor: request.actor,
+      payload:
+        request.action.type === 'canvas_create_layer'
+          ? { layerId: createdLayerId, layerType: request.action.layer.type }
+          : { layerId: request.action.layerId },
+    });
 
     return updated;
   }
@@ -173,6 +194,13 @@ export class PaintService {
 
     const updated = this.getCanvas(canvasId)!;
     this.events.publishSnapshot(canvasId, bumped.revision);
+    this.logCanvasAction({
+      message: 'undo',
+      canvasId,
+      revision: bumped.revision,
+      actor: 'user',
+      payload: { restoredRevision: target.revision },
+    });
 
     return updated;
   }
@@ -204,8 +232,29 @@ export class PaintService {
 
     const updated = this.getCanvas(canvasId)!;
     this.events.publishSnapshot(canvasId, bumped.revision);
+    this.logCanvasAction({
+      message: 'redo',
+      canvasId,
+      revision: bumped.revision,
+      actor: 'user',
+      payload: { restoredRevision: target.revision },
+    });
 
     return updated;
+  }
+
+  private logCanvasAction(input: {
+    message: string;
+    canvasId: string;
+    revision: number;
+    actor: Actor;
+    payload: unknown;
+  }): void {
+    this.observability?.log({
+      category: 'canvas-action',
+      level: 'info',
+      ...input,
+    });
   }
 
   private prepareHistory(canvas: CanvasRecord): void {
@@ -285,6 +334,19 @@ export class PaintService {
     if (expectedRevision !== undefined && expectedRevision !== canvas.revision) {
       throw new RevisionConflictError(expectedRevision, canvas.revision);
     }
+  }
+}
+
+function actionLogMessage(
+  type: 'canvas_create_layer' | 'canvas_update_layer' | 'canvas_delete_layer',
+): string {
+  switch (type) {
+    case 'canvas_create_layer':
+      return 'layer_create';
+    case 'canvas_update_layer':
+      return 'layer_update';
+    case 'canvas_delete_layer':
+      return 'layer_delete';
   }
 }
 
