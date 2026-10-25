@@ -1,17 +1,41 @@
+import { useEffect } from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { Toolbox } from '../features/toolbox/Toolbox';
+import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 
 export function App() {
+  const canvas = useCanvasStore((state) => state.canvas);
+  const status = useCanvasStore((state) => state.status);
+  const error = useCanvasStore((state) => state.error);
+  const createNewCanvas = useCanvasStore((state) => state.createNewCanvas);
+  const loadCanvas = useCanvasStore((state) => state.loadCanvas);
+
+  useEffect(() => {
+    const canvasId = readRememberedCanvasId();
+
+    if (canvasId) {
+      void loadCanvas(canvasId);
+    }
+  }, [loadCanvas]);
+
   return (
     <div className="app-shell">
       <header className="menu-bar">
         <span className="brand">PaintCodex</span>
-        <button type="button" className="menu-button">
-          New Canvas
+        {canvas ? <span className="document-name">{canvas.name}</span> : null}
+        <span className="menu-spacer" />
+        {error ? <span className="menu-status">{error}</span> : null}
+        <button
+          type="button"
+          className="menu-button"
+          onClick={() => void createNewCanvas()}
+          disabled={status === 'loading'}
+        >
+          {status === 'loading' ? 'Working…' : 'New Canvas'}
         </button>
-        <button type="button" className="menu-button">
+        <button type="button" className="menu-button" disabled>
           Export PNG
         </button>
       </header>
@@ -19,7 +43,7 @@ export function App() {
       <div className="workspace">
         <Toolbox />
         <main className="canvas-area">
-          <CanvasStage />
+          <CanvasStage key={canvas?.id ?? 'blank'} />
         </main>
         <aside className="side-panel">
           <LayerPanel />
@@ -28,7 +52,7 @@ export function App() {
       </div>
 
       <footer className="status-bar">
-        <span>1920 × 1080</span>
+        <span>{canvas ? `${canvas.width} × ${canvas.height}` : 'No canvas'}</span>
         <span>Zoom: 100%</span>
         <span>Brush</span>
       </footer>

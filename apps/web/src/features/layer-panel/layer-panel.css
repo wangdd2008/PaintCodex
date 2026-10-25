@@ -17,3 +17,40 @@
   color: #747785;
   font-size: 13px;
 }
+
+.layer-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #2c2d33;
+  border-radius: 6px;
+  background: #1b1c21;
+  font-size: 13px;
+}
+
+.layer-item__visibility {
+  color: #7f9ce0;
+  font-size: 10px;
+}
+
+.layer-item__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-item__type {
+  color: #747785;
+  font-size: 11px;
+}
