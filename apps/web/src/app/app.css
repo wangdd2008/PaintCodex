@@ -24,6 +24,20 @@ button {
   height: 100vh;
 }
 
+.app-shell--monitor {
+  grid-template-rows: 44px minmax(0, 1fr);
+}
+
+.app-hidden {
+  display: none !important;
+}
+
+.monitor-area {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .menu-bar {
   display: flex;
   align-items: center;

@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
+import { MonitorPage } from '../features/monitor/MonitorPage';
 import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
+import { buildViewUrl, readViewFromSearch, type AppView } from './view-route';
 
 export function App() {
   const canvas = useCanvasStore((state) => state.canvas);
@@ -18,6 +20,7 @@ export function App() {
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
   const tool = useToolStore((state) => state.tool);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
 
   useEffect(() => {
     const canvasId = readRememberedCanvasId();
@@ -51,7 +54,21 @@ export function App() {
   }, [canvasId, refreshCanvas]);
 
   useEffect(() => {
+    function handlePopState() {
+      setView(readViewFromSearch(window.location.search));
+    }
+
+    window.addEventListener('popstate', handlePopState);
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (view !== 'canvas') {
+        return;
+      }
+
       if (!(event.ctrlKey || event.metaKey) || event.altKey) {
         return;
       }
@@ -90,7 +107,20 @@ export function App() {
     window.addEventListener('keydown', handleKeyDown);
 
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [view]);
+
+  function navigate(next: AppView) {
+    if (next === view) {
+      return;
+    }
+
+    window.history.pushState(
+      { page: next },
+      '',
+      buildViewUrl(window.location.href, next),
+    );
+    setView(next);
+  }
 
   function handleExportPng() {
     if (!canvas) {
@@ -116,31 +146,51 @@ export function App() {
   const menuMessage = error ?? exportError;
 
   return (
-    <div className="app-shell">
+    <div className={view === 'monitor' ? 'app-shell app-shell--monitor' : 'app-shell'}>
       <header className="menu-bar">
         <span className="brand">PaintCodex</span>
-        {canvas ? <span className="document-name">{canvas.name}</span> : null}
+        {view === 'canvas' && canvas ? (
+          <span className="document-name">{canvas.name}</span>
+        ) : null}
         <span className="menu-spacer" />
-        {menuMessage ? <span className="menu-status">{menuMessage}</span> : null}
+        {view === 'canvas' && menuMessage ? (
+          <span className="menu-status">{menuMessage}</span>
+        ) : null}
+        {view === 'canvas' ? (
+          <>
+            <button
+              type="button"
+              className="menu-button"
+              onClick={() => void createNewCanvas()}
+              disabled={status === 'loading'}
+            >
+              {status === 'loading' ? 'Working…' : 'New Canvas'}
+            </button>
+            <button
+              type="button"
+              className="menu-button"
+              onClick={handleExportPng}
+              disabled={!canvas}
+            >
+              Export PNG
+            </button>
+          </>
+        ) : null}
         <button
           type="button"
           className="menu-button"
-          onClick={() => void createNewCanvas()}
-          disabled={status === 'loading'}
+          onClick={() => navigate(view === 'monitor' ? 'canvas' : 'monitor')}
+          aria-current={view === 'monitor' ? 'page' : undefined}
         >
-          {status === 'loading' ? 'Working…' : 'New Canvas'}
-        </button>
-        <button
-          type="button"
-          className="menu-button"
-          onClick={handleExportPng}
-          disabled={!canvas}
-        >
-          Export PNG
+          {view === 'monitor' ? 'Back to Canvas' : 'Monitor'}
         </button>
       </header>
 
-      <div className="workspace">
+      {/*
+        The workspace stays mounted while monitoring so an in-flight AI chat
+        and the canvas state survive the view switch.
+      */}
+      <div className={view === 'monitor' ? 'workspace app-hidden' : 'workspace'}>
         <Toolbox />
         <main className="canvas-area">
           <CanvasStage key={canvas?.id ?? 'blank'} />
@@ -151,11 +201,19 @@ export function App() {
         </aside>
       </div>
 
-      <footer className="status-bar">
-        <span>{canvas ? `${canvas.width} × ${canvas.height}` : 'No canvas'}</span>
-        <span>Zoom: 100%</span>
-        <span>{tool === 'brush' ? 'Brush' : 'Select'}</span>
-      </footer>
+      {view === 'monitor' ? (
+        <main className="monitor-area">
+          <MonitorPage />
+        </main>
+      ) : null}
+
+      {view === 'canvas' ? (
+        <footer className="status-bar">
+          <span>{canvas ? `${canvas.width} × ${canvas.height}` : 'No canvas'}</span>
+          <span>Zoom: 100%</span>
+          <span>{tool === 'brush' ? 'Brush' : 'Select'}</span>
+        </footer>
+      ) : null}
     </div>
   );
 }
