@@ -234,6 +234,9 @@ importers:
       vite:
         specifier: ^7.0.0
         version: 7.3.7(@types/node@24.19.2)(tsx@4.23.15)
+      vitest:
+        specifier: ^3.2.0
+        version: 3.2.7(@types/node@24.19.2)(jsdom@20.0.3(canvas@2.11.2))(tsx@4.23.15)
 
   packages/protocol: {}
 

@@ -8,6 +8,7 @@ import {
   type FabricObject,
   type Path,
 } from 'fabric';
+import { setActiveCanvas } from '../../services/canvas-engine';
 import { useCanvasStore } from '../../services/canvas-store';
 import { useToolStore } from '../../services/tool-store';
 
@@ -45,6 +46,7 @@ export function CanvasStage() {
       preserveObjectStacking: true,
     });
     fabricRef.current = canvas;
+    setActiveCanvas(canvas);
     canvas.isDrawingMode = useToolStore.getState().tool === 'brush';
     canvas.selection = false;
 
@@ -97,6 +99,7 @@ export function CanvasStage() {
       objectsRef.current.clear();
       pendingJsonRef.current.clear();
       fabricRef.current = null;
+      setActiveCanvas(null);
       canvas.off('path:created', handlePathCreated);
       void canvas.dispose();
     };
