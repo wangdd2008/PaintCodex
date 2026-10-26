@@ -77,12 +77,13 @@ export function CanvasStage() {
   /**
    * Guard against double activation (keyboard plus the browser's synthetic
    * click): `createNewCanvas` flips the status synchronously, so the second
-   * call sees "loading" and does nothing.
+   * call sees "loading" and does nothing. A stale document must not block
+   * "new canvas" from the failure gate.
    */
   const startCanvas = () => {
     const state = useCanvasStore.getState();
 
-    if (state.canvas || state.status === 'loading') {
+    if (state.status === 'loading') {
       return;
     }
 
@@ -92,7 +93,7 @@ export function CanvasStage() {
   const retry = () => {
     const state = useCanvasStore.getState();
 
-    if (state.canvas || state.status === 'loading') {
+    if (state.status === 'loading') {
       return;
     }
 
@@ -103,7 +104,9 @@ export function CanvasStage() {
     }
   };
 
-  if (canvasDocument) {
+  // 只有 ready 才挂载 Fabric。loading/error 时即使旧文档仍在 Store 里，
+  // 也不能让它继续接受指针事件；正常刷新（refreshCanvas 不置 loading）不会走到这里。
+  if (status === 'ready' && canvasDocument) {
     return <CanvasSurface canvasDocument={canvasDocument} />;
   }
 

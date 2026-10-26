@@ -135,14 +135,18 @@ function resetSaveState(): SaveReset {
   };
 }
 
-/** 传输层失败折成中文可执行的原因；daemon 已经给出的中文原样保留。 */
-function describeSaveFailure(error: unknown, fallback: string): string {
-  if (error instanceof ApiError) {
-    return error.message;
-  }
-
+/**
+ * 所有用户可见错误都从这里出站：网络失败给统一中文提示，daemon 已经给出的
+ * 中文 message 原样保留，其余（含只有英文 message 的运行时错误）落到调用点
+ * 的中文兜底，避免 `Failed to fetch` 之类的文案漏到界面上。
+ */
+export function describeCanvasError(error: unknown, fallback: string): string {
   if (isNetworkFailure(error)) {
     return NETWORK_FAILURE_MESSAGE;
+  }
+
+  if (error instanceof ApiError) {
+    return CHINESE_PATTERN.test(error.message) ? error.message : fallback;
   }
 
   if (error instanceof Error && CHINESE_PATTERN.test(error.message)) {
@@ -226,7 +230,7 @@ async function runMutation<T>(
     finishMutationSuccess(set, get);
     return result;
   } catch (error) {
-    finishMutationFailure(set, get, describeSaveFailure(error, fallbackError));
+    finishMutationFailure(set, get, describeCanvasError(error, fallbackError));
     throw error;
   }
 }
@@ -387,7 +391,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({
         status: previous ? 'ready' : 'error',
         requestedCanvasId: previous?.id ?? null,
-        error: error instanceof Error ? error.message : '无法创建画布',
+        error: describeCanvasError(error, '无法创建画布'),
       });
     }
   },
@@ -417,15 +421,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     } catch (error) {
       // 返回失败不能把当前文档一起拖下水。
       const missing = error instanceof ApiError && error.status === 404;
-      let message = '无法返回上一张画布';
-
-      if (error instanceof Error) {
-        message = error.message;
-      }
-
-      if (missing) {
-        message = '上一张画布不存在，可能已被删除。';
-      }
+      const message = missing
+        ? '上一张画布不存在，可能已被删除。'
+        : describeCanvasError(error, '无法返回上一张画布');
 
       set({
         canvas: current,
@@ -484,7 +482,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       set({
         canvas: null,
         status: 'error',
-        error: error instanceof Error ? error.message : '无法加载画布',
+        error: describeCanvasError(error, '无法加载画布'),
         requestedCanvasId: id,
       });
     }
@@ -508,7 +506,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       // 刷新成功不能清掉横幅：横幅描述的是 mutation，而这里只是一次读取。
       // 刷新失败也只更新摘要错误。
       set({
-        error: error instanceof Error ? error.message : '无法刷新画布',
+        error: describeCanvasError(error, '无法刷新画布'),
       });
     }
   },

@@ -150,6 +150,51 @@ describe('CanvasStage 加载中', () => {
     expect(screen.getByText('正在加载画布…')).toBeTruthy();
     expect(container.querySelector('canvas')).toBeNull();
   });
+
+  it('旧文档仍在时也不挂载可交互画布', () => {
+    useCanvasStore.setState({ canvas: canvasDocument(), status: 'loading' });
+    const { container } = render(<CanvasStage />);
+
+    expect(screen.getByText('正在加载画布…')).toBeTruthy();
+    expect(container.querySelector('canvas')).toBeNull();
+    expect(container.querySelector('.canvas-frame')).toBeNull();
+  });
+});
+
+describe('CanvasStage 只有 ready 才挂载画布', () => {
+  it('加载失败且旧文档仍在时，显示失败门而不是旧画布，且可重试', async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL) =>
+      jsonResponse(canvasDocument()),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    useCanvasStore.setState({
+      canvas: canvasDocument(),
+      status: 'error',
+      error: '画布不存在，可能已被删除。',
+      requestedCanvasId: 'canvas-1',
+    });
+
+    const { container } = render(<CanvasStage />);
+
+    expect(container.querySelector('canvas')).toBeNull();
+    expect(screen.getByText('画布加载失败')).toBeTruthy();
+    expect(screen.getByText('画布不存在，可能已被删除。')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '重试' }));
+
+    await waitFor(() => expect(useCanvasStore.getState().status).toBe('ready'));
+    await waitFor(() => expect(container.querySelector('canvas')).toBeTruthy());
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/paint/canvas/canvas-1');
+  });
+
+  it('就绪时渲染画布', async () => {
+    useCanvasStore.setState({ canvas: canvasDocument(), status: 'ready' });
+    const { container } = render(<CanvasStage />);
+
+    await waitFor(() => expect(container.querySelector('canvas')).toBeTruthy());
+    expect(screen.queryByText('正在加载画布…')).toBeNull();
+    expect(screen.queryByText('画布加载失败')).toBeNull();
+  });
 });
 
 describe('CanvasStage 加载失败', () => {
@@ -170,6 +215,7 @@ describe('CanvasStage 加载失败', () => {
     expect(container.querySelector('canvas')).toBeNull();
     expect(screen.getByText('画布加载失败')).toBeTruthy();
     expect(screen.getByText(/无法连接本地服务/)).toBeTruthy();
+    expect(container.textContent).not.toContain('Failed to fetch');
     expect(screen.getByRole('button', { name: '重试' })).toBeTruthy();
     expect(screen.getByRole('button', { name: '新建画布' })).toBeTruthy();
 

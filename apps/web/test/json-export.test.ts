@@ -7,6 +7,21 @@ describe('canvasJsonFilename', () => {
     expect(canvasJsonFilename('Sunset Study')).toBe('Sunset-Study.json');
   });
 
+  it('appends the first 8 characters of the canvas id', () => {
+    expect(canvasJsonFilename('未命名 2026-10-27 00:50', '3f9a1c2d-aaaa-bbbb')).toBe(
+      '未命名-2026-10-27-0050-3f9a1c2d.json',
+    );
+    expect(canvasJsonFilename('A', '1234567890')).toBe('A-12345678.json');
+  });
+
+  it('keeps same-name canvases from overwriting each other', () => {
+    const name = '未命名 2026-10-27 00:50';
+
+    expect(canvasJsonFilename(name, '3f9a1c2d-aaaa')).not.toBe(
+      canvasJsonFilename(name, '9b8c7d6e-bbbb'),
+    );
+  });
+
   it('strips characters that are illegal on Windows', () => {
     expect(canvasJsonFilename('a\\b/c:d*e?f"g<h>i|j')).toBe('abcdefghij.json');
   });
@@ -19,6 +34,12 @@ describe('canvasJsonFilename', () => {
     expect(canvasJsonFilename('   ')).toBe('paintcodex.json');
     expect(canvasJsonFilename('')).toBe('paintcodex.json');
     expect(canvasJsonFilename(null)).toBe('paintcodex.json');
+  });
+
+  it('keeps the fallback basename when the name is empty but an id exists', () => {
+    expect(canvasJsonFilename('   ', '3f9a1c2d-aaaa')).toBe(
+      'paintcodex-3f9a1c2d.json',
+    );
   });
 
   it('does not add a second json extension', () => {

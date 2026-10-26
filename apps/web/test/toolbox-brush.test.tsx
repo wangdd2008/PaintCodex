@@ -89,7 +89,7 @@ describe('画笔粗细', () => {
     }
   });
 
-  it('defaults to width 6 with no preset selected', () => {
+  it('defaults to width 6 with the default width visibly and accessibly selected', () => {
     render(<Toolbox />);
 
     expect(useToolStore.getState().brushWidth).toBe(6);
@@ -100,6 +100,10 @@ describe('画笔粗细', () => {
           .getAttribute('aria-pressed'),
       ).toBe('false');
     }
+
+    const defaultWidth = screen.getByRole('button', { name: '笔宽 6（默认）' });
+    expect(defaultWidth.getAttribute('aria-pressed')).toBe('true');
+    expect(defaultWidth.textContent).toContain('6');
   });
 
   it('switches the session width when a preset is clicked', () => {
@@ -112,5 +116,20 @@ describe('画笔粗细', () => {
       screen.getByRole('button', { name: '笔宽 8' }).getAttribute('aria-pressed'),
     ).toBe('true');
     expect(window.localStorage.length).toBe(0);
+  });
+
+  it('after clicking 8, exactly 8 is selected and the default item is gone', () => {
+    render(<Toolbox />);
+
+    fireEvent.click(screen.getByRole('button', { name: '笔宽 8' }));
+
+    const widthsGroup = screen.getByRole('group', { name: '画笔粗细' });
+    const pressed = Array.from(
+      widthsGroup.querySelectorAll('button[aria-pressed="true"]'),
+    );
+
+    expect(pressed).toHaveLength(1);
+    expect(pressed[0]?.getAttribute('aria-label')).toBe('笔宽 8');
+    expect(screen.queryByRole('button', { name: '笔宽 6（默认）' })).toBeNull();
   });
 });

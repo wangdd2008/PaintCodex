@@ -1,7 +1,7 @@
 import { MAX_CANVAS_NAME_LENGTH } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { displayCanvasName } from '../../services/naming';
-import { useCanvasStore } from '../../services/canvas-store';
+import { describeCanvasError, useCanvasStore } from '../../services/canvas-store';
 import './canvas-name.css';
 
 /**
@@ -70,7 +70,7 @@ export function CanvasNameEditor() {
     } catch (caught) {
       // 失败回滚显示并就地提示，不出现「界面改了但服务端没改」。
       setDraft(originalDisplay);
-      setError(caught instanceof Error ? caught.message : '画布改名失败');
+      setError(describeCanvasError(caught, '画布改名失败'));
     } finally {
       setSaving(false);
     }
