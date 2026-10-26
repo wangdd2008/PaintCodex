@@ -41,6 +41,6 @@
 
 **2026-10-26 — 合并后补记**
 
-- 合并 `feat/release-hardening` 最新 `3bd18f1`（含票 13 连接状态指示）：merge commit `38be2fc`，无冲突。
-- 合并后门禁：`pnpm --filter @paintcodex/web test` → **21 文件 / 150 passed**（本票 6 条全过）；`pnpm -r typecheck` 三包全绿。
+- 合并 `feat/release-hardening` 最新 `6e7e7b7`（含票 13 连接状态、票 11 AI 等待）：merge commit `48c6df0`，无冲突。
+- 合并后门禁：`pnpm --filter @paintcodex/web test` → **22 文件 / 155 passed**（本票 6 条全过）；`pnpm -r typecheck` 三包全绿。
 
