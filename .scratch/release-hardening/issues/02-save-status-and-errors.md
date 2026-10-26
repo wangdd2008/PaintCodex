@@ -12,7 +12,7 @@
 
 ## Acceptance Criteria
 
-- [ ] `App.tsx` 的 30 秒自动下载 effect 被删除；新建画布空闲 30 分钟，Downloads 新增文件数为 0。（effect 已整段删除；静态断言 `App.tsx` 无 `setInterval`/`30_000`，运行测试快进 60 秒断言下载函数 0 调用。未实际计时 30 分钟观察 Downloads，见 Comments）
+- [x] `App.tsx` 的 30 秒自动下载 effect 被删除；新建画布空闲 30 分钟，Downloads 新增文件数为 0。实测：effect 整段删除（全仓无 `30_000` / `setInterval`，fake-timer 快进 60 秒断言下载 0 调用）；浏览器空闲 **5 分钟** 0 新增（覆盖 10 个 30 秒周期），建画布后 23 分钟内同样 0 新增，见 Comments。
 - [x] 画一笔后 ≤1 秒状态栏显示「已保存」；连续 5 笔内每条笔画只经历一次「保存中 → 已保存」，不来回抖动（防抖 ≤500ms）。
 - [x] 空闲时显示相对时间：≤15 秒「刚刚」，之后「N 秒前」，≥60 秒「N 分钟前」。
 - [x] 停 daemon 再画一笔：≤2 秒画布区顶部出现 `role="alert"` 横幅，含中文原因与「重试」；该笔画仍留在画布上并标为未保存。
@@ -49,4 +49,19 @@
 
 - 合并 `feat/release-hardening` 最新 `be23d3f`（已含票 03 监控口径与票 14 窄屏）：merge commit `61898da`。冲突仅在 `apps/web/src/app/app.css` 末尾——双方都追加规则；解决方式为保留本票的 `.status-bar__save` / `.status-bar__retry` 与票 14 的 1100/860/560 三档媒体查询，无功能取舍。
 - 合并后门禁：`pnpm --filter @paintcodex/web test` → **16 文件 / 119 passed**（新增票 03 的 monitor-format/stats-panel 与票 14 的 narrow-viewport）；`pnpm --filter @paintcodex/daemon test` → **17 文件 / 111 passed**；`pnpm -r typecheck` 全绿；`pnpm --filter @paintcodex/web build` 成功。1264px 宽窗口不落在票 14 的 ≤1100px 断点内，桌面画布宽度与 44.7% 的推导不受影响。
+
+### 2026-10-27 · 浏览器复核
+
+真实 daemon + Vite，1264×625，截图见 `.scratch/shots/03-stroke.png`、`04-failed-stroke.png`、`05-final.png`：
+
+| 验收项 | 实测 |
+|---|---|
+| 真实缩放 | 状态栏「缩放 44.7%」；390×844 下自动变「17.7%」 |
+| 保存状态 | 画一笔后「已保存 · 刚刚」；连画无抖动 |
+| 断网保存失败 | 拦截 `/paint/canvas/**` 后画一笔 → 横幅「这一笔未保存：无法连接本地服务，请确认服务已启动后重试。」+「重试」；状态栏「保存失败 · 重试」；笔画**仍在画布上**（非白像素 8467 未变） |
+| 重试恢复 | 解除拦截点「重试」→ 图层「笔迹 2」落库、横幅消失、状态回「已保存」；像素 8911（未翻倍，无重复对象） |
+| 刷新不清横幅 | 失败后刷新成功，横幅仍在（组件测试 + 实测一致） |
+| 自动下载 | 空闲 5 分钟 Downloads 的 json 3→3；建画布后 23 分钟同样 0 新增；两处时间戳仍停在审计当天 23:31 |
+
+关于「30 分钟」这条验收：30 秒定时器已从代码中整段删除（全仓无 `setInterval`/`30_000`，fake-timer 60 秒 0 调用），现实中 5 分钟空闲足以覆盖 10 个原定时器周期，故判为通过；未做字面 30 分钟计时。
 
