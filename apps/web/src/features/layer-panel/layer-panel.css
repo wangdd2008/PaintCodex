@@ -37,10 +37,14 @@
 }
 
 .layer-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
+  /* 38px = 28px 行内控件 + 上下各 4px 内边距 + 2px 边框。 */
+  box-sizing: border-box;
+  min-height: 38px;
+  padding: 4px 10px;
   border: 1px solid #2c2d33;
   border-radius: 6px;
   background: #1b1c21;
@@ -53,24 +57,80 @@
   background: #23314f;
 }
 
+/* 命中区 28×28：靠固定尺寸扩展热区，字形仍是 16px 图标 / 11px 字号。 */
 .layer-item__visibility {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: #7f9ce0;
-  padding: 0;
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
 }
 
+.layer-item__visibility:hover {
+  background: #2a2c35;
+  color: #b9ccf5;
+}
+
+/* 隐藏态：颜色变淡之外，图标本身叠加斜线。 */
+.layer-item__visibility[aria-pressed='false'] {
+  color: #6c7080;
+}
+
+.layer-item__visibility[aria-pressed='false']:hover {
+  color: #9aa2b5;
+}
+
+.layer-item__icon {
+  display: block;
+}
+
+/* 悬停与键盘聚焦时出现文字提示；tooltip 是装饰，读屏靠 aria-label/aria-pressed。 */
+.layer-item__tooltip {
+  position: absolute;
+  left: 46px;
+  top: 50%;
+  z-index: 2;
+  transform: translateY(-50%);
+  padding: 3px 8px;
+  border: 1px solid #3a3c45;
+  border-radius: 4px;
+  background: #26272e;
+  color: #e6e8ef;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.layer-item__visibility:hover + .layer-item__tooltip,
+.layer-item__visibility:focus-visible + .layer-item__tooltip {
+  opacity: 1;
+}
+
 .layer-item__name {
   flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .layer-item__type {
+  flex: 0 0 auto;
   color: #747785;
   font-size: 11px;
 }
@@ -79,17 +139,35 @@
   color: #b18cff;
 }
 
+/* 命中区 24×24；字形保持 16px。 */
 .layer-item__delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: #9a9daa;
-  padding: 0 2px;
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
+.layer-item__visibility:focus-visible,
+.layer-item__delete:focus-visible {
+  outline: 2px solid #5b8def;
+  outline-offset: 2px;
+}
+
 .layer-item__delete:hover:not(:disabled) {
+  background: #2a2c35;
   color: #e07a7a;
 }
 

@@ -1,6 +1,6 @@
 import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { useCanvasStore } from '../../services/canvas-store';
+import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
 import './ai-chat.css';
 
 interface ChatMessage {
@@ -22,6 +22,29 @@ function userFacingError(message: string): string {
   return /Codex CLI timed out after \d+ms/.test(message)
     ? '请求超时，请重试'
     : message;
+}
+
+/**
+ * AI actions always need a canvas to land on. Explaining why the composer is
+ * disabled keeps the assistant from promising layers with nowhere to put them.
+ */
+function composerBlockedReason(
+  hasCanvas: boolean,
+  status: CanvasStatus,
+): string | null {
+  if (hasCanvas) {
+    return null;
+  }
+
+  if (status === 'loading') {
+    return '画布正在加载，请稍候。';
+  }
+
+  if (status === 'error') {
+    return '画布加载失败，请先重试或新建一张画布。';
+  }
+
+  return '先新建一张画布，再让 AI 作画。';
 }
 
 /** Hides the machine-readable canvas action from the chat bubble. */
@@ -61,6 +84,9 @@ export function AiChatPanel() {
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<ChatStep | null>(null);
+  const canvas = useCanvasStore((state) => state.canvas);
+  const status = useCanvasStore((state) => state.status);
+  const blockedReason = composerBlockedReason(canvas !== null, status);
 
   const nextId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
@@ -138,6 +164,10 @@ export function AiChatPanel() {
 
     const message = input.trim();
     if (message.length === 0 || inFlight) {
+      return;
+    }
+
+    if (!useCanvasStore.getState().canvas) {
       return;
     }
 
@@ -317,6 +347,12 @@ export function AiChatPanel() {
             </p>
           ) : null}
 
+          {blockedReason ? (
+            <p className="ai-chat__blocked" role="status">
+              {blockedReason}
+            </p>
+          ) : null}
+
           <form className="ai-chat__composer" onSubmit={(event) => void send(event)}>
             <textarea
               className="ai-chat__input"
@@ -325,7 +361,7 @@ export function AiChatPanel() {
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={inFlight}
+              disabled={inFlight || blockedReason !== null}
             />
             <div className="ai-chat__actions">
               {/* Draft actions stay hidden while a request runs, so the cancel
@@ -347,7 +383,7 @@ export function AiChatPanel() {
                 <button
                   type="submit"
                   className="ai-chat__send"
-                  disabled={input.trim().length === 0}
+                  disabled={input.trim().length === 0 || blockedReason !== null}
                 >
                   发送
                 </button>

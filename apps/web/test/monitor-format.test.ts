@@ -4,7 +4,10 @@ import {
   DEFAULT_LOG_FILTERS,
   DEFAULT_LOG_SORT,
   filterLogs,
+  formatAiChatHint,
   formatDuration,
+  formatErrorBreakdown,
+  formatHttpErrorHint,
   formatPercent,
   formatTimestamp,
   mergeLogs,
@@ -85,8 +88,70 @@ describe('formatPercent', () => {
     expect(formatPercent(1)).toBe('100.0%');
   });
 
-  it('renders invalid ratios as a dash', () => {
+  it('renders invalid or unknown ratios as a dash', () => {
     expect(formatPercent(Number.NaN)).toBe('—');
+    expect(formatPercent(null)).toBe('—');
+  });
+});
+
+describe('formatHttpErrorHint', () => {
+  it('writes the failure and conflict numerators over the request denominator', () => {
+    expect(
+      formatHttpErrorHint({
+        httpFailureCount: 0,
+        httpConflictCount: 2,
+        requestCount: 24,
+      }),
+    ).toBe('0 失败 · 2 冲突 / 24 请求');
+  });
+
+  it('keeps a zero denominator explicit', () => {
+    expect(
+      formatHttpErrorHint({
+        httpFailureCount: 0,
+        httpConflictCount: 0,
+        requestCount: 0,
+      }),
+    ).toBe('0 失败 · 0 冲突 / 0 请求');
+  });
+});
+
+describe('formatAiChatHint', () => {
+  it('shows successes over non-aborted chats plus the cancellation count', () => {
+    expect(
+      formatAiChatHint({
+        aiChatSuccessCount: 1,
+        aiChatCount: 1,
+        aiChatAbortedCount: 1,
+      }),
+    ).toBe('1/1 次对话 · 1 取消');
+  });
+});
+
+describe('formatErrorBreakdown', () => {
+  it('lists only categories that reported errors', () => {
+    expect(
+      formatErrorBreakdown([
+        { category: 'http', count: 24, errorCount: 0 },
+        { category: 'ai-chat', count: 2, errorCount: 1 },
+        { category: 'system', count: 3, errorCount: 0 },
+      ]),
+    ).toBe('ai-chat 1');
+  });
+
+  it('orders categories by error count and joins them', () => {
+    expect(
+      formatErrorBreakdown([
+        { category: 'http', count: 24, errorCount: 1 },
+        { category: 'ai-chat', count: 2, errorCount: 3 },
+      ]),
+    ).toBe('ai-chat 3 · http 1');
+  });
+
+  it('returns null when nothing errored', () => {
+    expect(
+      formatErrorBreakdown([{ category: 'http', count: 24, errorCount: 0 }]),
+    ).toBeNull();
   });
 });
 
