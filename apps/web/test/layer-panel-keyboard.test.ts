@@ -382,6 +382,10 @@ describe('图层行的键盘导航与选中', () => {
     fireEvent.keyDown(visibility, { key: ' ' });
     expect(useCanvasStore.getState().activeLayerId).toBe(before);
 
+    // 票 02 的 ≤500ms 保存防抖期间 `saving` 仍为 true，删除按钮按设计禁用；
+    // 合并两票后先等防抖结束，再断言删除仍走确认交互。
+    await waitFor(() => expect(useCanvasStore.getState().saving).toBe(false));
+
     fireEvent.click(screen.getByRole('button', { name: '删除 笔迹 2' }));
     expect(confirmSpy).toHaveBeenCalled();
     expect(useCanvasStore.getState().activeLayerId).toBe(before);
