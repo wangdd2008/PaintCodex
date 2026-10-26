@@ -39,3 +39,9 @@
 - **门禁数字**：`pnpm --filter @paintcodex/web test` → **20 文件 / 144 条，143 passed / 1 failed**；唯一失败为 `test/layer-panel-keyboard.test.ts > 行内可见性与删除按钮不会触发整行选中`（期望 `window.confirm` 被调用，但票 02 的保存态让删除按钮在可见性 mutation 的 500ms 防抖期内保持 disabled）。该失败在合并基线 `a1745e2` 上以 `git stash` 复跑同样失败，属票 02 与票 08 的既有交叉问题，不在本票范围，未修改。`pnpm -r typecheck` 三包全绿。
 - **需人工/浏览器复核**：① 真实 daemon 下 20 秒等待的秒数节奏与状态行视觉（jsdom 只能断言文案，不能验证实际间隔与不跳动）；② 真实 SSE 下 `snapshot_changed` 刷新与 `layerCreated` 的到达先后——撤销按钮应在快照刷新后出现，不应在 1 秒内闪出「已有后续操作」；③ 点击撤销是否只移除该 AI 图层、保留此前笔迹，并把确认行变为「已撤销添加图层」；④ 运行中再画一笔或切换画布后，确认行是否稳定降级为纯文本而不提供撤销。
 - **范围**：未改 AI 错误处理（票 12）、未改连接状态（票 13）、未改后端协议与 `routes.ai.ts`；未引入新依赖；撤销仍是快照级（ADR-0003），没有新建局部撤销栈。
+
+**2026-10-26 — 合并后补记**
+
+- 合并 `feat/release-hardening` 最新 `747a2c3`（票 02 修复「成功后立即解除控件禁用，只有显示做防抖」）：merge commit `dc4491e`。无冲突，合并只带入 `apps/web/src/services/canvas-store.ts` 的 6 行修复。
+- 合并后门禁：`pnpm --filter @paintcodex/web test` → **20 文件 / 144 passed**（含本票新增 5 条）；`pnpm -r typecheck` 三包全绿。先前记录的 `layer-panel-keyboard` 失败正是 `747a2c3` 修复的交叉问题，现在不再是已知失败。
+- 需人工/浏览器复核项不变（上述 ①–④）。
