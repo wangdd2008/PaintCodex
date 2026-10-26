@@ -3,6 +3,7 @@ import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { MonitorPage } from '../features/monitor/MonitorPage';
+import { SaveStatus } from '../features/status-bar/SaveStatus';
 import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
@@ -10,6 +11,7 @@ import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export'
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
+import { useViewportStore } from '../services/viewport-store';
 import { buildViewUrl, readViewFromSearch, type AppView } from './view-route';
 
 export function App() {
@@ -20,6 +22,7 @@ export function App() {
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
   const tool = useToolStore((state) => state.tool);
+  const zoomPercent = useViewportStore((state) => state.zoomPercent);
   const [exportError, setExportError] = useState<string | null>(null);
   const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
   // 窄屏（≤860px）侧栏是覆盖式抽屉；桌面忽略这个状态，侧栏常驻。
@@ -182,23 +185,7 @@ export function App() {
     }
   }
 
-  // Auto-save: export JSON every 30 seconds when a canvas is active
-  useEffect(() => {
-    if (!canvas) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      try {
-        downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
-      } catch {
-        // Silent failure for auto-save
-      }
-    }, 30_000);
-
-    return () => window.clearInterval(interval);
-  }, [canvas]);
-
+  // Persistence is handling saving (ADR-0008); export only runs on demand.
   const menuMessage = error ?? exportError;
 
   return (
@@ -290,8 +277,11 @@ export function App() {
       {view === 'canvas' ? (
         <footer className="status-bar">
           <span>{canvas ? `${canvas.width} × ${canvas.height}` : '无画布'}</span>
-          <span>缩放: 100%</span>
+          <span>
+            缩放 {zoomPercent === null ? '—' : `${zoomPercent.toFixed(1)}%`}
+          </span>
           <span>{tool === 'brush' ? '画笔' : '选择'}</span>
+          <SaveStatus />
         </footer>
       ) : null}
     </div>
