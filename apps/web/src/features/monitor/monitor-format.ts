@@ -1,4 +1,9 @@
-import type { AgentLog, LogCategory, LogLevel } from '@paintcodex/protocol';
+import type {
+  AgentLog,
+  LogCategory,
+  LogLevel,
+  MonitorCategoryStats,
+} from '@paintcodex/protocol';
 
 export type LogRange = '5m' | '15m' | '1h' | 'all';
 
@@ -125,12 +130,58 @@ export function formatTimestamp(timestamp: number): string {
   )}.${String(date.getMilliseconds()).padStart(3, '0')}`;
 }
 
-export function formatPercent(ratio: number): string {
-  if (!Number.isFinite(ratio)) {
+/** Formats a ratio as a percentage; unknown ratios render as a dash. */
+export function formatPercent(ratio: number | null | undefined): string {
+  if (ratio === null || ratio === undefined || !Number.isFinite(ratio)) {
     return '—';
   }
 
   return `${(ratio * 100).toFixed(1)}%`;
+}
+
+export interface HttpErrorHintInput {
+  httpFailureCount: number;
+  httpConflictCount: number;
+  requestCount: number;
+}
+
+/**
+ * `0 失败 · 2 冲突 / 24 请求`: both numerators and the denominator stay on the
+ * card, so the rate above it can be recomputed by hand.
+ */
+export function formatHttpErrorHint(input: HttpErrorHintInput): string {
+  return `${input.httpFailureCount} 失败 · ${input.httpConflictCount} 冲突 / ${input.requestCount} 请求`;
+}
+
+export interface AiChatHintInput {
+  aiChatSuccessCount: number;
+  aiChatCount: number;
+  aiChatAbortedCount: number;
+}
+
+/** `1/1 次对话 · 1 取消`: cancellations are shown but never enter the denominator. */
+export function formatAiChatHint(input: AiChatHintInput): string {
+  return `${input.aiChatSuccessCount}/${input.aiChatCount} 次对话 · ${input.aiChatAbortedCount} 取消`;
+}
+
+/**
+ * Category error counts that add up to the all-errors total, largest first.
+ * Returns null when no category errored, so the card can omit its hint.
+ */
+export function formatErrorBreakdown(
+  categoryCounts: readonly MonitorCategoryStats[],
+): string | null {
+  const errored = categoryCounts
+    .filter((entry) => entry.errorCount > 0)
+    .sort(
+      (left, right) =>
+        right.errorCount - left.errorCount ||
+        left.category.localeCompare(right.category),
+    );
+
+  return errored.length === 0
+    ? null
+    : errored.map((entry) => `${entry.category} ${entry.errorCount}`).join(' · ');
 }
 
 export function shortenId(value: string, maxLength = 8): string {
