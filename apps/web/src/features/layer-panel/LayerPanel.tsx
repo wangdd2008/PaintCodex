@@ -21,7 +21,7 @@ export function LayerPanel() {
       <h2 className="panel-title">图层</h2>
 
       {!canvas ? (
-        <p className="panel-empty">尚未加载画布。</p>
+        <p className="panel-empty">还没有画布</p>
       ) : canvas.layers.length === 0 ? (
         <p className="panel-empty">暂无图层。</p>
       ) : (

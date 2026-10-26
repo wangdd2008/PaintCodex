@@ -191,14 +191,17 @@ export function App() {
         ) : null}
         {view === 'canvas' ? (
           <>
-            <button
-              type="button"
-              className="menu-button"
-              onClick={() => void createNewCanvas()}
-              disabled={status === 'loading'}
-            >
-              {status === 'loading' ? '处理中…' : '新建画布'}
-            </button>
+            {/* Without a canvas the empty state holds the only creation CTA. */}
+            {canvas ? (
+              <button
+                type="button"
+                className="menu-button"
+                onClick={() => void createNewCanvas()}
+                disabled={status === 'loading'}
+              >
+                {status === 'loading' ? '处理中…' : '新建画布'}
+              </button>
+            ) : null}
             <button
               type="button"
               className="menu-button"
