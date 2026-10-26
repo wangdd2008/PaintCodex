@@ -1,4 +1,4 @@
-.ai-chat {
+﻿.ai-chat {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -98,10 +98,64 @@
 /* Own line inside the bubble so it reads as status, not as reply text. */
 .ai-chat__step {
   display: block;
-  margin-bottom: 4px;
   color: #9ea3b0;
   font-size: 11px;
   animation: ai-chat-step-in 160ms ease-out;
+}
+
+/* 步骤文案与「已用 Ns」计时共用一行状态。 */
+.ai-chat__progress {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ai-chat__progress .ai-chat__step {
+  margin-bottom: 0;
+}
+
+.ai-chat__timer {
+  color: #747785;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 运行结束后保留：空白气泡会让人看不出已经完成。 */
+.ai-chat__terminal {
+  color: #8f93a3;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 助手气泡下方的落地确认。 */
+.ai-chat__landing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  color: #9ea3b0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ai-chat__landing-note {
+  color: #747785;
+}
+
+.ai-chat__landing-undo {
+  border: 0;
+  background: transparent;
+  color: #9db4e0;
+  padding: 4px 2px;
+  min-height: 24px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ai-chat__landing-undo:hover {
+  color: #c9d8f5;
+  text-decoration: underline;
 }
 
 .ai-chat__cancelled {
