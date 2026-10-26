@@ -133,6 +133,18 @@
   line-height: 1.45;
 }
 
+/* Why the composer is disabled: AI actions need a canvas to land on. */
+.ai-chat__blocked {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #4d4630;
+  border-radius: 6px;
+  background: #26231a;
+  color: #d8c48a;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .ai-chat__composer {
   display: flex;
   flex-direction: column;

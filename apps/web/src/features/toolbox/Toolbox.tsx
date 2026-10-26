@@ -5,6 +5,7 @@ import './toolbox.css';
 export function Toolbox() {
   const tool = useToolStore((state) => state.tool);
   const setTool = useToolStore((state) => state.setTool);
+  const canvas = useCanvasStore((state) => state.canvas);
   const canUndo = useCanvasStore((state) => state.canvas?.history.canUndo ?? false);
   const canRedo = useCanvasStore((state) => state.canvas?.history.canRedo ?? false);
   const saving = useCanvasStore((state) => state.saving);
@@ -18,6 +19,7 @@ export function Toolbox() {
         className={tool === 'brush' ? 'tool-button tool-button--active' : 'tool-button'}
         title="画笔"
         aria-pressed={tool === 'brush'}
+        disabled={!canvas}
         onClick={() => setTool('brush')}
       >
         画笔
@@ -27,6 +29,7 @@ export function Toolbox() {
         className={tool === 'select' ? 'tool-button tool-button--active' : 'tool-button'}
         title="选择和移动 AI 图层"
         aria-pressed={tool === 'select'}
+        disabled={!canvas}
         onClick={() => setTool('select')}
       >
         选择

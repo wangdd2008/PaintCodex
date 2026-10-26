@@ -24,6 +24,11 @@ interface CanvasState {
   canvas: CanvasDocument | null;
   status: CanvasStatus;
   error: string | null;
+  /**
+   * The canvas id the UI is waiting for. Distinguishes "load failed" (id exists)
+   * from "no canvas yet" (id null) once `canvas` is null in both cases.
+   */
+  requestedCanvasId: string | null;
   saving: boolean;
   activeLayerId: string | null;
   createNewCanvas: () => Promise<void>;
@@ -153,6 +158,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvas: null,
   status: 'idle',
   error: null,
+  requestedCanvasId: null,
   saving: false,
   activeLayerId: null,
 
@@ -166,6 +172,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         canvas,
         status: 'ready',
         error: null,
+        requestedCanvasId: canvas.id,
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
@@ -177,7 +184,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   loadCanvas: async (id: string) => {
-    set({ status: 'loading', error: null });
+    set({ status: 'loading', error: null, requestedCanvasId: id });
 
     try {
       const canvas = await getCanvas(id);
@@ -186,6 +193,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         canvas,
         status: 'ready',
         error: null,
+        requestedCanvasId: canvas.id,
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
@@ -197,6 +205,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         canvas: null,
         status: 'error',
         error: error instanceof Error ? error.message : '无法加载画布',
+        requestedCanvasId: id,
       });
     }
   },

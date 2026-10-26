@@ -1,7 +1,24 @@
 // @vitest-environment jsdom
+import type { CanvasDocument } from '@paintcodex/protocol';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatPanel } from '../src/features/ai-chat/AiChatPanel';
+import { useCanvasStore } from '../src/services/canvas-store';
+
+function readyCanvas(): CanvasDocument {
+  return {
+    id: 'canvas-1',
+    name: '测试画布',
+    width: 1920,
+    height: 1080,
+    backgroundColor: '#ffffff',
+    revision: 1,
+    createdAt: 0,
+    updatedAt: 0,
+    history: { canUndo: false, canRedo: false },
+    layers: [],
+  };
+}
 
 const encoder = new TextEncoder();
 
@@ -56,11 +73,28 @@ beforeEach(() => {
     configurable: true,
     value: () => undefined,
   });
+  // Composer tests assume a loaded canvas; the no-canvas gate has its own test.
+  useCanvasStore.setState({
+    canvas: readyCanvas(),
+    status: 'ready',
+    error: null,
+    requestedCanvasId: 'canvas-1',
+    saving: false,
+    activeLayerId: null,
+  });
 });
 
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  useCanvasStore.setState({
+    canvas: null,
+    status: 'idle',
+    error: null,
+    requestedCanvasId: null,
+    saving: false,
+    activeLayerId: null,
+  });
 });
 
 describe('AiChatPanel clear input', () => {
@@ -207,6 +241,44 @@ describe('AiChatPanel cancel', () => {
     // Cancelling is a user action, not a failure.
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.getByRole('button', { name: '发送' })).toBeTruthy();
+  });
+});
+
+describe('AiChatPanel 无画布门禁', () => {
+  it('无画布时禁用输入并说明原因，不发出请求', () => {
+    useCanvasStore.setState({
+      canvas: null,
+      status: 'idle',
+      error: null,
+      requestedCanvasId: null,
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<AiChatPanel />);
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(screen.getByText('先新建一张画布，再让 AI 作画。')).toBeTruthy();
+    expect(
+      (screen.getByRole('button', { name: '发送' }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('加载失败时禁用输入并指向重试或新建', () => {
+    useCanvasStore.setState({
+      canvas: null,
+      status: 'error',
+      error: 'Failed to fetch',
+      requestedCanvasId: 'canvas-1',
+    });
+
+    render(<AiChatPanel />);
+
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
+    expect(
+      screen.getByText('画布加载失败，请先重试或新建一张画布。'),
+    ).toBeTruthy();
   });
 });
 
