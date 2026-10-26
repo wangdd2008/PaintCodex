@@ -23,6 +23,68 @@
   font-size: 13px;
 }
 
+/* 删除恢复条：面板顶部，8 秒或 revision 失效后消失。 */
+.layer-restore {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border: 1px solid #3b4a66;
+  border-radius: 6px;
+  background: #1e2736;
+  color: #dbe4f7;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.layer-restore__message {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-restore__separator {
+  flex: 0 0 auto;
+  color: #8b97ae;
+}
+
+/* 命中区 ≥24px；字形保持 12px。 */
+.layer-restore__undo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #5b8def;
+  border-radius: 5px;
+  background: #2a3a5c;
+  color: #e7eeff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.layer-restore__undo:hover:not(:disabled) {
+  background: #34486f;
+}
+
+.layer-restore__undo:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+.layer-restore__undo:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .layer-list {
   list-style: none;
   margin: 0;

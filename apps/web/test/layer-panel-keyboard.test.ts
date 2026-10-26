@@ -363,11 +363,14 @@ describe('图层行的键盘导航与选中', () => {
   it('行内可见性与删除按钮不会触发整行选中', async () => {
     const layers = [makeLayer(1), makeLayer(2)];
     seedCanvas(layers, 'layer-1');
+    const remaining = makeCanvas([layers[0]!], 2);
     const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) => jsonResponse(makeCanvas(layers)),
+      async (_url: string, init?: RequestInit) =>
+        init?.method === 'DELETE'
+          ? jsonResponse(remaining)
+          : jsonResponse(makeCanvas(layers)),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(createElement(LayerPanel));
 
@@ -382,13 +385,14 @@ describe('图层行的键盘导航与选中', () => {
     fireEvent.keyDown(visibility, { key: ' ' });
     expect(useCanvasStore.getState().activeLayerId).toBe(before);
 
+    // 票 10：删除不再弹原生确认，直接发请求。
     fireEvent.click(screen.getByRole('button', { name: '删除 笔迹 2' }));
-    expect(confirmSpy).toHaveBeenCalled();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('DELETE');
     expect(useCanvasStore.getState().activeLayerId).toBe(before);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('Delete 键沿用确认交互删除聚焦图层', async () => {
+  it('Delete 键直接删除聚焦图层，不再弹原生确认', async () => {
     const layers = [makeLayer(1), makeLayer(2)];
     seedCanvas(layers, 'layer-1');
     const remaining = makeCanvas([layers[0]!], 2);
@@ -397,7 +401,7 @@ describe('图层行的键盘导航与选中', () => {
         init?.method === 'DELETE' ? jsonResponse(remaining) : jsonResponse(makeCanvas(layers)),
     );
     vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     render(createElement(LayerPanel));
 
@@ -414,6 +418,7 @@ describe('图层行的键盘导航与选中', () => {
       expect(screen.getAllByRole('option')).toHaveLength(1),
     );
     expect(useCanvasStore.getState().activeLayerId).toBe('layer-1');
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 
   it('读屏名称包含名称、类型、可见性；选中态由 aria-selected 表达', () => {
@@ -559,7 +564,6 @@ describe('图层管理的整条键盘路径', () => {
       },
     );
     vi.stubGlobal('fetch', fetchMock);
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     class MockEventSource {
       onopen: (() => void) | null = null;
