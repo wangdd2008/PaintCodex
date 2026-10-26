@@ -95,9 +95,16 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
+  /* 侧栏本身不滚动：图层面板与 AI 面板各自消化溢出。 */
+  overflow: hidden;
   border-left: 1px solid #2c2d33;
   background: #1b1c21;
+}
+
+/* AI 面板保底高度，图层增长时优先让图层列表滚动而不是压扁对话。 */
+.side-panel > .ai-chat {
+  flex: 1;
+  min-height: 240px;
 }
 
 .canvas-area {
