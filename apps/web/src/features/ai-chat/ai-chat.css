@@ -1,4 +1,4 @@
-﻿.ai-chat {
+.ai-chat {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -166,6 +166,14 @@
   font-style: italic;
 }
 
+/* 失败气泡的占位：空内容时它就是气泡正文。 */
+.ai-chat__incomplete {
+  display: block;
+  margin-top: 2px;
+  color: #f2b8b5;
+  font-size: 11px;
+}
+
 @keyframes ai-chat-step-in {
   from {
     opacity: 0;
@@ -177,6 +185,10 @@
 }
 
 .ai-chat__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0;
   padding: 8px 10px;
   border: 1px solid #6b3434;
@@ -185,6 +197,32 @@
   color: #f2b8b5;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.ai-chat__error-text {
+  flex: 1;
+}
+
+.ai-chat__retry {
+  flex: none;
+  border: 1px solid #6b3434;
+  border-radius: 6px;
+  padding: 4px 10px;
+  min-height: 28px;
+  background: #3a1f21;
+  color: #f2b8b5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__retry:hover:not(:disabled) {
+  background: #4a2628;
+}
+
+.ai-chat__retry:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Why the composer is disabled: AI actions need a canvas to land on. */
