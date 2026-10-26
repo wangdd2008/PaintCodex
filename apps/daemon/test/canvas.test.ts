@@ -12,6 +12,13 @@ function newDbPath(): string {
   return join(dir, 'paintcodex.db');
 }
 
+/** Mirrors the documented default-name format with the local wall clock. */
+function localMinuteStamp(date: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  return `未命名 ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 afterEach(() => {
   while (tempDirs.length > 0) {
     rmSync(tempDirs.pop()!, { recursive: true, force: true });
@@ -21,16 +28,17 @@ afterEach(() => {
 describe('canvas API', () => {
   it('creates a 1920x1080 white canvas at revision 0', async () => {
     const app = buildServer({ dbPath: ':memory:' });
+    const before = localMinuteStamp(new Date());
 
     const response = await app.inject({
       method: 'POST',
       url: '/paint/canvas',
       payload: {},
     });
+    const after = localMinuteStamp(new Date());
 
     expect(response.statusCode).toBe(201);
     expect(response.json()).toMatchObject({
-      name: 'Untitled',
       width: 1920,
       height: 1080,
       backgroundColor: '#ffffff',
@@ -38,6 +46,10 @@ describe('canvas API', () => {
       layers: [],
     });
     expect(response.json().id).toEqual(expect.any(String));
+
+    // 默认名是「未命名 YYYY-MM-DD HH:mm」，用 daemon 本地时区，且不是裸 Untitled。
+    expect(response.json().name).toMatch(/^未命名 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    expect([before, after]).toContain(response.json().name);
 
     await app.close();
   });

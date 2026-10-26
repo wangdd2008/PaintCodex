@@ -12,6 +12,7 @@ import {
   deleteLayer as deleteLayerRequest,
   getCanvas,
   redoCanvas,
+  renameCanvas as renameCanvasRequest,
   undoCanvas,
   updateLayer as updateLayerRequest,
 } from './api';
@@ -41,6 +42,12 @@ interface CanvasState {
    * from "no canvas yet" (id null) once `canvas` is null in both cases.
    */
   requestedCanvasId: string | null;
+  /**
+   * Single-level back pointer. Creating a canvas is easy to misclick and there
+   * is no canvas list this round, so remembering exactly one id is enough to
+   * make the previous document reachable again in one click.
+   */
+  previousCanvasId: string | null;
   /** Kept in sync with `saveState === 'saving'` for existing disabled logic. */
   saving: boolean;
   saveState: SaveState;
@@ -61,8 +68,10 @@ interface CanvasState {
    */
   activeLayerRequest: number;
   createNewCanvas: () => Promise<void>;
+  returnToPreviousCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
   refreshCanvas: () => Promise<void>;
+  renameCanvas: (name: string) => Promise<void>;
   createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
   updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
   /** Resolves with the canvas produced by the delete (row disappears on success only). */
@@ -353,6 +362,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   status: 'idle',
   error: null,
   requestedCanvasId: null,
+  previousCanvasId: null,
   saving: false,
   saveState: 'idle',
   lastSavedAt: null,
@@ -364,24 +374,103 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   activeLayerRequest: 0,
 
   createNewCanvas: async () => {
+    const previous = get().canvas;
+
     set({ status: 'loading', error: null, ...resetSaveState() });
 
     try {
       const canvas = await createCanvas();
+      // Only a canvas that actually exists may claim the address bar and
+      // localStorage; until then the current document stays addressable.
       rememberCanvas(canvas.id);
       set({
         canvas,
         status: 'ready',
         error: null,
         requestedCanvasId: canvas.id,
+        previousCanvasId: previous?.id ?? get().previousCanvasId,
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
+      // Creation failed: the current document must stay usable and addressable.
       set({
-        status: 'error',
+        status: previous ? 'ready' : 'error',
+        requestedCanvasId: previous?.id ?? null,
         error: error instanceof Error ? error.message : '无法创建画布',
       });
     }
+  },
+
+  returnToPreviousCanvas: async () => {
+    const previousId = get().previousCanvasId;
+    const current = get().canvas;
+
+    if (!previousId) {
+      return;
+    }
+
+    // Switching documents resets the persisted-status of the old one.
+    set({ status: 'loading', error: null, ...resetSaveState() });
+
+    try {
+      const canvas = await getCanvas(previousId);
+      rememberCanvas(canvas.id);
+      set({
+        canvas,
+        status: 'ready',
+        error: null,
+        requestedCanvasId: canvas.id,
+        previousCanvasId: null,
+        activeLayerId: topLayerId(canvas),
+      });
+    } catch (error) {
+      // A failed return must not take the current document down with it.
+      const missing = error instanceof ApiError && error.status === 404;
+      let message = '无法返回上一张画布';
+
+      if (error instanceof Error) {
+        message = error.message;
+      }
+
+      if (missing) {
+        message = '上一张画布不存在，可能已被删除。';
+      }
+
+      set({
+        canvas: current,
+        status: current ? 'ready' : 'error',
+        requestedCanvasId: current?.id ?? previousId,
+        previousCanvasId: missing ? null : previousId,
+        error: message,
+      });
+    }
+  },
+
+  renameCanvas: async (name: string) => {
+    const current = get().canvas;
+
+    if (!current) {
+      throw new Error('没有可重命名的画布');
+    }
+
+    // Same queue as strokes: a rename answered with an older snapshot must not
+    // land after a newer stroke save and hide the layer that was just drawn.
+    // Save state is left alone — a rename is identity, not persistence of content.
+    const updated = await enqueueMutation(() =>
+      renameCanvasRequest(current.id, name.trim()),
+    );
+
+    // A rename answered after the user switched canvases must not overwrite
+    // the document that is on screen now.
+    if (get().canvas?.id !== current.id) {
+      return;
+    }
+
+    set({
+      canvas: updated,
+      status: 'ready',
+      activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+    });
   },
 
   loadCanvas: async (id: string) => {

@@ -29,6 +29,20 @@ export const DEFAULT_CANVAS_HEIGHT = 1080;
 export const MAX_CANVAS_DIMENSION = 8192;
 export const SNAPSHOT_LIMIT = 20;
 
+/**
+ * A canvas without a name is still a document the user must be able to tell
+ * apart from the next one, so the default carries the local wall-clock time
+ * the daemon created it at (`未命名 2026-10-26 14:32`).
+ */
+export function defaultCanvasName(now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+
+  const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const time = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+  return `未命名 ${date} ${time}`;
+}
+
 const ACTION_LOG_MESSAGES = {
   canvas_create_layer: 'layer_create',
   canvas_update_layer: 'layer_update',
@@ -48,7 +62,7 @@ export class PaintService {
     const now = Date.now();
     const canvas = this.canvases.create({
       id: randomUUID(),
-      name: input.name?.trim() || 'Untitled',
+      name: input.name !== undefined ? input.name.trim() : defaultCanvasName(),
       width: input.width ?? DEFAULT_CANVAS_WIDTH,
       height: input.height ?? DEFAULT_CANVAS_HEIGHT,
       backgroundColor: input.backgroundColor ?? '#ffffff',
@@ -79,6 +93,29 @@ export class PaintService {
     const canvas = this.canvases.findById(id);
 
     return canvas ? this.toDocument(canvas) : null;
+  }
+
+  /**
+   * Renaming is an identity change, not a document mutation: it keeps the
+   * revision, the undo stack, and any in-flight stroke's `expectedRevision`
+   * untouched, and returns the same shape `GET /paint/canvas/:id` returns.
+   */
+  renameCanvas(canvasId: string, name: string): CanvasDocument {
+    const renamed = this.canvases.rename(canvasId, name.trim());
+
+    if (!renamed) {
+      throw new CanvasNotFoundError();
+    }
+
+    this.logCanvasAction({
+      message: 'canvas_rename',
+      canvasId,
+      revision: renamed.revision,
+      actor: 'user',
+      payload: { name: renamed.name },
+    });
+
+    return this.toDocument(renamed);
   }
 
   applyAction(canvasId: string, request: ApplyActionRequest): CanvasDocument {
