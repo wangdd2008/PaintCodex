@@ -85,6 +85,11 @@ button {
   cursor: default;
 }
 
+/* 抽屉开关只在 ≤860px 出现，桌面始终看得到侧栏。 */
+.drawer-toggle {
+  display: none;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 300px;
@@ -161,4 +166,111 @@ button {
   background: #1f2026;
   color: #9a9daa;
   font-size: 12px;
+}
+
+/*
+ * 窄屏承诺：桌面优先，窄屏 ≥360px 可用。
+ * 完整移动端（触控手势、双指缩放、移动端专用工具栏）不在本轮。
+ * 三档断点只做布局收口，桌面布局保持在上面的默认规则里。
+ */
+
+/* 第一档：收窄工具条，侧栏按视口宽度在 260–320px 之间伸缩。 */
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 48px minmax(0, 1fr) clamp(260px, 24vw, 320px);
+  }
+
+  /* 48px 工具条里给「画笔/选择」这类两字标签留出整行宽度。 */
+  .workspace .toolbox {
+    padding: 12px 4px;
+  }
+
+  .workspace .tool-button {
+    padding: 10px 2px;
+  }
+}
+
+/* 第二档：侧栏离开网格，变成覆盖式抽屉；菜单可换行，文档名让位。 */
+@media (max-width: 860px) {
+  .app-shell {
+    /* 菜单与状态栏换行后按内容取高，避免压住画布。 */
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .menu-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .document-name {
+    display: none;
+  }
+
+  .drawer-toggle {
+    display: inline-flex;
+  }
+
+  .workspace {
+    position: relative;
+    grid-template-columns: 48px minmax(0, 1fr);
+    /* 收起时抽屉在右侧视口外；裁掉它，否则 document 仍会被撑出横向滚动。 */
+    overflow: hidden;
+  }
+
+  .side-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    width: min(320px, 86vw);
+    border-left: 1px solid #2c2d33;
+    box-shadow: -12px 0 32px rgb(0 0 0 / 55%);
+    /* 收起时移出视口并隐藏，避免被读屏或 Tab 顺序摸到。 */
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 160ms ease, visibility 160ms ease;
+  }
+
+  .side-panel.side-panel--open {
+    transform: none;
+    visibility: visible;
+  }
+
+  .canvas-area {
+    padding: 16px;
+  }
+
+  .status-bar {
+    min-height: 28px;
+  }
+}
+
+/* 第三档：抽屉接近全宽，导出等按钮整体换行，画布贴边保住 280px 可用宽度。 */
+@media (max-width: 560px) {
+  .menu-bar {
+    column-gap: 8px;
+    padding: 8px 10px;
+  }
+
+  /* 占满整行的 spacer 把品牌留在第一行，其余按钮从第二行开始排。 */
+  .menu-spacer {
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .side-panel {
+    width: calc(100% - 16px);
+  }
+
+  .canvas-area {
+    padding: 0;
+  }
+
+  .status-bar {
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    padding: 4px 12px;
+  }
 }
