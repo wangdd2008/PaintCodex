@@ -5,10 +5,9 @@ import { useCanvasStore } from '../../services/canvas-store';
 import './canvas-name.css';
 
 /**
- * The canvas name is the identity the user owns. Double-click (or the ✎
- * button) edits it in place; Enter/blur saves, Esc cancels, an empty value
- * reverts. The displayed name only ever comes from the daemon response, so a
- * failed rename cannot leave the menu bar claiming a name that was not saved.
+ * 画布名是用户拥有的身份标识。双击（或 ✎ 按钮）就地编辑；Enter/失焦提交，
+ * Esc 取消，空值回退原名。显示名只来自 daemon 响应，所以改名失败时
+ * 菜单栏不会声称一个并未保存成功的名字。
  */
 export function CanvasNameEditor() {
   const canvasId = useCanvasStore((state) => state.canvas?.id ?? null);
@@ -20,7 +19,7 @@ export function CanvasNameEditor() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-  /** Esc unmounts the input; the blur that follows must not save. */
+  /** Esc 会卸载输入框；紧随其后的 blur 不能再提交一次。 */
   const cancelRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -32,7 +31,7 @@ export function CanvasNameEditor() {
     inputRef.current?.select();
   }, [editing]);
 
-  // Switching canvases (new one or 返回上一张) must not carry this draft over.
+  // 切换画布（新建或「返回上一张」）时不能把这份草稿带过去。
   useEffect(() => {
     setEditing(false);
     setDraft(displayCanvasName(name));

@@ -9,9 +9,8 @@ interface NewCanvasConfirmProps {
 }
 
 /**
- * A custom, in-canvas confirmation instead of `window.confirm`: the decision
- * stays inside the canvas area, is styleable and readable, and focuses
- * 「取消」 first so an Enter or Esc leaves the current canvas intact.
+ * 不用 `window.confirm`，改用画布内的自定义确认：决定留在画布区域里，
+ * 可样式化、可读，并先聚焦「取消」，让 Enter 或 Esc 默认保住当前画布。
  */
 export function NewCanvasConfirm({
   canvasName,

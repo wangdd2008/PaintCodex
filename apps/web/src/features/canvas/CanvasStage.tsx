@@ -16,6 +16,10 @@ import { setActiveCanvas } from '../../services/canvas-engine';
 import { useCanvasStore } from '../../services/canvas-store';
 import { setLayerOpacityPreviewHandler } from '../../services/layer-preview';
 import { nextStrokeLayerName } from '../../services/naming';
+import {
+  isNetworkFailure,
+  NETWORK_FAILURE_MESSAGE,
+} from '../../services/network-error';
 import { useToolStore } from '../../services/tool-store';
 import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
 
@@ -47,9 +51,6 @@ const LOCATE_HIGHLIGHT_COLOR = '#ff8a00';
 const LOCATE_HIGHLIGHT_STROKE_WIDTH = 8;
 const LOCATE_HIGHLIGHT_DURATION_MS = 800;
 
-const NETWORK_ERROR_PATTERN =
-  /failed to fetch|networkerror|load failed|network request failed/i;
-
 /**
  * Turns technical transport failures into a Chinese, actionable reason. The
  * daemon already answers in Chinese; only network-level errors need mapping.
@@ -59,9 +60,7 @@ function describeCanvasFailure(error: string | null): string {
     return '无法加载画布，请稍后重试。';
   }
 
-  return NETWORK_ERROR_PATTERN.test(error)
-    ? '无法连接本地服务，请确认服务已启动后重试。'
-    : error;
+  return isNetworkFailure(error) ? NETWORK_FAILURE_MESSAGE : error;
 }
 
 /**
@@ -145,7 +144,7 @@ export function CanvasStage() {
   }
 
   return (
-    <div className="canvas-gate canvas-gate--empty">
+    <div className="canvas-gate canvas-gate--no-canvas">
       <p className="canvas-gate__title">还没有画布</p>
       <p className="canvas-gate__description">
         1920 × 1080，画完可以让 AI 添加图层。
@@ -243,7 +242,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
 
     canvas?.requestRenderAll();
     syncUnsavedCount();
-    useCanvasStore.getState().markStrokesPersisted();
+    useCanvasStore.getState().markPendingStrokesSaved();
     useCanvasStore.getState().showCanvasAlert(reason, null);
   }
 
@@ -342,7 +341,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       throw new Error('仍有笔画未保存');
     }
 
-    useCanvasStore.getState().markStrokesPersisted();
+    useCanvasStore.getState().markPendingStrokesSaved();
 
     if (discardReason) {
       useCanvasStore.getState().showCanvasAlert(discardReason, null);

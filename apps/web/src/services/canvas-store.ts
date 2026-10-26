@@ -16,19 +16,18 @@ import {
   undoCanvas,
   updateLayer as updateLayerRequest,
 } from './api';
+import { isNetworkFailure, NETWORK_FAILURE_MESSAGE } from './network-error';
 
 const STORAGE_KEY = 'paintcodex.canvasId';
 
-/** Consecutive strokes settle into one "saved" transition (ADR-0008). */
+/** 连续笔画只结算成一次「已保存」状态（ADR-0008）。 */
 export const SAVE_DEBOUNCE_MS = 500;
 
-const NETWORK_ERROR_PATTERN =
-  /failed to fetch|networkerror|load failed|network request failed|fetch failed/i;
 const CHINESE_PATTERN = /[\u4e00-\u9fff]/;
 
 export type CanvasStatus = 'idle' | 'loading' | 'ready' | 'error';
 
-/** Save state only ever describes persistence, never export (ADR-0008). */
+/** 保存状态只描述持久化，与导出无关（ADR-0008）。 */
 export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
 
 export type SaveRetry = () => Promise<void> | void;
@@ -38,33 +37,31 @@ interface CanvasState {
   status: CanvasStatus;
   error: string | null;
   /**
-   * The canvas id the UI is waiting for. Distinguishes "load failed" (id exists)
-   * from "no canvas yet" (id null) once `canvas` is null in both cases.
+   * 界面正在等待的画布 id。`canvas` 为 null 时，用它区分「加载失败」（id 存在）
+   * 与「还没有画布」（id 为 null）。
    */
   requestedCanvasId: string | null;
   /**
-   * Single-level back pointer. Creating a canvas is easy to misclick and there
-   * is no canvas list this round, so remembering exactly one id is enough to
-   * make the previous document reachable again in one click.
+   * 单级回退指针。新建画布容易误点，而这一轮没有画布列表，记住一个 id
+   * 就足以让上一张文档一键返回。
    */
   previousCanvasId: string | null;
-  /** Kept in sync with `saveState === 'saving'` for existing disabled logic. */
+  /** 与 `saveState === 'saving'` 保持同步，供既有的禁用逻辑使用。 */
   saving: boolean;
   saveState: SaveState;
   lastSavedAt: number | null;
-  /** Reason of the most recent failed persistence attempt, in Chinese. */
+  /** 最近一次持久化失败的原因（中文）。 */
   saveError: string | null;
-  /** Failed strokes still on screen; blocks an honest "已保存". */
+  /** 仍在屏幕上的失败笔画；有它就挡掉不诚实的「已保存」。 */
   unsavedStrokes: number;
-  /** One canvas-level error banner at a time (spec §2). */
+  /** 同一时刻只显示一条画布级错误横幅（spec §2）。 */
   canvasAlert: string | null;
-  /** Retry belongs to the failed mutation that raised the banner. */
+  /** 重试属于抛出横幅的那次失败 mutation。 */
   canvasRetry: SaveRetry | null;
   activeLayerId: string | null;
   /**
-   * Increments only on an explicit user selection (`setActiveLayer`). Canvas
-   * mutations also set `activeLayerId` (a new stroke becomes the active layer),
-   * but those must not replay the canvas "locate" feedback.
+   * 只在用户显式选中（`setActiveLayer`）时递增。画布 mutation 也会设置
+   * `activeLayerId`（新笔画成为活动图层），但它们不得重放画布的「定位」反馈。
    */
   activeLayerRequest: number;
   createNewCanvas: () => Promise<void>;
@@ -74,7 +71,7 @@ interface CanvasState {
   renameCanvas: (name: string) => Promise<void>;
   createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
   updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
-  /** Resolves with the canvas produced by the delete (row disappears on success only). */
+  /** 解析为删除后的画布（只有成功时行才会消失）。 */
   deleteLayer: (layerId: string) => Promise<CanvasDocument>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
@@ -83,7 +80,7 @@ interface CanvasState {
   dismissCanvasAlert: () => void;
   retryCanvasAlert: () => Promise<void>;
   setUnsavedStrokes: (count: number) => void;
-  markStrokesPersisted: () => void;
+  markPendingStrokesSaved: () => void;
 }
 
 type SetState = (partial: Partial<CanvasState>) => void;
@@ -138,20 +135,18 @@ function resetSaveState(): SaveReset {
   };
 }
 
-/** Transport failures become a Chinese, actionable reason; daemon text is kept. */
+/** 传输层失败折成中文可执行的原因；daemon 已经给出的中文原样保留。 */
 function describeSaveFailure(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {
     return error.message;
   }
 
-  if (error instanceof Error) {
-    if (NETWORK_ERROR_PATTERN.test(error.message)) {
-      return '无法连接本地服务，请确认服务已启动后重试。';
-    }
+  if (isNetworkFailure(error)) {
+    return NETWORK_FAILURE_MESSAGE;
+  }
 
-    if (CHINESE_PATTERN.test(error.message)) {
-      return error.message;
-    }
+  if (error instanceof Error && CHINESE_PATTERN.test(error.message)) {
+    return error.message;
   }
 
   return fallback;
@@ -173,14 +168,12 @@ function finishMutationSuccess(set: SetState, get: GetState): void {
     return;
   }
 
-  // Nothing is in flight any more, so controls must not stay disabled while the
-  // display debounce keeps showing "保存中" for up to SAVE_DEBOUNCE_MS.
+  // 已经没有任何请求在途，控件不能因为展示层的防抖还停在「保存中」而继续禁用。
   if (get().saving) {
     set({ saving: false });
   }
 
-  // A failed mutation keeps the state honest until it is retried, and failed
-  // strokes keep it honest until they are persisted.
+  // 失败的 mutation 保留错误态直到重试成功；失败笔画也保留错误态直到真正保存。
   if (get().unsavedStrokes > 0 || get().saveState === 'error') {
     set({ saveState: 'error', saving: false });
     return;
@@ -313,7 +306,15 @@ async function createLayerWithRetry(
   }
 }
 
-async function performUndo(set: SetState, get: GetState): Promise<void> {
+/** 撤销与重做只差服务端调用和失败文案，其余流程完全一致。 */
+async function performHistoryStep(
+  set: SetState,
+  get: GetState,
+  step: 'undo' | 'redo',
+): Promise<void> {
+  const request = step === 'undo' ? undoCanvas : redoCanvas;
+  const actionLabel = step === 'undo' ? '无法撤销' : '无法重做';
+
   await runMutation(
     set,
     get,
@@ -324,36 +325,26 @@ async function performUndo(set: SetState, get: GetState): Promise<void> {
         throw new Error('No canvas loaded');
       }
 
-      const updated = await undoCanvas(current.id, current.revision);
+      const updated = await request(current.id, current.revision);
       set({
         canvas: updated,
         status: 'ready',
         activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
       });
     },
-    '无法撤销',
+    actionLabel,
   );
 }
 
-async function performRedo(set: SetState, get: GetState): Promise<void> {
-  await runMutation(
-    set,
-    get,
-    async () => {
-      const current = get().canvas;
-
-      if (!current) {
-        throw new Error('No canvas loaded');
-      }
-
-      const updated = await redoCanvas(current.id, current.revision);
-      set({
-        canvas: updated,
-        status: 'ready',
-        activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
-      });
-    },
-    '无法重做',
+/** 失败横幅统一成「无法X：原因」，重试复用同一个 mutation。 */
+function alertMutationFailure(
+  get: GetState,
+  actionLabel: string,
+  retry: SaveRetry,
+): void {
+  get().showCanvasAlert(
+    `${actionLabel}：${get().saveError ?? '未知原因'}`,
+    retry,
   );
 }
 
@@ -380,8 +371,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     try {
       const canvas = await createCanvas();
-      // Only a canvas that actually exists may claim the address bar and
-      // localStorage; until then the current document stays addressable.
+      // 只有真正存在的画布才能占用地址栏与 localStorage；
+      // 在那之前，当前文档必须保持可寻址。
       rememberCanvas(canvas.id);
       set({
         canvas,
@@ -392,7 +383,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
-      // Creation failed: the current document must stay usable and addressable.
+      // 新建失败：当前文档必须继续可用、可寻址。
       set({
         status: previous ? 'ready' : 'error',
         requestedCanvasId: previous?.id ?? null,
@@ -409,7 +400,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       return;
     }
 
-    // Switching documents resets the persisted-status of the old one.
+    // 切换文档会重置上一张的持久化状态。
     set({ status: 'loading', error: null, ...resetSaveState() });
 
     try {
@@ -424,7 +415,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
-      // A failed return must not take the current document down with it.
+      // 返回失败不能把当前文档一起拖下水。
       const missing = error instanceof ApiError && error.status === 404;
       let message = '无法返回上一张画布';
 
@@ -453,15 +444,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       throw new Error('没有可重命名的画布');
     }
 
-    // Same queue as strokes: a rename answered with an older snapshot must not
-    // land after a newer stroke save and hide the layer that was just drawn.
-    // Save state is left alone — a rename is identity, not persistence of content.
+    // 与笔画共用同一条队列：用旧快照应答的改名，不能落在更新的笔画保存之后，
+    // 否则会把刚画的图层藏起来。
+    // 保存状态不参与——改名是身份变化，不是内容持久化。
     const updated = await enqueueMutation(() =>
       renameCanvasRequest(current.id, name.trim()),
     );
 
-    // A rename answered after the user switched canvases must not overwrite
-    // the document that is on screen now.
+    // 用户切换画布后才返回的改名结果，不得覆盖屏幕上当前的文档。
     if (get().canvas?.id !== current.id) {
       return;
     }
@@ -515,8 +505,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
       });
     } catch (error) {
-      // A successful refresh must not clear the banner: the banner describes a
-      // mutation, while this is only a read. A failed one only sets the summary.
+      // 刷新成功不能清掉横幅：横幅描述的是 mutation，而这里只是一次读取。
+      // 刷新失败也只更新摘要错误。
       set({
         error: error instanceof Error ? error.message : '无法刷新画布',
       });
@@ -567,7 +557,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         '无法更新图层',
       );
     } catch (error) {
-      get().showCanvasAlert(`无法更新图层：${get().saveError ?? '未知原因'}`, () =>
+      alertMutationFailure(get, '无法更新图层', () =>
         get().updateLayer(layerId, patch),
       );
       throw error;
@@ -598,7 +588,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         '无法删除图层',
       );
     } catch (error) {
-      get().showCanvasAlert(`无法删除图层：${get().saveError ?? '未知原因'}`, async () => {
+      alertMutationFailure(get, '无法删除图层', async () => {
         await get().deleteLayer(layerId);
       });
       throw error;
@@ -607,20 +597,20 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   undo: async () => {
     try {
-      await performUndo(set, get);
+      await performHistoryStep(set, get, 'undo');
     } catch {
-      get().showCanvasAlert(`无法撤销：${get().saveError ?? '未知原因'}`, () =>
-        performUndo(set, get),
+      alertMutationFailure(get, '无法撤销', () =>
+        performHistoryStep(set, get, 'undo'),
       );
     }
   },
 
   redo: async () => {
     try {
-      await performRedo(set, get);
+      await performHistoryStep(set, get, 'redo');
     } catch {
-      get().showCanvasAlert(`无法重做：${get().saveError ?? '未知原因'}`, () =>
-        performRedo(set, get),
+      alertMutationFailure(get, '无法重做', () =>
+        performHistoryStep(set, get, 'redo'),
       );
     }
   },
@@ -637,7 +627,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   dismissCanvasAlert: () => {
-    // Keep the retry so the status bar's "保存失败 · 重试" still works.
+    // 保留重试回调，状态栏的「保存失败 · 重试」仍要能用。
     set({ canvasAlert: null });
   },
 
@@ -663,7 +653,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({ unsavedStrokes: Math.max(0, count) });
   },
 
-  markStrokesPersisted: () => {
+  /** 待保存笔画落定后显示「已保存」；仍有未保存笔画时什么都不做。 */
+  markPendingStrokesSaved: () => {
     if (get().unsavedStrokes > 0) {
       return;
     }

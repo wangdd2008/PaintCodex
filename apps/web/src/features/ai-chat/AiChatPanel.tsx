@@ -15,6 +15,35 @@ interface ChatLayerConfirmation {
   undone?: boolean;
 }
 
+/** 撤销入口的三种状态：可撤销、已有后续操作、不适用。 */
+type LayerUndoState = 'available' | 'stale' | 'hidden';
+
+/** 撤销守卫的唯一判定：撤销、陈旧提示与隐藏都从这里派生。 */
+function layerUndoState(
+  layer: ChatLayerConfirmation,
+  canvasId: string | null,
+  revision: number | null,
+): LayerUndoState {
+  if (
+    layer.undone === true ||
+    layer.canvasId === null ||
+    layer.canvasId !== canvasId ||
+    revision === null
+  ) {
+    return 'hidden';
+  }
+
+  if (revision === layer.expectedRevision) {
+    return 'available';
+  }
+
+  if (revision > layer.expectedRevision) {
+    return 'stale';
+  }
+
+  return 'hidden';
+}
+
 interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
@@ -471,19 +500,11 @@ export function AiChatPanel() {
 
   /** 快照级撤销只在 AI 这一步仍是最新 revision 时安全。 */
   const canUndoLayer = (layer: ChatLayerConfirmation): boolean =>
-    layer.undone !== true &&
-    layer.canvasId !== null &&
-    layer.canvasId === currentCanvasId &&
-    currentRevision !== null &&
-    currentRevision === layer.expectedRevision;
+    layerUndoState(layer, currentCanvasId, currentRevision) === 'available';
 
   /** 后续 mutation 已越过 AI 这一步：只给纯文本，不给撤销入口。 */
   const isLayerStale = (layer: ChatLayerConfirmation): boolean =>
-    layer.undone !== true &&
-    layer.canvasId !== null &&
-    layer.canvasId === currentCanvasId &&
-    currentRevision !== null &&
-    currentRevision > layer.expectedRevision;
+    layerUndoState(layer, currentCanvasId, currentRevision) === 'stale';
 
   /** 只撤销 AI 这一步；revision 守卫已证明不会丢掉后续操作。 */
   const undoLayer = async (messageId: number) => {

@@ -41,12 +41,12 @@ describe('相对时间文案', () => {
     expect(formatSavedAt(now - 125_000, now)).toBe('2 分钟前');
   });
 
-  it('三种保存状态各有唯一文案', () => {
+  it('保存中、已保存与空闲各有唯一文案', () => {
     const now = 1_000_000;
 
     expect(saveStatusText('saving', null, now)).toBe('保存中…');
     expect(saveStatusText('saved', now, now)).toBe('已保存 · 刚刚');
-    expect(saveStatusText('error', null, now)).toBe('保存失败 · 重试');
+    expect(saveStatusText('idle', null, now)).toBe('—');
   });
 });
 
