@@ -93,6 +93,18 @@ export class CanvasRepository {
     return row ?? null;
   }
 
+  /**
+   * Renames a canvas without touching `revision`: identity is not content, so a
+   * rename must not create an undo step or invalidate an in-flight save.
+   */
+  rename(id: string, name: string): CanvasRecord | null {
+    this.db
+      .prepare(`UPDATE canvases SET name = ?, updatedAt = ? WHERE id = ?`)
+      .run(name, Date.now(), id);
+
+    return this.findById(id);
+  }
+
   bumpRevision(id: string): CanvasRecord | null {
     this.db
       .prepare(`UPDATE canvases SET revision = revision + 1, updatedAt = ? WHERE id = ?`)

@@ -15,6 +15,10 @@ export class CommandDispatcher {
     return this.service.createCanvas(input);
   }
 
+  renameCanvas(canvasId: string, name: string): CanvasDocument {
+    return this.service.renameCanvas(canvasId, name);
+  }
+
   dispatch(canvasId: string, request: ApplyActionRequest): CanvasDocument {
     return this.service.applyAction(canvasId, request);
   }

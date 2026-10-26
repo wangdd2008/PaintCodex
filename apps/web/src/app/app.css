@@ -113,12 +113,85 @@ button {
 }
 
 .canvas-area {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: #111216;
   min-width: 0;
+}
+
+/* 新建确认条贴在画布区顶部，覆盖显示以免推开画布；不弹原生 confirm。 */
+.new-canvas-confirm {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  width: min(640px, calc(100% - 24px));
+  padding: 10px 14px;
+  transform: translateX(-50%);
+  border: 1px solid #4a4d59;
+  border-radius: 8px;
+  background: #26272e;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  font-size: 13px;
+}
+
+.new-canvas-confirm__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.new-canvas-confirm__text {
+  flex: 1 1 220px;
+  margin: 0;
+  color: #b9bcc7;
+  line-height: 1.5;
+}
+
+.new-canvas-confirm__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.new-canvas-confirm__button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid #3a3c45;
+  border-radius: 6px;
+  background: #1f2026;
+  color: inherit;
+  cursor: pointer;
+}
+
+.new-canvas-confirm__button:hover:not(:disabled) {
+  background: #2f313a;
+}
+
+.new-canvas-confirm__button--primary {
+  border-color: #5b8def;
+  background: #2c3f66;
+  color: #eef3ff;
+}
+
+.new-canvas-confirm__button--primary:hover:not(:disabled) {
+  background: #36507f;
+}
+
+.new-canvas-confirm__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.new-canvas-confirm__button:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
 }
 
 .canvas-viewport {
