@@ -31,7 +31,7 @@
 2026-10-26 — 实现完成，随后合并 `feat/release-hardening` 的最新提交。
 
 - 实现提交：`070b925`。
-- 验证：`pnpm --filter @paintcodex/daemon test`（103 → 111 passed）、`pnpm --filter @paintcodex/web test`（62 → 74 passed）、`pnpm -r typecheck` 全绿。
+- 验证：`pnpm --filter @paintcodex/daemon test`（103 → 111 passed）、`pnpm --filter @paintcodex/web test`（63 → 74 passed；合并 06 的图层测试后总计 79）、`pnpm -r typecheck` 全绿。
 - 口径：
   - **HTTP 错误率** = (5xx `error` + 4xx `warn`) / 排除 `/monitor/*` 后的 HTTP 请求数；hint 固定写 `N 失败 · M 冲突 / K 请求`，分子分母可直接复算；`K = 0` 时比率为 `null`，界面显示 `—`。
   - **全部错误** = 窗口内所有分类 `level='error'` 的条数；hint 按分类列出 `category N`，与分类条的错误计数同源；4xx 只作为「冲突」进入错误率分子，不进入「全部错误」。
