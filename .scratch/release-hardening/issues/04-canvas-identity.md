@@ -59,7 +59,7 @@ body: {"name": string}          // 只接受 name；trim 后 1–80 字符
 
 - 新建：先 `POST` 成功，再 `rememberCanvas`；失败时保留 `canvas`/`requestedCanvasId`/状态 `ready`，只有错误文案变化。有画布时「新建画布」打开画布区顶部确认条（`role="alertdialog"`，焦点默认在「取消」，Esc 关闭），确认后按钮转「新建中…」，失败仍停在原画布。
 - 返回上一张：`previousCanvasId` 单级、内存态（刷新即失效，符合「不做列表」）；成功返回后清空；返回请求失败保留当前画布与指针，404 时提示「上一张画布不存在」并清空指针。
-- 重命名：菜单栏名字双击或 ✎ 进入（✎ 是 Tab 可达的真实按钮，Enter/Space 打开）；Enter/失焦提交，Esc 取消（`stopPropagation`，不会顺带关闭侧栏抽屉），空值回退原名且不发请求；显示名只来自服务端响应，失败时回滚并就地 `role="alert"` 提示；输入框 `aria-label="画布名称"` + `maxLength=80`。
+- 重命名：菜单栏名字双击或 ✎ 进入（✎ 是 Tab 可达的真实按钮，Enter/Space 打开）；Enter/失焦提交，Esc 取消（`stopPropagation`，不会顺带关闭侧栏抽屉），空值回退原名且不发请求；显示名只来自服务端响应，失败时回滚并就地 `role="alert"` 提示；输入框 `aria-label="画布名称"` + `maxLength=80`。`PATCH` 走与笔画相同的 mutation 队列（但不改保存状态），避免改名响应比在途笔画更晚落地、用旧快照盖掉刚画的图层。
 - 改名后的传播：菜单栏（`CanvasNameEditor`）、画布下方 hint（`CanvasStage` 读 `canvas.name`）、导出 PNG/JSON 文件名（`canvasPngFilename` / `canvasJsonFilename` 读 `canvas.name`）、刷新（daemon 已持久化）自动一致，无需额外同步。
 
 **测试数字**

@@ -451,7 +451,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       throw new Error('没有可重命名的画布');
     }
 
-    const updated = await renameCanvasRequest(current.id, name.trim());
+    // Same queue as strokes: a rename answered with an older snapshot must not
+    // land after a newer stroke save and hide the layer that was just drawn.
+    // Save state is left alone — a rename is identity, not persistence of content.
+    const updated = await enqueueMutation(() =>
+      renameCanvasRequest(current.id, name.trim()),
+    );
 
     // A rename answered after the user switched canvases must not overwrite
     // the document that is on screen now.
