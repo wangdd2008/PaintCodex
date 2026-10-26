@@ -1,7 +1,18 @@
-import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
+﻿import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
 import './ai-chat.css';
+
+/** 这次回复落地的 AI 图层，以及撤销守卫要比较的 revision。 */
+interface ChatLayerConfirmation {
+  id: string;
+  name: string;
+  canvasId: string | null;
+  /** AI 图层生成后产生的 revision；只有当前 revision 与它相等时才允许撤销。 */
+  expectedRevision: number;
+  /** 用户已撤销这一步，避免撤销入口再次出现。 */
+  undone?: boolean;
+}
 
 interface ChatMessage {
   id: number;
@@ -9,6 +20,12 @@ interface ChatMessage {
   content: string;
   /** Set on the pending reply when the user cancels it. */
   cancelled?: boolean;
+  /** 首个 delta 已到达：等待文案切换为「正在生成…」。 */
+  generating?: boolean;
+  /** done 时结算的固定用时；运行结束后继续保留。 */
+  durationSeconds?: number;
+  /** 从 `layerCreated` 帧消费到的落地确认。 */
+  layer?: ChatLayerConfirmation;
 }
 
 /** The protocol owns the step shape so frontend and daemon cannot drift. */
@@ -84,19 +101,46 @@ export function AiChatPanel() {
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentStep, setCurrentStep] = useState<ChatStep | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const canvas = useCanvasStore((state) => state.canvas);
   const status = useCanvasStore((state) => state.status);
+  const currentCanvasId = useCanvasStore((state) => state.canvas?.id ?? null);
+  const currentRevision = useCanvasStore((state) => state.canvas?.revision ?? null);
   const blockedReason = composerBlockedReason(canvas !== null, status);
 
   const nextId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** 本次回复的墙钟起点，供每秒计时与终态用时共用。 */
+  const runStartedAt = useRef<number | null>(null);
+  /** 请求发出时的 revision，用来推算 AI 那一步的 revision。 */
+  const runStartRevision = useRef<number | null>(null);
+  /** 请求针对的画布；确认行绝不能撤销另一张画布。 */
+  const runCanvasId = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  // 每秒刷新一次计时；生成期间也继续计时。
+  useEffect(() => {
+    if (!inFlight) {
+      return;
+    }
+
+    const startedAt = runStartedAt.current;
+    if (startedAt === null) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [inFlight]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -116,7 +160,11 @@ export function AiChatPanel() {
   };
 
   const appendToAssistant = (delta: string) => {
-    updateLastAssistant((last) => ({ ...last, content: last.content + delta }));
+    updateLastAssistant((last) => ({
+      ...last,
+      content: last.content + delta,
+      generating: true,
+    }));
   };
 
   const markAssistantCancelled = () => {
@@ -146,7 +194,37 @@ export function AiChatPanel() {
       }
     }
 
+    if (payload.layerCreated) {
+      const { id, name } = payload.layerCreated;
+
+      if (typeof id === 'string' && typeof name === 'string') {
+        // AI 图层只比发出时的 revision 多一步；运行期间又画了一笔、
+        // 另一个标签页写入或发生重试时，守卫保持关闭，
+        // 宁可不给撤销，也不撤掉不属于这一步的快照。
+        const startRevision = runStartRevision.current ?? 0;
+
+        updateLastAssistant((last) => ({
+          ...last,
+          layer: {
+            id,
+            name,
+            canvasId: runCanvasId.current,
+            expectedRevision: startRevision + 1,
+          },
+        }));
+        return;
+      }
+    }
+
     if (payload.done === true) {
+      const startedAt = runStartedAt.current;
+      const durationSeconds =
+        startedAt === null
+          ? 0
+          : Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+
+      setElapsedSeconds(durationSeconds);
+      updateLastAssistant((last) => ({ ...last, durationSeconds }));
       return;
     }
 
@@ -175,6 +253,10 @@ export function AiChatPanel() {
     setLastInput(null);
     setError(null);
     setCurrentStep(null);
+    setElapsedSeconds(0);
+    runStartedAt.current = Date.now();
+    runStartRevision.current = useCanvasStore.getState().canvas?.revision ?? null;
+    runCanvasId.current = useCanvasStore.getState().canvas?.id ?? null;
     setInFlight(true);
 
     const userMessage: ChatMessage = {
@@ -250,6 +332,9 @@ export function AiChatPanel() {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
+      runStartedAt.current = null;
+      runStartRevision.current = null;
+      runCanvasId.current = null;
       setCurrentStep(null);
       setInFlight(false);
     }
@@ -283,6 +368,50 @@ export function AiChatPanel() {
     setLastInput(null);
   };
 
+  /** 快照级撤销只在 AI 这一步仍是最新 revision 时安全。 */
+  const canUndoLayer = (layer: ChatLayerConfirmation): boolean =>
+    layer.undone !== true &&
+    layer.canvasId !== null &&
+    layer.canvasId === currentCanvasId &&
+    currentRevision !== null &&
+    currentRevision === layer.expectedRevision;
+
+  /** 后续 mutation 已越过 AI 这一步：只给纯文本，不给撤销入口。 */
+  const isLayerStale = (layer: ChatLayerConfirmation): boolean =>
+    layer.undone !== true &&
+    layer.canvasId !== null &&
+    layer.canvasId === currentCanvasId &&
+    currentRevision !== null &&
+    currentRevision > layer.expectedRevision;
+
+  /** 只撤销 AI 这一步；revision 守卫已证明不会丢掉后续操作。 */
+  const undoLayer = async (messageId: number) => {
+    const message = messages.find((item) => item.id === messageId);
+    const layer = message?.layer;
+
+    if (!layer || !canUndoLayer(layer)) {
+      return;
+    }
+
+    await useCanvasStore.getState().undo();
+
+    const after = useCanvasStore.getState().canvas;
+    const layerStillThere =
+      after?.layers.some((item) => item.id === layer.id) ?? true;
+
+    if (!layerStillThere) {
+      setMessages((previous) =>
+        previous.map((item) =>
+          item.id === messageId && item.layer
+            ? { ...item, layer: { ...item.layer, undone: true } }
+            : item,
+        ),
+      );
+    }
+  };
+
+  const lastMessageId = messages[messages.length - 1]?.id ?? null;
+
   return (
     <section className="ai-chat" aria-label="AI chat">
       <button
@@ -309,7 +438,23 @@ export function AiChatPanel() {
             ) : (
               messages.map((message) => {
                 const text = visibleAssistantText(message.content);
-                const step = inFlight && message.role === 'assistant' ? currentStep : null;
+                const isPending =
+                  inFlight &&
+                  message.role === 'assistant' &&
+                  message.id === lastMessageId;
+                const step = isPending ? currentStep : null;
+                // 最后两步描述结果落地，首个 token 之后仍继续显示，
+                // 不能一直停在「正在生成…」。
+                const applyStep =
+                  step?.id === 'action_parse' || step?.id === 'action_apply'
+                    ? step
+                    : null;
+                const progressLabel =
+                  applyStep?.label ??
+                  (message.generating ? '正在生成…' : step?.label ?? '思考中…');
+                const progressKey =
+                  applyStep?.id ??
+                  (message.generating ? 'generating' : step?.id ?? 'waiting');
 
                 return (
                   <article
@@ -320,21 +465,56 @@ export function AiChatPanel() {
                       {message.role === 'user' ? '你' : 'AI 助手'}
                     </span>
                     <p className="ai-chat__text">
-                      {step ? (
-                        // Keyed by step id so every backend step replays the fade-in.
-                        <span className="ai-chat__step" key={step.id}>
-                          {step.label}
+                      {isPending ? (
+                        <span className="ai-chat__progress">
+                          {/* Keyed by phase so every step replays the fade-in. */}
+                          <span className="ai-chat__step" key={progressKey}>
+                            {progressLabel}
+                          </span>
+                          <span className="ai-chat__timer">
+                            已用 {elapsedSeconds}s
+                          </span>
                         </span>
                       ) : null}
-                      {text.length > 0
-                        ? text
-                        : inFlight && message.role === 'assistant' && !step
-                          ? '思考中…'
-                          : ''}
+                      {text}
                       {message.cancelled ? (
                         <span className="ai-chat__cancelled">已取消</span>
                       ) : null}
                     </p>
+                    {/* 终态在运行结束后保留，不能清空为空白。 */}
+                    {!isPending && message.durationSeconds !== undefined ? (
+                      <span className="ai-chat__terminal">
+                        已完成 · 用时 {message.durationSeconds}s
+                      </span>
+                    ) : null}
+                    {message.layer ? (
+                      <div className="ai-chat__landing">
+                        <span className="ai-chat__landing-text">
+                          {message.layer.undone
+                            ? `已撤销添加图层「${message.layer.name}」`
+                            : `已添加图层「${message.layer.name}」`}
+                        </span>
+                        {canUndoLayer(message.layer) ? (
+                          <>
+                            <span aria-hidden="true"> · </span>
+                            <button
+                              type="button"
+                              className="ai-chat__landing-undo"
+                              onClick={() => void undoLayer(message.id)}
+                            >
+                              撤销
+                            </button>
+                          </>
+                        ) : isLayerStale(message.layer) ? (
+                          <>
+                            <span aria-hidden="true"> · </span>
+                            <span className="ai-chat__landing-note">
+                              已有后续操作，无法撤销
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })
