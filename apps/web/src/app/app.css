@@ -224,10 +224,65 @@ button {
   height: 100% !important;
 }
 
-.canvas-hint {
+/* Canvas-level error banner: one mutation failure, one line, retry or dismiss. */
+.canvas-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #7a3b3b;
+  border-radius: 6px;
+  background: #33201f;
+  color: #ffd7d7;
+  font-size: 13px;
+}
+
+.canvas-alert__message {
+  flex: 1;
   margin: 0;
-  color: #8a8d99;
-  font-size: 12px;
+  line-height: 1.5;
+}
+
+.canvas-alert__retry {
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid #a95a5a;
+  border-radius: 6px;
+  background: #4a2a2a;
+  color: #ffecec;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.canvas-alert__retry:hover {
+  background: #5a3333;
+}
+
+.canvas-alert__retry:focus-visible,
+.canvas-alert__dismiss:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+.canvas-alert__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #d9a5a5;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-alert__dismiss:hover {
+  border-color: #7a3b3b;
+  color: #ffecec;
 }
 
 /* Covers the canvas area for the three non-ready states, so no white board is
@@ -330,6 +385,35 @@ button {
   background: #1f2026;
   color: #9a9daa;
   font-size: 12px;
+}
+
+.status-bar__save {
+  color: #9a9daa;
+}
+
+.status-bar__retry {
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid #7a3b3b;
+  border-radius: 4px;
+  background: #2a1e1e;
+  color: #f0b4b4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.status-bar__retry:hover:not(:disabled) {
+  background: #3a2626;
+}
+
+.status-bar__retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.status-bar__retry:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
 }
 
 /*

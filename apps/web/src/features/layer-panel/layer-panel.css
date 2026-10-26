@@ -57,6 +57,12 @@
   background: #23314f;
 }
 
+/* 2px 环 + 2px 间距，颜色 #5b8def 与行底色/选中底色的对比均 ≥3:1。 */
+.layer-item:focus-visible {
+  outline: 2px solid #5b8def;
+  outline-offset: 2px;
+}
+
 /* 命中区 28×28：靠固定尺寸扩展热区，字形仍是 16px 图标 / 11px 字号。 */
 .layer-item__visibility {
   display: inline-flex;
