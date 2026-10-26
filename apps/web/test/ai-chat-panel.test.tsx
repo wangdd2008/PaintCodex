@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { CanvasDocument } from '@paintcodex/protocol';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatPanel } from '../src/features/ai-chat/AiChatPanel';
 import { useCanvasStore } from '../src/services/canvas-store';
@@ -283,7 +283,7 @@ describe('AiChatPanel 无画布门禁', () => {
 });
 
 describe('AiChatPanel errors', () => {
-  it('replaces the Codex CLI timeout with a retry prompt', async () => {
+  it('replaces the Codex CLI timeout with a Chinese retry prompt', async () => {
     const stream = controlledStream();
     stubFetch(stream.body);
 
@@ -296,10 +296,12 @@ describe('AiChatPanel errors', () => {
     stream.close();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('请求超时，请重试');
+    expect(within(alert).getByText('请求超时（等待 120 秒）。')).toBeTruthy();
+    expect(within(alert).getByRole('button', { name: '重试' })).toBeTruthy();
+    expect(alert.textContent).not.toContain('Codex CLI');
   });
 
-  it('keeps other backend error messages verbatim', async () => {
+  it('translates backend error codes instead of showing their English message', async () => {
     const stream = controlledStream();
     stubFetch(stream.body);
 
@@ -310,6 +312,7 @@ describe('AiChatPanel errors', () => {
     stream.close();
 
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toBe('Open a canvas first.');
+    expect(alert.textContent).toContain('请先新建一张画布，再让 AI 作画。');
+    expect(alert.textContent).not.toContain('Open a canvas first.');
   });
 });
