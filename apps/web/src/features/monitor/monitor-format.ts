@@ -23,6 +23,21 @@ export const DEFAULT_LOG_FILTERS: LogFilterState = {
   range: 'all',
 };
 
+/**
+ * 级别的界面说法。协议里的 `debug/info/warn/error` 保留为筛选值，
+ * 只把展示文字中文化，请求参数不受影响。
+ */
+export const LOG_LEVEL_LABELS: Record<LogLevel, string> = {
+  debug: '调试',
+  info: '信息',
+  warn: '警告',
+  error: '错误',
+};
+
+export function formatLogLevel(level: LogLevel): string {
+  return LOG_LEVEL_LABELS[level];
+}
+
 export const LOG_RANGE_MS: Record<Exclude<LogRange, 'all'>, number> = {
   '5m': 5 * 60_000,
   '15m': 15 * 60_000,

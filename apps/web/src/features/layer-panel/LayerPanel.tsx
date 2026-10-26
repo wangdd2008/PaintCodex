@@ -11,11 +11,11 @@ import './layer-panel.css';
 /** 删除后的恢复条存活 8 秒；连续删除时后一条替换前一条并重新计时。 */
 export const DELETE_RESTORE_TIMEOUT_MS = 8000;
 
-/** 读屏用的类型名：界面上的类型文字另有呈现，这里只为播报服务。 */
+/** 图层类型的唯一中文说法：列表徽标与读屏名称共用，避免两处漂移。 */
 const LAYER_TYPE_LABELS: Record<Layer['type'], string> = {
-  raster: '位图',
+  raster: '图片',
   vector: '笔迹',
-  'ai-generated': 'AI 生成',
+  'ai-generated': 'AI',
 };
 
 interface DeleteRestore {
@@ -397,7 +397,7 @@ export function LayerPanel() {
                       : 'layer-item__type'
                   }
                 >
-                  {layer.type === 'ai-generated' ? '✦ AI' : layer.type}
+                  {LAYER_TYPE_LABELS[layer.type]}
                 </span>
                 <button
                   type="button"

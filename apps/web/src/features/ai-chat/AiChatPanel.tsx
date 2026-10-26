@@ -514,7 +514,7 @@ export function AiChatPanel() {
   const lastMessageId = messages[messages.length - 1]?.id ?? null;
 
   return (
-    <section className="ai-chat" aria-label="AI chat">
+    <section className="ai-chat" aria-label="AI 对话">
       <button
         type="button"
         className="ai-chat__toggle"

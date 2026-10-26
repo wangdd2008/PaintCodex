@@ -15,6 +15,7 @@ import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export';
 import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
+import { displayCanvasName } from '../services/naming';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
 import { useViewportStore } from '../services/viewport-store';
@@ -187,7 +188,7 @@ export function App() {
         throw new Error('画布尚未准备好导出');
       }
 
-      downloadPng(dataUrl, canvasPngFilename(canvas.name));
+      downloadPng(dataUrl, canvasPngFilename(displayCanvasName(canvas.name)));
       setExportError(null);
     } catch (caught) {
       setExportError(
@@ -202,7 +203,7 @@ export function App() {
     }
 
     try {
-      downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
+      downloadCanvasJson(canvas, canvasJsonFilename(displayCanvasName(canvas.name)));
       setExportError(null);
     } catch (caught) {
       setExportError(

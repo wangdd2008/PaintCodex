@@ -1,5 +1,6 @@
 import { MAX_CANVAS_NAME_LENGTH } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { displayCanvasName } from '../../services/naming';
 import { useCanvasStore } from '../../services/canvas-store';
 import './canvas-name.css';
 
@@ -14,7 +15,8 @@ export function CanvasNameEditor() {
   const name = useCanvasStore((state) => state.canvas?.name ?? '');
   const renameCanvas = useCanvasStore((state) => state.renameCanvas);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name);
+  // 编辑器里显示的也走兜底名；草稿同样从显示值开始，避免「Untitled」出现在输入框。
+  const [draft, setDraft] = useState(() => displayCanvasName(name));
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -33,13 +35,13 @@ export function CanvasNameEditor() {
   // Switching canvases (new one or 返回上一张) must not carry this draft over.
   useEffect(() => {
     setEditing(false);
-    setDraft(name);
+    setDraft(displayCanvasName(name));
     setError(null);
   }, [canvasId]);
 
   function beginEdit() {
     cancelRequestedRef.current = false;
-    setDraft(name);
+    setDraft(displayCanvasName(name));
     setError(null);
     setEditing(true);
   }
@@ -50,13 +52,14 @@ export function CanvasNameEditor() {
     }
 
     const original = name;
+    const originalDisplay = displayCanvasName(original);
     const trimmed = draft.trim();
 
     setEditing(false);
 
-    if (trimmed === '' || trimmed === original) {
-      // 空值回退原名；没变化就不打扰服务端。
-      setDraft(original);
+    // 空值或未改动回退原名；旧画布只显示「未命名」，不因为打开/确认编辑就写回。
+    if (trimmed === '' || trimmed === originalDisplay) {
+      setDraft(originalDisplay);
       return;
     }
 
@@ -67,7 +70,7 @@ export function CanvasNameEditor() {
       setError(null);
     } catch (caught) {
       // 失败回滚显示并就地提示，不出现「界面改了但服务端没改」。
-      setDraft(original);
+      setDraft(originalDisplay);
       setError(caught instanceof Error ? caught.message : '画布改名失败');
     } finally {
       setSaving(false);
@@ -77,7 +80,7 @@ export function CanvasNameEditor() {
   function cancel() {
     cancelRequestedRef.current = true;
     setEditing(false);
-    setDraft(name);
+    setDraft(displayCanvasName(name));
     setError(null);
   }
 
@@ -127,7 +130,7 @@ export function CanvasNameEditor() {
             title="双击重命名"
             onDoubleClick={beginEdit}
           >
-            {name}
+            {displayCanvasName(name)}
           </span>
           <button
             type="button"

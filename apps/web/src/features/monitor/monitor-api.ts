@@ -133,7 +133,7 @@ async function request<T>(url: string, signal?: AbortSignal): Promise<T> {
     const body = (await response.json().catch(() => null)) as MonitorErrorBody | null;
 
     throw new ApiError(
-      body?.error?.message ?? `Request failed with status ${response.status}`,
+      body?.error?.message ?? `请求失败，状态码 ${response.status}`,
       response.status,
       body?.error?.code,
     );
