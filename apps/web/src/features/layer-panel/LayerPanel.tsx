@@ -6,6 +6,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { useCanvasStore } from '../../services/canvas-store';
+import { LayerNameEditor } from './LayerNameEditor';
+import { LayerOpacityControl } from './LayerOpacityControl';
 import './layer-panel.css';
 
 /** 删除后的恢复条存活 8 秒；连续删除时后一条替换前一条并重新计时。 */
@@ -389,7 +391,7 @@ export function LayerPanel() {
                 <span className="layer-item__tooltip" aria-hidden="true">
                   {layer.visible ? '隐藏图层' : '显示图层'}
                 </span>
-                <span className="layer-item__name">{layer.name}</span>
+                <LayerNameEditor layer={layer} />
                 <span
                   className={
                     layer.type === 'ai-generated'
@@ -399,6 +401,8 @@ export function LayerPanel() {
                 >
                   {LAYER_TYPE_LABELS[layer.type]}
                 </span>
+                {/* 透明度与重命名都作用于「该行」，与 activeLayerId 无关（spec §7）。 */}
+                <LayerOpacityControl layer={layer} />
                 <button
                   type="button"
                   className="layer-item__delete"

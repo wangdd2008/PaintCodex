@@ -14,6 +14,7 @@ import {
 } from 'fabric';
 import { setActiveCanvas } from '../../services/canvas-engine';
 import { useCanvasStore } from '../../services/canvas-store';
+import { setLayerOpacityPreviewHandler } from '../../services/layer-preview';
 import { nextStrokeLayerName } from '../../services/naming';
 import { useToolStore } from '../../services/tool-store';
 import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
@@ -592,6 +593,26 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       setObjectsVersion((version) => version + 1);
     })();
   }, [ready, layers]);
+
+  /**
+   * 透明度滑块的本地预览（票 09）：只改 Fabric 对象的 `opacity`，不发 PATCH。
+   * 松手后的 `change` 由图层面板提交；失败时它会把预览改回快照值。
+   */
+  useEffect(() => {
+    setLayerOpacityPreviewHandler((layerId, opacity) => {
+      const canvas = fabricRef.current;
+      const object = objectsRef.current.get(layerId);
+
+      if (!canvas || !object) {
+        return;
+      }
+
+      object.set({ opacity });
+      canvas.requestRenderAll();
+    });
+
+    return () => setLayerOpacityPreviewHandler(null);
+  }, []);
 
   /**
    * Selecting an AI layer means selecting it on the canvas: it becomes Fabric's
