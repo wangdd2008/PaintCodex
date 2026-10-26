@@ -3,6 +3,10 @@ import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { MonitorPage } from '../features/monitor/MonitorPage';
+import {
+  ConnectionStatus,
+  type ConnectionState,
+} from '../features/status-bar/ConnectionStatus';
 import { SaveStatus } from '../features/status-bar/SaveStatus';
 import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
@@ -27,6 +31,8 @@ export function App() {
   const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
   // 窄屏（≤860px）侧栏是覆盖式抽屉；桌面忽略这个状态，侧栏常驻。
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // SSE 连接状态只由 EventSource 的 open/error 驱动，不轮询、不手动重连。
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const drawerToggleRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -44,8 +50,14 @@ export function App() {
       return;
     }
 
+    // 打开（或切换到）一张画布时先显示「连接中…」，直到 SSE 的 open 事件到达。
+    setConnectionState('connecting');
+
     return subscribeToCanvas(canvasId, {
-      onOpen: () => void refreshCanvas(),
+      onOpen: () => {
+        setConnectionState('live');
+        void refreshCanvas();
+      },
       onSnapshotChanged: (event) => {
         const current = useCanvasStore.getState().canvas;
 
@@ -57,6 +69,7 @@ export function App() {
           void refreshCanvas();
         }
       },
+      onError: () => setConnectionState('reconnecting'),
     });
   }, [canvasId, refreshCanvas]);
 
@@ -282,6 +295,8 @@ export function App() {
           </span>
           <span>{tool === 'brush' ? '画笔' : '选择'}</span>
           <SaveStatus />
+          {/* 没有画布就没有 SSE 通道，不伪造连接状态。 */}
+          {canvasId ? <ConnectionStatus state={connectionState} /> : null}
         </footer>
       ) : null}
     </div>
