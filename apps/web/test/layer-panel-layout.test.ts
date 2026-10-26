@@ -126,7 +126,7 @@ describe('LayerPanel 滚动容器', () => {
 
     render(createElement(LayerPanel));
 
-    const list = screen.getByRole('list');
+    const list = screen.getByRole('listbox', { name: '图层列表' });
     expect(list.classList.contains('layer-list')).toBe(true);
     expect(list.querySelectorAll('li')).toHaveLength(2);
   });
