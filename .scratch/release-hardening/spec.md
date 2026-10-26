@@ -132,6 +132,7 @@ Commitment is **20 items**: `UX-01` … `UX-20`. `UX-21` … `UX-26` (P2) are ex
 - `POST /paint/canvas` 对 `name` 施加同一套校验（现状是零校验，非字符串会在 `input.name?.trim()` 抛错）。
 - 有画布时新建先确认；新建失败不覆盖当前 `canvasId` 与 localStorage。
 - 返回上一张：优先 `previousCanvasId`（单级，够用），不引入 `pushState`/路由。
+- 浏览器后退**不接管**：应用内返回入口由按钮承担。票 04 的「`history.back()` 不再离开应用」按此解释——浏览器后退仍会回到进入前的页面（与基线一致），这是有意取舍，不是遗漏。
 - 本轮不做画布列表。
 
 ### 7. 图层列表
