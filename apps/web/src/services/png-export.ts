@@ -5,24 +5,34 @@ const TRAILING_DOTS = /\.+$/;
 const PNG_EXTENSION = /\.png$/i;
 const FALLBACK_BASENAME = 'paintcodex';
 const DEFAULT_MEDIA_TYPE = 'application/octet-stream';
+/** 与画布名的短 id 后缀一起，避免两分钟内创建的同名画布导出的文件互覆。 */
+const SHORT_ID_LENGTH = 8;
 
-/**
- * Turns a canvas name into a safe `<name>.png` download name. Characters that
- * Windows rejects, plus whitespace, are normalised away; empty names fall back
- * to `paintcodex.png`.
- */
-export function canvasPngFilename(name: string | null | undefined): string {
-  const sanitized = (name ?? '')
+function sanitizedBasename(value: string): string {
+  return value
     .replace(ILLEGAL_FILENAME_CHARS, '')
     .replace(WHITESPACE_RUN, '-')
     .replace(EDGE_DASHES, '')
     .replace(TRAILING_DOTS, '');
+}
 
-  if (!sanitized) {
+/**
+ * 把画布名与画布 id 折成安全的 `<name>-<short-id>.png` 下载名：去掉 Windows
+ * 不允许的字符并归一空白，空名回退为 `paintcodex.png`。
+ */
+export function canvasPngFilename(
+  name: string | null | undefined,
+  id?: string | null,
+): string {
+  const base = sanitizedBasename(name ?? '');
+  const shortId = sanitizedBasename((id ?? '').slice(0, SHORT_ID_LENGTH));
+  const basename = shortId ? `${base || FALLBACK_BASENAME}-${shortId}` : base;
+
+  if (!basename) {
     return `${FALLBACK_BASENAME}.png`;
   }
 
-  return PNG_EXTENSION.test(sanitized) ? sanitized : `${sanitized}.png`;
+  return PNG_EXTENSION.test(basename) ? basename : `${basename}.png`;
 }
 
 /**

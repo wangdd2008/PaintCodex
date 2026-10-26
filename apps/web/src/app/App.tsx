@@ -14,7 +14,7 @@ import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export';
-import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
+import { describeCanvasError, readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { displayCanvasName } from '../services/naming';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
@@ -188,12 +188,13 @@ export function App() {
         throw new Error('画布尚未准备好导出');
       }
 
-      downloadPng(dataUrl, canvasPngFilename(displayCanvasName(canvas.name)));
+      downloadPng(
+        dataUrl,
+        canvasPngFilename(displayCanvasName(canvas.name), canvas.id),
+      );
       setExportError(null);
     } catch (caught) {
-      setExportError(
-        caught instanceof Error ? caught.message : '无法导出 PNG',
-      );
+      setExportError(describeCanvasError(caught, '无法导出 PNG'));
     }
   }
 
@@ -203,12 +204,13 @@ export function App() {
     }
 
     try {
-      downloadCanvasJson(canvas, canvasJsonFilename(displayCanvasName(canvas.name)));
+      downloadCanvasJson(
+        canvas,
+        canvasJsonFilename(displayCanvasName(canvas.name), canvas.id),
+      );
       setExportError(null);
     } catch (caught) {
-      setExportError(
-        caught instanceof Error ? caught.message : '无法导出 JSON',
-      );
+      setExportError(describeCanvasError(caught, '无法导出 JSON'));
     }
   }
 

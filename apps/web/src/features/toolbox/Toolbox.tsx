@@ -22,6 +22,10 @@ export function Toolbox() {
   const customColorSelected = !BRUSH_COLOR_PRESETS.some(
     (preset) => preset.value === brushColor,
   );
+  // 默认笔宽 6 不在四档里；没有额外控件时，初始状态没有任何宽度是选中的。
+  const currentWidthOutsidePresets = !(BRUSH_WIDTHS as readonly number[]).includes(
+    brushWidth,
+  );
 
   return (
     <nav className="toolbox" aria-label="工具">
@@ -141,6 +145,29 @@ export function Toolbox() {
             </button>
           );
         })}
+        {currentWidthOutsidePresets ? (
+          <button
+            type="button"
+            className="toolbox-width toolbox-width--selected toolbox-width--current"
+            title={`笔宽 ${brushWidth}（默认）`}
+            aria-label={`笔宽 ${brushWidth}（默认）`}
+            aria-pressed="true"
+            onClick={() => setBrushWidth(brushWidth)}
+          >
+            <span
+              className="toolbox-width__stroke"
+              style={{ height: `${brushWidth}px`, backgroundColor: brushColor }}
+              aria-hidden="true"
+            />
+            <span className="toolbox-width__label">
+              {brushWidth} px
+              <span className="toolbox-width__default">默认</span>
+            </span>
+            <span className="toolbox-width__check" aria-hidden="true">
+              ✓
+            </span>
+          </button>
+        ) : null}
       </div>
     </nav>
   );

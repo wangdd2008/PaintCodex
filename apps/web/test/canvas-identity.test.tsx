@@ -239,7 +239,12 @@ describe('画布行内重命名', () => {
     await waitFor(() => expect(useCanvasStore.getState().canvas?.name).toBe('深夜速写'));
 
     expect(screen.getByText('深夜速写')).toBeTruthy();
-    expect(canvasPngFilename(useCanvasStore.getState().canvas?.name)).toBe('深夜速写.png');
+    expect(
+      canvasPngFilename(
+        useCanvasStore.getState().canvas?.name,
+        useCanvasStore.getState().canvas?.id,
+      ),
+    ).toBe('深夜速写-canvas-a.png');
 
     const patchCall = fetchMock.mock.calls.find(
       (call) => (call[1] as RequestInit | undefined)?.method === 'PATCH',

@@ -6,6 +6,16 @@ const EDGE_DASHES = /^-+|-+$/g;
 const TRAILING_DOTS = /\.+$/;
 const JSON_EXTENSION = /\.json$/i;
 const FALLBACK_BASENAME = 'paintcodex';
+/** 与画布名的短 id 后缀一起，避免两分钟内创建的同名画布导出的文件互覆。 */
+const SHORT_ID_LENGTH = 8;
+
+function sanitizedBasename(value: string): string {
+  return value
+    .replace(ILLEGAL_FILENAME_CHARS, '')
+    .replace(WHITESPACE_RUN, '-')
+    .replace(EDGE_DASHES, '')
+    .replace(TRAILING_DOTS, '');
+}
 
 export interface CanvasJsonExport {
   version: string;
@@ -14,20 +24,21 @@ export interface CanvasJsonExport {
 }
 
 /**
- * Turns a canvas name into a safe `<name>.json` download name.
+ * 把画布名与画布 id 折成安全的 `<name>-<short-id>.json` 下载名。
  */
-export function canvasJsonFilename(name: string | null | undefined): string {
-  const sanitized = (name ?? '')
-    .replace(ILLEGAL_FILENAME_CHARS, '')
-    .replace(WHITESPACE_RUN, '-')
-    .replace(EDGE_DASHES, '')
-    .replace(TRAILING_DOTS, '');
+export function canvasJsonFilename(
+  name: string | null | undefined,
+  id?: string | null,
+): string {
+  const base = sanitizedBasename(name ?? '');
+  const shortId = sanitizedBasename((id ?? '').slice(0, SHORT_ID_LENGTH));
+  const basename = shortId ? `${base || FALLBACK_BASENAME}-${shortId}` : base;
 
-  if (!sanitized) {
+  if (!basename) {
     return `${FALLBACK_BASENAME}.json`;
   }
 
-  return JSON_EXTENSION.test(sanitized) ? sanitized : `${sanitized}.json`;
+  return JSON_EXTENSION.test(basename) ? basename : `${basename}.json`;
 }
 
 /**
