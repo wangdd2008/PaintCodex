@@ -16,6 +16,15 @@ const FALLBACK_WIDTH = 1920;
 const FALLBACK_HEIGHT = 1080;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
+/**
+ * Locating a brush layer is a transient, client-only cue: the stroke is
+ * repainted in a louder color for 800ms and then restored from the values we
+ * captured. Nothing here is written back to the daemon.
+ */
+const LOCATE_HIGHLIGHT_COLOR = '#ff8a00';
+const LOCATE_HIGHLIGHT_STROKE_WIDTH = 8;
+const LOCATE_HIGHLIGHT_DURATION_MS = 800;
+
 const NETWORK_ERROR_PATTERN =
   /failed to fetch|networkerror|load failed|network request failed/i;
 
@@ -145,13 +154,18 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const tool = useToolStore((state) => state.tool);
   const brushColor = useToolStore((state) => state.brushColor);
   const brushWidth = useToolStore((state) => state.brushWidth);
+  const activeLayerId = useCanvasStore((state) => state.activeLayerId);
+  const activeLayerRequest = useCanvasStore((state) => state.activeLayerRequest);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const objectsRef = useRef(new Map<string, FabricObject>());
   const signaturesRef = useRef(new Map<string, string>());
   const pendingJsonRef = useRef(new Set<string>());
   const syncTokenRef = useRef(0);
+  const lastSelectionRequestRef = useRef(activeLayerRequest);
+  const lastLocateRequestRef = useRef(activeLayerRequest);
   const [ready, setReady] = useState(false);
+  const [objectsVersion, setObjectsVersion] = useState(0);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
 
   const width = canvasDocument.width ?? FALLBACK_WIDTH;
@@ -380,8 +394,119 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       }
 
       canvas.requestRenderAll();
+      setObjectsVersion((version) => version + 1);
     })();
   }, [ready, layers]);
+
+  /**
+   * Selecting an AI layer means selecting it on the canvas: it becomes Fabric's
+   * active object, so the transform box, dragging and scaling all apply, and the
+   * existing `object:modified` handler writes the result back as SVG. Brush
+   * layers are not selectable objects, so they get the transient highlight below.
+   */
+  useEffect(() => {
+    const canvas = fabricRef.current;
+
+    if (!ready || !canvas || !layers) {
+      return;
+    }
+
+    const explicit = activeLayerRequest !== lastSelectionRequestRef.current;
+    lastSelectionRequestRef.current = activeLayerRequest;
+
+    if (!activeLayerId) {
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      return;
+    }
+
+    const layer = layers.find((entry) => entry.id === activeLayerId);
+    const object = objectsRef.current.get(activeLayerId);
+
+    if (layer?.type !== 'ai-generated') {
+      canvas.discardActiveObject();
+      canvas.requestRenderAll();
+      return;
+    }
+
+    if (!object || !layer.visible) {
+      return;
+    }
+
+    // A transform box is only usable in select mode. Only an explicit click may
+    // change the tool; merely loading a canvas with an AI layer on top must not
+    // take the brush away from the user.
+    if (useToolStore.getState().tool !== 'select') {
+      if (explicit) {
+        useToolStore.getState().setTool('select');
+      }
+
+      return;
+    }
+
+    canvas.setActiveObject(object);
+    canvas.requestRenderAll();
+  }, [activeLayerId, activeLayerRequest, ready, layers, tool, objectsVersion]);
+
+  /**
+   * Brush-layer location feedback: temporarily repaint the stroke, then restore
+   * the exact previous paint properties. `activeLayerRequest` is bumped only by
+   * an explicit selection, so a newly drawn stroke (which also becomes the
+   * active layer) does not flash on every brush stroke.
+   */
+  useEffect(() => {
+    const explicit = activeLayerRequest !== lastLocateRequestRef.current;
+    lastLocateRequestRef.current = activeLayerRequest;
+
+    if (!explicit || !ready) {
+      return;
+    }
+
+    const canvas = fabricRef.current;
+    const layer = layers?.find((entry) => entry.id === activeLayerId);
+    const object = activeLayerId ? objectsRef.current.get(activeLayerId) : undefined;
+
+    if (
+      !canvas ||
+      !layer ||
+      layer.type === 'ai-generated' ||
+      !layer.visible ||
+      !object
+    ) {
+      return;
+    }
+
+    const paintable = object as FabricObject & { strokeWidth: number };
+    const previousStroke = paintable.stroke;
+    const previousStrokeWidth = paintable.strokeWidth;
+
+    paintable.set({
+      stroke: LOCATE_HIGHLIGHT_COLOR,
+      strokeWidth: LOCATE_HIGHLIGHT_STROKE_WIDTH,
+    });
+    canvas.requestRenderAll();
+
+    const timer = window.setTimeout(() => {
+      paintable.set({
+        stroke: previousStroke,
+        strokeWidth: previousStrokeWidth,
+      });
+      canvas.requestRenderAll();
+    }, LOCATE_HIGHLIGHT_DURATION_MS);
+
+    return () => {
+      window.clearTimeout(timer);
+      paintable.set({
+        stroke: previousStroke,
+        strokeWidth: previousStrokeWidth,
+      });
+
+      // The canvas may already be disposed when the component unmounts.
+      if (fabricRef.current === canvas) {
+        canvas.requestRenderAll();
+      }
+    };
+  }, [activeLayerRequest, activeLayerId, ready, layers]);
 
   return (
     <div className="canvas-viewport">

@@ -31,6 +31,12 @@ interface CanvasState {
   requestedCanvasId: string | null;
   saving: boolean;
   activeLayerId: string | null;
+  /**
+   * Increments only on an explicit user selection (`setActiveLayer`). Canvas
+   * mutations also set `activeLayerId` (a new stroke becomes the active layer),
+   * but those must not replay the canvas "locate" feedback.
+   */
+  activeLayerRequest: number;
   createNewCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
   refreshCanvas: () => Promise<void>;
@@ -161,6 +167,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   requestedCanvasId: null,
   saving: false,
   activeLayerId: null,
+  activeLayerRequest: 0,
 
   createNewCanvas: async () => {
     set({ status: 'loading', error: null });
@@ -346,6 +353,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   setActiveLayer: (layerId: string | null) => {
-    set({ activeLayerId: layerId });
+    set({
+      activeLayerId: layerId,
+      activeLayerRequest: get().activeLayerRequest + 1,
+    });
   },
 }));
