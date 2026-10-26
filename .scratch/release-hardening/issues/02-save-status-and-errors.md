@@ -44,3 +44,9 @@
 - **门禁数字**：`pnpm --filter @paintcodex/web test` → **14 文件 / 103 passed**；`pnpm --filter @paintcodex/daemon test` → **17 文件 / 103 passed**；`pnpm -r typecheck` 全绿；`pnpm --filter @paintcodex/web build` 成功（默认 TEMP 下 esbuild 删临时文件被 Windows 权限拒绝，重定向临时目录后构建通过，非代码问题）。
 - **需浏览器人工复核**：① 1264×625 实际窗口下状态栏是否为 44.7% ±1%（jsdom 无布局，无法断言真实像素）；② 新建画布空闲 30 分钟的 Downloads 计数（代码/测试已证无 30 秒定时器，未实际计时）；③ 停 daemon 后真实 pointer 画一笔，横幅是否 ≤2 秒出现、笔画半透明虚线与状态栏「保存失败」是否同步；④ 重试成功后刷新页面笔画仍在（真实 daemon 持久化）；⑤ 关闭横幅后从状态栏「保存失败 · 重试」再次重试的交互。
 - **范围**：未改票 11/12/13 的 AI 与连接逻辑；未引入新依赖；未重建 toast；撤销仍为快照级（票 10 的恢复条未做）。
+
+**2026-10-26 — 合并后补记**
+
+- 合并 `feat/release-hardening` 最新 `be23d3f`（已含票 03 监控口径与票 14 窄屏）：merge commit `61898da`。冲突仅在 `apps/web/src/app/app.css` 末尾——双方都追加规则；解决方式为保留本票的 `.status-bar__save` / `.status-bar__retry` 与票 14 的 1100/860/560 三档媒体查询，无功能取舍。
+- 合并后门禁：`pnpm --filter @paintcodex/web test` → **16 文件 / 119 passed**（新增票 03 的 monitor-format/stats-panel 与票 14 的 narrow-viewport）；`pnpm --filter @paintcodex/daemon test` → **17 文件 / 111 passed**；`pnpm -r typecheck` 全绿；`pnpm --filter @paintcodex/web build` 成功。1264px 宽窗口不落在票 14 的 ≤1100px 断点内，桌面画布宽度与 44.7% 的推导不受影响。
+
