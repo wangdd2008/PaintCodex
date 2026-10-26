@@ -2,7 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 8px;
+  /* 4px 横向内边距：56px 与 48px 工具条下都能放下两列 18px 色块。 */
+  padding: 12px 4px;
   border-right: 1px solid #2c2d33;
   background: #1b1c21;
 }
@@ -30,4 +31,139 @@
 .tool-button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.toolbox-group {
+  border-top: 1px solid #2c2d33;
+  padding-top: 8px;
+}
+
+/* 56px 工具条内放两列色块：18 + 4 + 18 = 40，正好等于内容宽度。 */
+.toolbox-group--palette {
+  display: grid;
+  grid-template-columns: repeat(2, 18px);
+  gap: 4px;
+  justify-content: center;
+}
+
+.toolbox-swatch {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #6b6f7a;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.toolbox-swatch--selected {
+  border-color: #e8f0ff;
+  box-shadow: 0 0 0 2px #e8f0ff;
+}
+
+.toolbox-check {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  line-height: 1;
+  color: #ffffff;
+  text-shadow:
+    0 0 2px #000000,
+    0 0 2px #000000;
+  pointer-events: none;
+}
+
+.toolbox-custom {
+  position: relative;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+
+.toolbox-custom--selected {
+  box-shadow: 0 0 0 2px #e8f0ff;
+}
+
+.toolbox-custom__input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid #6b6f7a;
+  border-radius: 50%;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+}
+
+.toolbox-custom__input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.toolbox-custom__input::-webkit-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.toolbox-custom__input::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
+}
+
+.toolbox-custom--selected .toolbox-check {
+  border-radius: 50%;
+}
+
+/* 四档粗细：浅底上的实心笔触，按当前颜色和真实像素高度预览。 */
+.toolbox-group--widths {
+  display: grid;
+  gap: 4px;
+  justify-items: center;
+}
+
+.toolbox-width {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #e8e8ea;
+  cursor: pointer;
+}
+
+.toolbox-width:hover {
+  background: #f4f5f7;
+}
+
+.toolbox-width--selected {
+  border-color: #5b8def;
+  box-shadow: 0 0 0 1px #5b8def;
+}
+
+.toolbox-width__stroke {
+  display: block;
+  width: 22px;
+  border-radius: 999px;
+}
+
+.toolbox-width__check {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  font-size: 9px;
+  line-height: 1;
+  color: #1b1c21;
+  pointer-events: none;
+}
+
+.toolbox-swatch:focus-visible,
+.toolbox-custom__input:focus-visible,
+.toolbox-width:focus-visible {
+  outline: 2px solid #5b8def;
+  outline-offset: 2px;
 }

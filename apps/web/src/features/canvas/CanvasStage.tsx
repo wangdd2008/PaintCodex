@@ -14,8 +14,6 @@ import { useToolStore } from '../../services/tool-store';
 
 const FALLBACK_WIDTH = 1920;
 const FALLBACK_HEIGHT = 1080;
-const BRUSH_COLOR = '#111111';
-const BRUSH_WIDTH = 4;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 function layerSignature(layer: PaintLayer): string {
@@ -25,6 +23,8 @@ function layerSignature(layer: PaintLayer): string {
 export function CanvasStage() {
   const canvasDocument = useCanvasStore((state) => state.canvas);
   const tool = useToolStore((state) => state.tool);
+  const brushColor = useToolStore((state) => state.brushColor);
+  const brushWidth = useToolStore((state) => state.brushWidth);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const objectsRef = useRef(new Map<string, FabricObject>());
@@ -66,9 +66,11 @@ export function CanvasStage() {
     canvas.isDrawingMode = useToolStore.getState().tool === 'brush';
     canvas.selection = false;
 
+    // The canvas is rebuilt on resize; pick up whatever the session currently holds.
+    const settings = useToolStore.getState();
     const brush = new PencilBrush(canvas);
-    brush.color = BRUSH_COLOR;
-    brush.width = BRUSH_WIDTH;
+    brush.color = settings.brushColor;
+    brush.width = settings.brushWidth;
     canvas.freeDrawingBrush = brush;
 
     const handlePathCreated = (event: { path: Path }) => {
@@ -178,6 +180,17 @@ export function CanvasStage() {
 
     canvas.requestRenderAll();
   }, [tool, layers]);
+
+  useEffect(() => {
+    const brush = fabricRef.current?.freeDrawingBrush;
+
+    if (!brush) {
+      return;
+    }
+
+    brush.color = brushColor;
+    brush.width = brushWidth;
+  }, [brushColor, brushWidth]);
 
   useEffect(() => {
     const canvas = fabricRef.current;
