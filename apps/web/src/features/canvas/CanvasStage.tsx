@@ -1,4 +1,4 @@
-import type { Layer as PaintLayer } from '@paintcodex/protocol';
+import type { CanvasDocument, Layer as PaintLayer } from '@paintcodex/protocol';
 import { useEffect, useRef, useState } from 'react';
 import {
   Canvas,
@@ -16,12 +16,132 @@ const FALLBACK_WIDTH = 1920;
 const FALLBACK_HEIGHT = 1080;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
+const NETWORK_ERROR_PATTERN =
+  /failed to fetch|networkerror|load failed|network request failed/i;
+
+/**
+ * Turns technical transport failures into a Chinese, actionable reason. The
+ * daemon already answers in Chinese; only network-level errors need mapping.
+ */
+function describeCanvasFailure(error: string | null): string {
+  if (!error) {
+    return '无法加载画布，请稍后重试。';
+  }
+
+  return NETWORK_ERROR_PATTERN.test(error)
+    ? '无法连接本地服务，请确认服务已启动后重试。'
+    : error;
+}
+
+/**
+ * The canvas area has exactly one of four mutually exclusive states: no canvas,
+ * loading, load failure, or ready. Only "ready" mounts Fabric at all, so the
+ * other states cannot accept pointer events or create paths.
+ */
+export function CanvasStage() {
+  const canvasDocument = useCanvasStore((state) => state.canvas);
+  const status = useCanvasStore((state) => state.status);
+  const error = useCanvasStore((state) => state.error);
+  const requestedCanvasId = useCanvasStore((state) => state.requestedCanvasId);
+
+  /**
+   * Guard against double activation (keyboard plus the browser's synthetic
+   * click): `createNewCanvas` flips the status synchronously, so the second
+   * call sees "loading" and does nothing.
+   */
+  const startCanvas = () => {
+    const state = useCanvasStore.getState();
+
+    if (state.canvas || state.status === 'loading') {
+      return;
+    }
+
+    void state.createNewCanvas();
+  };
+
+  const retry = () => {
+    const state = useCanvasStore.getState();
+
+    if (state.canvas || state.status === 'loading') {
+      return;
+    }
+
+    if (state.requestedCanvasId) {
+      void state.loadCanvas(state.requestedCanvasId);
+    } else {
+      void state.createNewCanvas();
+    }
+  };
+
+  if (canvasDocument) {
+    return <CanvasSurface canvasDocument={canvasDocument} />;
+  }
+
+  if (status === 'loading') {
+    return (
+      <div className="canvas-gate canvas-gate--loading" aria-busy="true">
+        <p className="canvas-gate__title">正在加载画布…</p>
+        <p className="canvas-gate__description">正在从本地服务读取画布内容。</p>
+      </div>
+    );
+  }
+
+  if (status === 'error') {
+    const isLoadFailure = requestedCanvasId !== null;
+
+    return (
+      <div className="canvas-gate canvas-gate--error" role="alert">
+        <p className="canvas-gate__title">
+          {isLoadFailure ? '画布加载失败' : '无法新建画布'}
+        </p>
+        <p className="canvas-gate__reason">{describeCanvasFailure(error)}</p>
+        <div className="canvas-gate__actions">
+          <button type="button" className="canvas-gate__cta" onClick={retry}>
+            重试
+          </button>
+          {isLoadFailure ? (
+            <button
+              type="button"
+              className="canvas-gate__cta canvas-gate__cta--secondary"
+              onClick={startCanvas}
+            >
+              新建画布
+            </button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="canvas-gate canvas-gate--empty">
+      <p className="canvas-gate__title">还没有画布</p>
+      <p className="canvas-gate__description">
+        1920 × 1080，画完可以让 AI 添加图层。
+      </p>
+      <button
+        type="button"
+        className="canvas-gate__cta"
+        onClick={startCanvas}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+            event.preventDefault();
+            startCanvas();
+          }
+        }}
+      >
+        开始一张画布
+      </button>
+    </div>
+  );
+}
+
 function layerSignature(layer: PaintLayer): string {
   return JSON.stringify(layer.content);
 }
 
-export function CanvasStage() {
-  const canvasDocument = useCanvasStore((state) => state.canvas);
+/** Fabric lives here so it only ever exists while a document is ready. */
+function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const tool = useToolStore((state) => state.tool);
   const brushColor = useToolStore((state) => state.brushColor);
   const brushWidth = useToolStore((state) => state.brushWidth);
@@ -32,11 +152,12 @@ export function CanvasStage() {
   const pendingJsonRef = useRef(new Set<string>());
   const syncTokenRef = useRef(0);
   const [ready, setReady] = useState(false);
+  const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
 
-  const width = canvasDocument?.width ?? FALLBACK_WIDTH;
-  const height = canvasDocument?.height ?? FALLBACK_HEIGHT;
-  const backgroundColor = canvasDocument?.backgroundColor ?? '#ffffff';
-  const layers = canvasDocument?.layers;
+  const width = canvasDocument.width ?? FALLBACK_WIDTH;
+  const height = canvasDocument.height ?? FALLBACK_HEIGHT;
+  const backgroundColor = canvasDocument.backgroundColor ?? '#ffffff';
+  const layers = canvasDocument.layers;
 
   function findLayerId(target: FabricObject): string | null {
     for (const [layerId, object] of objectsRef.current) {
@@ -81,7 +202,10 @@ export function CanvasStage() {
       const current = state.canvas;
 
       if (!current) {
-        canvas.remove(path);
+        // Defensive guard: never silently discard a stroke. Keep it on screen
+        // and say why it was not saved, even if the UI state is inconsistent.
+        setBlockedStroke('没有画布，这一笔没有保存。');
+        canvas.requestRenderAll();
         return;
       }
 
@@ -98,6 +222,7 @@ export function CanvasStage() {
           pendingJsonRef.current.delete(json);
 
           if (created) {
+            setBlockedStroke(null);
             objectsRef.current.set(created.id, path);
             signaturesRef.current.set(
               created.id,
@@ -263,10 +388,13 @@ export function CanvasStage() {
       <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}` }}>
         <canvas ref={canvasElementRef} aria-label="PaintCodex canvas" />
       </div>
+      {blockedStroke ? (
+        <p className="canvas-warning" role="alert">
+          {blockedStroke}
+        </p>
+      ) : null}
       <p className="canvas-hint">
-        {canvasDocument
-          ? `${canvasDocument.name} · ${width} × ${height}`
-          : `Blank ${FALLBACK_WIDTH} × ${FALLBACK_HEIGHT} canvas`}
+        {canvasDocument.name} · {width} × {height}
       </p>
     </div>
   );

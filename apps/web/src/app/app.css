@@ -95,9 +95,16 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
+  /* 侧栏本身不滚动：图层面板与 AI 面板各自消化溢出。 */
+  overflow: hidden;
   border-left: 1px solid #2c2d33;
   background: #1b1c21;
+}
+
+/* AI 面板保底高度，图层增长时优先让图层列表滚动而不是压扁对话。 */
+.side-panel > .ai-chat {
+  flex: 1;
+  min-height: 240px;
 }
 
 .canvas-area {
@@ -142,6 +149,97 @@ button {
 .canvas-hint {
   margin: 0;
   color: #8a8d99;
+  font-size: 12px;
+}
+
+/* Covers the canvas area for the three non-ready states, so no white board is
+   ever rendered that looks drawable. */
+.canvas-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 1100px;
+  min-height: 280px;
+  height: 100%;
+  padding: 32px;
+  border: 1px dashed #34363f;
+  border-radius: 8px;
+  background: #17181c;
+  text-align: center;
+}
+
+.canvas-gate__title {
+  margin: 0;
+  color: #e8e8ea;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.canvas-gate__description {
+  margin: 0;
+  max-width: 420px;
+  color: #9a9daa;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.canvas-gate__reason {
+  margin: 0;
+  max-width: 520px;
+  color: #e07a7a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.canvas-gate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.canvas-gate__cta {
+  min-height: 44px;
+  padding: 0 24px;
+  border: 1px solid #5b8def;
+  border-radius: 6px;
+  background: #2c3f66;
+  color: #eef3ff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.canvas-gate__cta:hover:not(:disabled) {
+  background: #36507f;
+}
+
+.canvas-gate__cta:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.canvas-gate__cta:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+.canvas-gate__cta--secondary {
+  border-color: #3a3c45;
+  background: #26272e;
+  color: #e8e8ea;
+}
+
+.canvas-gate__cta--secondary:hover:not(:disabled) {
+  background: #2f313a;
+}
+
+.canvas-warning {
+  margin: 0;
+  color: #e07a7a;
   font-size: 12px;
 }
 
