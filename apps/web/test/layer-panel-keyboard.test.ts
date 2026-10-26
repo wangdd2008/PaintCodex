@@ -430,11 +430,11 @@ describe('图层行的键盘导航与选中', () => {
     render(createElement(LayerPanel));
 
     expect(screen.getByRole('option', { name: '笔迹 1，笔迹，可见' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: '笔迹 2，AI 生成，可见' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: '笔迹 3，位图，已隐藏' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '笔迹 2，AI，可见' })).toBeTruthy();
+    expect(screen.getByRole('option', { name: '笔迹 3，图片，已隐藏' })).toBeTruthy();
 
     const selected = screen.getByRole('option', { selected: true });
-    expect(selected.getAttribute('aria-label')).toBe('笔迹 2，AI 生成，可见');
+    expect(selected.getAttribute('aria-label')).toBe('笔迹 2，AI，可见');
   });
 
   it('行焦点环为 2px、offset 2px，且与行底色对比 ≥3:1', () => {

@@ -1,4 +1,5 @@
 import { useEffect, useRef, type KeyboardEvent } from 'react';
+import { displayCanvasName } from '../../services/naming';
 
 interface NewCanvasConfirmProps {
   canvasName: string;
@@ -46,7 +47,7 @@ export function NewCanvasConfirm({
         新建画布？
       </p>
       <p id="new-canvas-confirm-detail" className="new-canvas-confirm__text">
-        当前画布「{canvasName}」会保留在本地，但从界面移除。新建后可用「返回上一张」找回。
+        当前画布「{displayCanvasName(canvasName)}」会保留在本地，但从界面移除。新建后可用「返回上一张」找回。
       </p>
       <div className="new-canvas-confirm__actions">
         <button

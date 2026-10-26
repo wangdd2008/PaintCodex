@@ -5,6 +5,7 @@ import {
   DEFAULT_LOG_SORT,
   filterLogs,
   formatDuration,
+  formatLogLevel,
   formatTimestamp,
   shortenId,
   sortLogs,
@@ -86,7 +87,7 @@ export function LogList({
       <div className="log-list__header">
         <h2 className="monitor-heading">日志</h2>
         <span className="monitor-muted">
-          {visibleLogs.length} of {logs.length}
+          显示 {visibleLogs.length} / {logs.length} 条
         </span>
         <span className="monitor-spacer" />
         {loading ? <span className="monitor-muted">加载中…</span> : null}
@@ -127,7 +128,7 @@ export function LogList({
             <option value="all">全部级别</option>
             {LOG_LEVELS.map((level) => (
               <option key={level} value={level}>
-                {level}
+                {formatLogLevel(level)}
               </option>
             ))}
           </select>
@@ -199,7 +200,7 @@ export function LogList({
                   className={className}
                   tabIndex={traceId === null ? undefined : 0}
                   aria-selected={selected}
-                  title={traceId === null ? undefined : `Open trace ${traceId}`}
+                  title={traceId === null ? undefined : `查看追踪 ${traceId}`}
                   onClick={traceId === null ? undefined : () => onSelectTrace(traceId)}
                   onKeyDown={
                     traceId === null
@@ -209,7 +210,9 @@ export function LogList({
                 >
                   <td className="log-table__time">{formatTimestamp(log.timestamp)}</td>
                   <td>
-                    <span className={`level-badge level-badge--${log.level}`}>{log.level}</span>
+                    <span className={`level-badge level-badge--${log.level}`}>
+                      {formatLogLevel(log.level)}
+                    </span>
                   </td>
                   <td>
                     <span className="category-badge">{log.category}</span>

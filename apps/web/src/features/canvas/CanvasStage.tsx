@@ -14,6 +14,7 @@ import {
 } from 'fabric';
 import { setActiveCanvas } from '../../services/canvas-engine';
 import { useCanvasStore } from '../../services/canvas-store';
+import { nextStrokeLayerName } from '../../services/naming';
 import { useToolStore } from '../../services/tool-store';
 import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
 
@@ -391,7 +392,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       const json = JSON.stringify(path.toJSON());
       const pendingId = `stroke-${++pendingIdRef.current}`;
       const input: CreateLayerInput = {
-        name: `Stroke ${current.layers.length + 1}`,
+        name: nextStrokeLayerName(current.layers),
         type: 'vector',
         content: { kind: 'fabric', json },
       };
@@ -757,7 +758,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
         </div>
       ) : null}
       <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}` }}>
-        <canvas ref={canvasElementRef} aria-label="PaintCodex canvas" />
+        <canvas ref={canvasElementRef} aria-label="画布" />
       </div>
       {blockedStroke ? (
         <p className="canvas-warning" role="alert">

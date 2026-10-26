@@ -2,7 +2,7 @@ import type { AgentTrace, AgentTraceNode } from '@paintcodex/protocol';
 import { useEffect, useState } from 'react';
 import { ApiError } from '../../services/api';
 import { fetchTrace } from './monitor-api';
-import { formatDuration, formatTimestamp, shortenId } from './monitor-format';
+import { formatDuration, formatLogLevel, formatTimestamp, shortenId } from './monitor-format';
 
 interface TraceViewProps {
   traceId: string | null;
@@ -120,13 +120,13 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
 
       <div className="trace-view__body">
         {traceId === null ? (
-          <p className="monitor-empty">选择一个带有追踪的日志以查看其 spans。</p>
+          <p className="monitor-empty">选择一个带有追踪的日志以查看其节点。</p>
         ) : state.status === 'loading' ? (
           <p className="monitor-empty">加载追踪中…</p>
         ) : state.status === 'error' ? (
           <p className="monitor-error">{state.error ?? '无法加载追踪'}</p>
         ) : state.trace === null || state.trace.roots.length === 0 ? (
-          <p className="monitor-empty">此追踪没有记录任何 spans。</p>
+          <p className="monitor-empty">此追踪没有记录任何节点。</p>
         ) : (
           <ul className="trace-tree">
             {state.trace.roots.map((node) => (
@@ -166,7 +166,7 @@ function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
             type="button"
             className="trace-node__toggle"
             aria-expanded={isOpen}
-            aria-label={isOpen ? '折叠 span' : '展开 span'}
+            aria-label={isOpen ? '折叠节点' : '展开节点'}
             onClick={() => onToggle(log.id)}
           >
             {isOpen ? '▾' : '▸'}
@@ -177,7 +177,9 @@ function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
           </span>
         )}
         <span className="trace-node__time">{formatTimestamp(log.timestamp)}</span>
-        <span className={`level-badge level-badge--${log.level}`}>{log.level}</span>
+        <span className={`level-badge level-badge--${log.level}`}>
+          {formatLogLevel(log.level)}
+        </span>
         <span className="trace-node__message" title={log.message}>
           {log.message}
         </span>

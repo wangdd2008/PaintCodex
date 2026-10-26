@@ -284,7 +284,7 @@ export function AiChatPanel() {
       });
 
       if (!response.ok) {
-        let detail = `AI request failed (${response.status})`;
+        let detail = `AI 请求失败（状态码 ${response.status}）`;
         try {
           const body = (await response.json()) as { error?: { message?: unknown } };
           if (typeof body.error?.message === 'string') {
@@ -297,7 +297,7 @@ export function AiChatPanel() {
       }
 
       if (!response.body) {
-        throw new Error('The daemon returned an empty response stream.');
+        throw new Error('AI 请求失败：本地服务没有返回内容流。');
       }
 
       const reader = response.body.getReader();
@@ -413,7 +413,7 @@ export function AiChatPanel() {
   const lastMessageId = messages[messages.length - 1]?.id ?? null;
 
   return (
-    <section className="ai-chat" aria-label="AI chat">
+    <section className="ai-chat" aria-label="AI 对话">
       <button
         type="button"
         className="ai-chat__toggle"
