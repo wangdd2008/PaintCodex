@@ -36,7 +36,8 @@
 - **无画布**：没有 `canvasId` 就没有 SSE 通道，状态栏不渲染连接槽位（仍显示「无画布」），不伪造「连接中」。
 - **测试**：新增 `apps/web/test/connection-status.test.tsx` 5 条：① 渲染先「连接中…」→ `open` 后「实时中」、刷新恰 1 次、快进 60 秒仍为 1 次（无轮询）；② `error` → 「重新连接中…」+ `status-bar__connection--reconnecting` 颜色类、重复 `error` 仍只有一个 `role="status"`、无 `role="alert"`；③ `error` 后 `open` 恢复「实时中」并再刷新 1 次（共 2 次）；④ 切换到另一张画布回到「连接中…」并重新订阅；⑤ 无画布不渲染连接槽位。
 - **门禁**：`pnpm --filter @paintcodex/web test` → **20 文件 / 144 passed**；`pnpm -r typecheck` → protocol / daemon / web 三包全绿。
-- **合并后集成问题（非本票范围，已上报）**：`a1745e2` 上 `layer-panel-keyboard.test.ts` 的「行内可见性与删除按钮不会触发整行选中」稳定失败——票 02 的 ≤500ms 保存防抖让 `saving` 在 mutation 成功后仍为 true，而票 08 的删除按钮在 `saving` 时按设计禁用，测试在防抖窗口内点击删除，`confirm` 因此未被调用。只在测试里先 `waitFor(saving === false)` 再断言确认交互，未改任何产品逻辑（删除仍走确认、防抖仍生效）。该修正随 `feat(13)` 提交。
+- **合并后集成问题（非本票范围）**：`a1745e2` 上 `layer-panel-keyboard.test.ts` 的「行内可见性与删除按钮不会触发整行选中」稳定失败——票 02 的 ≤500ms 保存防抖让 `saving` 在 mutation 成功后仍为 true，而票 08 的删除按钮在 `saving` 时按设计禁用，测试在防抖窗口内点击删除，`confirm` 因此未被调用。为跑通门禁，`feat(13)` 曾只在测试里先 `waitFor(saving === false)` 再断言确认交互，未改产品逻辑。
+- **合并后补记（merge commit `e43e82e`）**：合并最新 `feat/release-hardening` 时带入 `747a2c3 fix(02): 成功后立即解除控件禁用，只有显示做防抖`，该修复从根上消除了上述 02+08 竞态（`saving` 在 mutation 成功后立即为 false，显示防抖不受影响）。既然根因已修，`feat(13)` 里的临时 `waitFor(saving === false)` 不再需要，已随本补记回退，`apps/web/test/layer-panel-keyboard.test.ts` 保持上游原样。合并后门禁重跑：`pnpm --filter @paintcodex/web test` → **20 文件 / 144 passed**；`pnpm -r typecheck` 三包全绿。
 - **需浏览器人工复核**：
   - 打开画布到「实时中」的实际耗时（验收 ≤1 秒），依赖真实 SSE 握手。
   - 停 daemon 到「重新连接中…」的实际耗时（验收 ≤3 秒）；恢复 daemon 后 ≤5 秒回到「实时中」并自动刷新一次。
