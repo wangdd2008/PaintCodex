@@ -1,3 +1,5 @@
+import { isNetworkFailure } from '../../services/network-error';
+
 /** 一条面向用户的失败说明；界面只渲染这里的中文，不渲染原始报错。 */
 export interface ChatFailure {
   message: string;
@@ -27,8 +29,6 @@ const INVALID_ACTION = 'AI 返回了无效的画布操作。';
 const APPLY_FAILED = 'AI 生成的图层未能应用到画布。';
 const GENERIC_FAILURE = 'AI 回复失败。';
 
-const NETWORK_PATTERN =
-  /failed to fetch|networkerror|network request failed|load failed|fetch failed|econnrefused|econnreset|enotfound/i;
 const TIMEOUT_PATTERN = /timed?\s*out|timeout|超时/i;
 
 /**
@@ -40,7 +40,7 @@ export function describeChatFailure(input: ChatFailureInput = {}): ChatFailure {
   const status = input.status ?? null;
   const text = input.message ?? '';
 
-  if (input.networkError === true || NETWORK_PATTERN.test(text)) {
+  if (input.networkError === true || isNetworkFailure(text)) {
     return { message: NETWORK_FAILURE, retryable: true };
   }
 

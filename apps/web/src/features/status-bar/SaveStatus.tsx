@@ -3,7 +3,10 @@ import { useCanvasStore, type SaveState } from '../../services/canvas-store';
 
 export const JUST_NOW_SECONDS = 15;
 
-/** Relative time for the one save status; refreshed once per second. */
+/** 保存失败时状态栏按钮的唯一文案。 */
+const SAVE_FAILED_RETRY_TEXT = '保存失败 · 重试';
+
+/** 保存状态的相对时间；每秒刷新一次。 */
 export function formatSavedAt(lastSavedAt: number, now: number): string {
   const elapsedSeconds = Math.max(0, Math.floor((now - lastSavedAt) / 1000));
 
@@ -18,8 +21,12 @@ export function formatSavedAt(lastSavedAt: number, now: number): string {
   return `${Math.floor(elapsedSeconds / 60)} 分钟前`;
 }
 
+/**
+ * 保存状态文案。失败态由状态栏按钮单独承担，不会走到这里；
+ * 因此入参排除 `'error'`，避免留下不可达的分支。
+ */
 export function saveStatusText(
-  saveState: SaveState,
+  saveState: Exclude<SaveState, 'error'>,
   lastSavedAt: number | null,
   now: number,
 ): string {
@@ -30,16 +37,14 @@ export function saveStatusText(
       return lastSavedAt === null
         ? '已保存'
         : `已保存 · ${formatSavedAt(lastSavedAt, now)}`;
-    case 'error':
-      return '保存失败 · 重试';
     default:
       return '—';
   }
 }
 
 /**
- * The single save status slot in the status bar. Failure stays a button so the
- * same mutation can be retried from here after the banner was dismissed.
+ * 状态栏里唯一的保存状态位置。失败时保持为按钮，
+ * 这样横幅被关掉后仍能从同一处重试同一次 mutation。
  */
 export function SaveStatus() {
   const saveState = useCanvasStore((state) => state.saveState);
@@ -67,7 +72,7 @@ export function SaveStatus() {
         disabled={!hasRetry}
         onClick={() => void retryCanvasAlert()}
       >
-        保存失败 · 重试
+        {SAVE_FAILED_RETRY_TEXT}
       </button>
     );
   }

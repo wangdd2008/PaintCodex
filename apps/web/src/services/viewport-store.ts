@@ -1,9 +1,8 @@
 import { create } from 'zustand';
 
 /**
- * The document is always 1920 × 1080, but CSS scales it to the available
- * width. The status bar must report that real ratio, so zoom is derived from
- * the rendered canvas width rather than hard-coded.
+ * 文档固定为 1920 × 1080，但 CSS 会按可用宽度缩放。状态栏必须报告真实比例，
+ * 所以缩放率由渲染后的画布宽度推导，而不是写死。
  */
 export function computeZoomPercent(
   renderedWidth: number,
@@ -22,7 +21,7 @@ export function computeZoomPercent(
 }
 
 interface ViewportState {
-  /** Rendered width / document width, as a percentage with one decimal. */
+  /** 渲染宽度 / 文档宽度，以保留一位小数的百分比表示。 */
   zoomPercent: number | null;
   setZoomPercent: (zoomPercent: number | null) => void;
 }
