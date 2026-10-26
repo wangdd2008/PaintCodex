@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
@@ -25,6 +25,9 @@ export function App() {
   const zoomPercent = useViewportStore((state) => state.zoomPercent);
   const [exportError, setExportError] = useState<string | null>(null);
   const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
+  // 窄屏（≤860px）侧栏是覆盖式抽屉；桌面忽略这个状态，侧栏常驻。
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const drawerToggleRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const canvasId = readRememberedCanvasId();
@@ -113,6 +116,26 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view]);
 
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setDrawerOpen(false);
+      // 抽屉由「图层」按钮打开，关闭后把焦点还回去。
+      drawerToggleRef.current?.focus();
+    }
+
+    window.addEventListener('keydown', handleDrawerKeyDown);
+
+    return () => window.removeEventListener('keydown', handleDrawerKeyDown);
+  }, [drawerOpen]);
+
   function navigate(next: AppView) {
     if (next === view) {
       return;
@@ -178,6 +201,16 @@ export function App() {
         ) : null}
         {view === 'canvas' ? (
           <>
+            <button
+              ref={drawerToggleRef}
+              type="button"
+              className="menu-button drawer-toggle"
+              aria-expanded={drawerOpen}
+              aria-controls="side-panel"
+              onClick={() => setDrawerOpen((open) => !open)}
+            >
+              图层
+            </button>
             {/* Without a canvas the empty state holds the only creation CTA. */}
             {canvas ? (
               <button
@@ -226,7 +259,10 @@ export function App() {
         <main className="canvas-area">
           <CanvasStage key={canvas?.id ?? 'blank'} />
         </main>
-        <aside className="side-panel">
+        <aside
+          id="side-panel"
+          className={drawerOpen ? 'side-panel side-panel--open' : 'side-panel'}
+        >
           <LayerPanel />
           <AiChatPanel />
         </aside>
