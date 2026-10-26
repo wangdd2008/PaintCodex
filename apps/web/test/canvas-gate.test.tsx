@@ -195,6 +195,31 @@ describe('CanvasStage 只有 ready 才挂载画布', () => {
     expect(screen.queryByText('正在加载画布…')).toBeNull();
     expect(screen.queryByText('画布加载失败')).toBeNull();
   });
+
+  it('正常刷新不置 loading，也不卸载 Fabric（同一条 canvas 元素）', async () => {
+    const document = canvasDocument();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: RequestInfo | URL) => jsonResponse(document)),
+    );
+    useCanvasStore.setState({
+      canvas: document,
+      status: 'ready',
+      requestedCanvasId: document.id,
+    });
+
+    const { container } = render(<CanvasStage />);
+
+    await waitFor(() => expect(container.querySelector('canvas')).toBeTruthy());
+    const before = container.querySelector('canvas');
+
+    await act(async () => {
+      await useCanvasStore.getState().refreshCanvas();
+    });
+
+    expect(useCanvasStore.getState().status).toBe('ready');
+    expect(container.querySelector('canvas')).toBe(before);
+  });
 });
 
 describe('CanvasStage 加载失败', () => {
