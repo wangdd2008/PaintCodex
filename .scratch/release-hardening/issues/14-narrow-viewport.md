@@ -32,13 +32,14 @@
 
 - 2026-10-26：实现提交 `f28ae53`（`feat(14): 窄屏三档断点与侧栏抽屉`），本条记录随附文档提交。
 - 改动文件：`apps/web/src/app/app.css`（三档断点 + 「桌面优先，窄屏 ≥360px 可用」注释，未改动票 06 的 `.side-panel { overflow: hidden }` 与面板限高）、`apps/web/src/app/App.tsx`（「图层」开关、`side-panel--open`、Esc 关闭并把焦点还给触发按钮）、`apps/web/test/narrow-viewport.test.ts`（新增 5 条）。
-- 门禁：`pnpm --filter @paintcodex/web test` → 8 文件 / 73 测试通过（其中新增 5 条：3 条 CSS 契约 + 1 条断点齐全 + 1 条抽屉开合）；`pnpm -r typecheck` 全绿。
+- 门禁：`pnpm --filter @paintcodex/web test` → 本票分支 8 文件 / 73 测试通过（其中新增 5 条：3 条 CSS 契约 + 1 条断点齐全 + 1 条抽屉开合）；合并 `feat/release-hardening` 后 11 文件 / 102 测试通过；`pnpm -r typecheck` 全绿（合并前后各跑一次）。
 - 真实视口实测（agent-browser / Chrome CDP）：
   - 390×844：`document.documentElement.scrollWidth = 390 = innerWidth`；画布 `342×192`（≥340×190）；抽屉展开宽 374px（`calc(100% - 16px)`，x=16）、`aria-expanded=true`；Esc 后 `side-panel--open` 移除且 `document.activeElement` 为「图层」按钮；菜单三行（品牌 / 图层·新建·导出×2 / 监控），导出按钮位于第二行；状态栏单行未溢出。
   - 360×780：无横向滚动，画布 312px（≥280px）。
   - 768：无溢出，抽屉 320px（`min(320px, 86vw)`），开关可见。
   - 1024：无溢出，侧栏 260px（`clamp` 取到下限），开关隐藏。
   - 1264：无溢出，侧栏 300px 静态、工具条 56px，桌面布局未回归。
+- 合并后复核（37a94bb）：390×844 空状态页 `scrollWidth = 390`，无横向滚动；合并带入的「无画布门禁」（票 01）会隐藏空白占位画布，因此上面的 `342×192` 需在有真实画布的 390 视口再确认一次。
 - 实机实测发现并修掉的问题：
   - 收起态 `translateX(100%)` 会把 document 撑到 764px 宽；仅隐藏抽屉不够，`.workspace` 在 ≤860px 加 `overflow: hidden` 后才真正无横向滚动。
   - 48px 工具条内「画笔/选择」被挤成一字一行，已把工具条内边距收到 4px、按钮内边距收到 2px。
