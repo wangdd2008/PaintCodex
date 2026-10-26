@@ -1,4 +1,8 @@
-import type { CanvasDocument, Layer as PaintLayer } from '@paintcodex/protocol';
+import type {
+  CanvasDocument,
+  CreateLayerInput,
+  Layer as PaintLayer,
+} from '@paintcodex/protocol';
 import { useEffect, useRef, useState } from 'react';
 import {
   Canvas,
@@ -11,12 +15,28 @@ import {
 import { setActiveCanvas } from '../../services/canvas-engine';
 import { useCanvasStore } from '../../services/canvas-store';
 import { useToolStore } from '../../services/tool-store';
+import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
 
 const FALLBACK_WIDTH = 1920;
 const FALLBACK_HEIGHT = 1080;
 const BRUSH_COLOR = '#111111';
 const BRUSH_WIDTH = 4;
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+const UNSAVED_DASH = [12, 8];
+const UNSAVED_OPACITY = 0.55;
+
+/** A stroke kept on screen while persistence has not succeeded yet. */
+interface PendingStroke {
+  id: string;
+  json: string;
+  path: Path;
+  input: CreateLayerInput;
+  failed: boolean;
+}
+
+function unsavedMessage(count: number, reason: string): string {
+  return count > 1 ? `有 ${count} 笔未保存：${reason}` : `这一笔未保存：${reason}`;
+}
 
 const NETWORK_ERROR_PATTERN =
   /failed to fetch|networkerror|load failed|network request failed/i;
@@ -150,9 +170,15 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const objectsRef = useRef(new Map<string, FabricObject>());
   const signaturesRef = useRef(new Map<string, string>());
   const pendingJsonRef = useRef(new Set<string>());
+  const pendingStrokesRef = useRef(new Map<string, PendingStroke>());
+  const pendingIdRef = useRef(0);
   const syncTokenRef = useRef(0);
   const [ready, setReady] = useState(false);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
+  const canvasAlert = useCanvasStore((state) => state.canvasAlert);
+  const hasCanvasRetry = useCanvasStore((state) => state.canvasRetry !== null);
+  const retryCanvasAlert = useCanvasStore((state) => state.retryCanvasAlert);
+  const dismissCanvasAlert = useCanvasStore((state) => state.dismissCanvasAlert);
 
   const width = canvasDocument.width ?? FALLBACK_WIDTH;
   const height = canvasDocument.height ?? FALLBACK_HEIGHT;
@@ -167,6 +193,145 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     }
 
     return null;
+  }
+
+  function failedStrokes(): PendingStroke[] {
+    return Array.from(pendingStrokesRef.current.values()).filter(
+      (stroke) => stroke.failed,
+    );
+  }
+
+  function syncUnsavedCount(): void {
+    useCanvasStore.getState().setUnsavedStrokes(failedStrokes().length);
+  }
+
+  function markPathUnsaved(path: Path): void {
+    path.set({ opacity: UNSAVED_OPACITY, strokeDashArray: UNSAVED_DASH });
+  }
+
+  function markPathSaved(path: Path): void {
+    path.set({ opacity: 1, strokeDashArray: null });
+  }
+
+  /**
+   * The last resort: the local object cannot be reconciled with the snapshot.
+   * Removing it is allowed only together with an explicit banner (ADR-0008).
+   */
+  function discardFailedStrokes(reason: string): void {
+    const canvas = fabricRef.current;
+
+    for (const stroke of failedStrokes()) {
+      canvas?.remove(stroke.path);
+      pendingStrokesRef.current.delete(stroke.id);
+    }
+
+    canvas?.requestRenderAll();
+    syncUnsavedCount();
+    useCanvasStore.getState().markStrokesPersisted();
+    useCanvasStore.getState().showCanvasAlert(reason, null);
+  }
+
+  /**
+   * Retries every failed stroke against the authoritative snapshot. If the
+   * server already has an identical layer, the local copy is dropped (it is
+   * saved); only an unreconcilable object is removed with an explicit message.
+   */
+  async function retryFailedStrokes(): Promise<void> {
+    const canvas = fabricRef.current;
+    const failed = failedStrokes();
+
+    if (!canvas || failed.length === 0) {
+      return;
+    }
+
+    await useCanvasStore.getState().refreshCanvas();
+
+    const fresh = useCanvasStore.getState().canvas;
+
+    if (!fresh) {
+      discardFailedStrokes('这一笔未保存：画布已不存在，无法重试。');
+      return;
+    }
+
+    let discardReason: string | null = null;
+
+    for (const stroke of failed) {
+      const aligned = fresh.layers.some(
+        (layer) =>
+          layer.content.kind === 'fabric' && layer.content.json === stroke.json,
+      );
+
+      if (aligned) {
+        // The snapshot already contains this exact stroke: keep the server copy.
+        canvas.remove(stroke.path);
+        pendingStrokesRef.current.delete(stroke.id);
+        continue;
+      }
+
+      let created: PaintLayer | null = null;
+
+      // While the retry is in flight the snapshot sync must not add a second
+      // Fabric object for this stroke; the local path becomes the canonical one.
+      pendingJsonRef.current.add(stroke.json);
+
+      try {
+        created = await useCanvasStore.getState().createLayer(stroke.input);
+      } catch {
+        pendingJsonRef.current.delete(stroke.json);
+        const state = useCanvasStore.getState();
+        syncUnsavedCount();
+        state.showCanvasAlert(
+          unsavedMessage(failedStrokes().length, state.saveError ?? '未知原因'),
+          retryFailedStrokes,
+        );
+        throw new Error('笔画重试失败');
+      }
+
+      const savedLayer = created
+        ? useCanvasStore
+            .getState()
+            .canvas?.layers.find((layer) => layer.id === created?.id)
+        : null;
+
+      if (
+        !created ||
+        !savedLayer ||
+        savedLayer.content.kind !== 'fabric' ||
+        savedLayer.content.json !== stroke.json
+      ) {
+        pendingJsonRef.current.delete(stroke.json);
+        canvas.remove(stroke.path);
+        pendingStrokesRef.current.delete(stroke.id);
+        discardReason = '这一笔未保存：无法与服务端快照对齐。';
+        continue;
+      }
+
+      objectsRef.current.set(created.id, stroke.path);
+      signaturesRef.current.set(created.id, JSON.stringify(savedLayer.content));
+      markPathSaved(stroke.path);
+      pendingStrokesRef.current.delete(stroke.id);
+      pendingJsonRef.current.delete(stroke.json);
+    }
+
+    canvas.requestRenderAll();
+    const remaining = failedStrokes();
+    syncUnsavedCount();
+
+    if (remaining.length > 0) {
+      const state = useCanvasStore.getState();
+      state.showCanvasAlert(
+        unsavedMessage(remaining.length, state.saveError ?? '未知原因'),
+        retryFailedStrokes,
+      );
+      throw new Error('仍有笔画未保存');
+    }
+
+    useCanvasStore.getState().markStrokesPersisted();
+
+    if (discardReason) {
+      useCanvasStore.getState().showCanvasAlert(discardReason, null);
+      return;
+    }
   }
 
   useEffect(() => {
@@ -208,16 +373,27 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       }
 
       const json = JSON.stringify(path.toJSON());
+      const pendingId = `stroke-${++pendingIdRef.current}`;
+      const input: CreateLayerInput = {
+        name: `Stroke ${current.layers.length + 1}`,
+        type: 'vector',
+        content: { kind: 'fabric', json },
+      };
+
       pendingJsonRef.current.add(json);
+      pendingStrokesRef.current.set(pendingId, {
+        id: pendingId,
+        json,
+        path,
+        input,
+        failed: false,
+      });
 
       void state
-        .createLayer({
-          name: `Stroke ${current.layers.length + 1}`,
-          type: 'vector',
-          content: { kind: 'fabric', json },
-        })
+        .createLayer(input)
         .then((created) => {
           pendingJsonRef.current.delete(json);
+          pendingStrokesRef.current.delete(pendingId);
 
           if (created) {
             setBlockedStroke(null);
@@ -227,11 +403,28 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
               JSON.stringify({ kind: 'fabric', json }),
             );
           }
+
+          syncUnsavedCount();
         })
         .catch(() => {
           pendingJsonRef.current.delete(json);
-          canvas.remove(path);
-          canvas.requestRenderAll();
+          const pending = pendingStrokesRef.current.get(pendingId);
+
+          if (pending) {
+            // Keep the stroke visible and marked as unsaved; retry re-runs the
+            // same layer mutation against the current revision.
+            pending.failed = true;
+            markPathUnsaved(path);
+            canvas.requestRenderAll();
+          }
+
+          const store = useCanvasStore.getState();
+          const count = failedStrokes().length;
+          store.setUnsavedStrokes(count);
+          store.showCanvasAlert(
+            unsavedMessage(count, store.saveError ?? '未知原因'),
+            retryFailedStrokes,
+          );
         });
     };
 
@@ -273,6 +466,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       objectsRef.current.clear();
       signaturesRef.current.clear();
       pendingJsonRef.current.clear();
+      pendingStrokesRef.current.clear();
       fabricRef.current = null;
       setActiveCanvas(null);
       canvas.off('path:created', handlePathCreated);
@@ -370,8 +564,62 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     })();
   }, [ready, layers]);
 
+  // The document is scaled by CSS; report the real ratio in the status bar.
+  useEffect(() => {
+    const element = canvasElementRef.current;
+
+    if (!element || typeof ResizeObserver === 'undefined') {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const renderedWidth = entries[0]?.contentRect.width ?? 0;
+
+      if (renderedWidth <= 0) {
+        return;
+      }
+
+      useViewportStore
+        .getState()
+        .setZoomPercent(computeZoomPercent(renderedWidth, width));
+    });
+
+    observer.observe(element);
+
+    return () => observer.disconnect();
+  }, [width]);
+
+  useEffect(
+    () => () => {
+      useViewportStore.getState().setZoomPercent(null);
+    },
+    [],
+  );
+
   return (
     <div className="canvas-viewport">
+      {canvasAlert ? (
+        <div className="canvas-alert" role="alert">
+          <p className="canvas-alert__message">{canvasAlert}</p>
+          {hasCanvasRetry ? (
+            <button
+              type="button"
+              className="canvas-alert__retry"
+              onClick={() => void retryCanvasAlert()}
+            >
+              重试
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="canvas-alert__dismiss"
+            aria-label="关闭错误提示"
+            onClick={dismissCanvasAlert}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}` }}>
         <canvas ref={canvasElementRef} aria-label="PaintCodex canvas" />
       </div>
@@ -380,9 +628,6 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
           {blockedStroke}
         </p>
       ) : null}
-      <p className="canvas-hint">
-        {canvasDocument.name} · {width} × {height}
-      </p>
     </div>
   );
 }

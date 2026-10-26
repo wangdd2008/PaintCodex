@@ -18,7 +18,19 @@ import {
 
 const STORAGE_KEY = 'paintcodex.canvasId';
 
+/** Consecutive strokes settle into one "saved" transition (ADR-0008). */
+export const SAVE_DEBOUNCE_MS = 500;
+
+const NETWORK_ERROR_PATTERN =
+  /failed to fetch|networkerror|load failed|network request failed|fetch failed/i;
+const CHINESE_PATTERN = /[\u4e00-\u9fff]/;
+
 export type CanvasStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/** Save state only ever describes persistence, never export (ADR-0008). */
+export type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
+export type SaveRetry = () => Promise<void> | void;
 
 interface CanvasState {
   canvas: CanvasDocument | null;
@@ -29,7 +41,18 @@ interface CanvasState {
    * from "no canvas yet" (id null) once `canvas` is null in both cases.
    */
   requestedCanvasId: string | null;
+  /** Kept in sync with `saveState === 'saving'` for existing disabled logic. */
   saving: boolean;
+  saveState: SaveState;
+  lastSavedAt: number | null;
+  /** Reason of the most recent failed persistence attempt, in Chinese. */
+  saveError: string | null;
+  /** Failed strokes still on screen; blocks an honest "已保存". */
+  unsavedStrokes: number;
+  /** One canvas-level error banner at a time (spec §2). */
+  canvasAlert: string | null;
+  /** Retry belongs to the failed mutation that raised the banner. */
+  canvasRetry: SaveRetry | null;
   activeLayerId: string | null;
   createNewCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
@@ -40,12 +63,29 @@ interface CanvasState {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   setActiveLayer: (layerId: string | null) => void;
+  showCanvasAlert: (message: string, retry?: SaveRetry | null) => void;
+  dismissCanvasAlert: () => void;
+  retryCanvasAlert: () => Promise<void>;
+  setUnsavedStrokes: (count: number) => void;
+  markStrokesPersisted: () => void;
 }
 
 type SetState = (partial: Partial<CanvasState>) => void;
 type GetState = () => CanvasState;
 
+interface SaveReset {
+  saveState: SaveState;
+  lastSavedAt: null;
+  saving: false;
+  saveError: null;
+  unsavedStrokes: 0;
+  canvasAlert: null;
+  canvasRetry: null;
+}
+
 let mutationQueue: Promise<unknown> = Promise.resolve();
+let mutationDepth = 0;
+let savedTimer: ReturnType<typeof setTimeout> | null = null;
 
 /**
  * Serialises canvas mutations so rapid brush strokes always send the revision
@@ -60,21 +100,117 @@ function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
   return result;
 }
 
+function cancelSavedTimer(): void {
+  if (savedTimer !== null) {
+    clearTimeout(savedTimer);
+    savedTimer = null;
+  }
+}
+
+function resetSaveState(): SaveReset {
+  cancelSavedTimer();
+  mutationDepth = 0;
+
+  return {
+    saveState: 'idle',
+    lastSavedAt: null,
+    saving: false,
+    saveError: null,
+    unsavedStrokes: 0,
+    canvasAlert: null,
+    canvasRetry: null,
+  };
+}
+
+/** Transport failures become a Chinese, actionable reason; daemon text is kept. */
+function describeSaveFailure(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    return error.message;
+  }
+
+  if (error instanceof Error) {
+    if (NETWORK_ERROR_PATTERN.test(error.message)) {
+      return '无法连接本地服务，请确认服务已启动后重试。';
+    }
+
+    if (CHINESE_PATTERN.test(error.message)) {
+      return error.message;
+    }
+  }
+
+  return fallback;
+}
+
+function beginMutation(set: SetState, get: GetState): void {
+  mutationDepth += 1;
+  cancelSavedTimer();
+
+  if (get().saveState !== 'saving') {
+    set({ saveState: 'saving', saving: true });
+  }
+}
+
+function finishMutationSuccess(set: SetState, get: GetState): void {
+  mutationDepth = Math.max(0, mutationDepth - 1);
+
+  if (mutationDepth > 0) {
+    return;
+  }
+
+  // A failed mutation keeps the state honest until it is retried, and failed
+  // strokes keep it honest until they are persisted.
+  if (get().unsavedStrokes > 0 || get().saveState === 'error') {
+    set({ saveState: 'error', saving: false });
+    return;
+  }
+
+  cancelSavedTimer();
+  savedTimer = setTimeout(() => {
+    savedTimer = null;
+
+    const state = get();
+
+    if (mutationDepth > 0) {
+      return;
+    }
+
+    if (state.unsavedStrokes > 0 || state.saveState === 'error') {
+      set({ saveState: 'error', saving: false });
+      return;
+    }
+
+    set({
+      saveState: 'saved',
+      saving: false,
+      saveError: null,
+      lastSavedAt: Date.now(),
+    });
+  }, SAVE_DEBOUNCE_MS);
+}
+
+function finishMutationFailure(
+  set: SetState,
+  get: GetState,
+  message: string,
+): void {
+  mutationDepth = Math.max(0, mutationDepth - 1);
+  cancelSavedTimer();
+  set({ saveState: 'error', saving: false, saveError: message });
+}
+
 async function runMutation(
   set: SetState,
+  get: GetState,
   task: () => Promise<void>,
   fallbackError: string,
 ): Promise<void> {
-  set({ saving: true, error: null });
+  beginMutation(set, get);
 
   try {
     await enqueueMutation(task);
-    set({ saving: false });
+    finishMutationSuccess(set, get);
   } catch (error) {
-    set({
-      saving: false,
-      error: error instanceof Error ? error.message : fallbackError,
-    });
+    finishMutationFailure(set, get, describeSaveFailure(error, fallbackError));
     throw error;
   }
 }
@@ -154,16 +290,66 @@ async function createLayerWithRetry(
   }
 }
 
+async function performUndo(set: SetState, get: GetState): Promise<void> {
+  await runMutation(
+    set,
+    get,
+    async () => {
+      const current = get().canvas;
+
+      if (!current) {
+        throw new Error('No canvas loaded');
+      }
+
+      const updated = await undoCanvas(current.id, current.revision);
+      set({
+        canvas: updated,
+        status: 'ready',
+        activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+      });
+    },
+    '无法撤销',
+  );
+}
+
+async function performRedo(set: SetState, get: GetState): Promise<void> {
+  await runMutation(
+    set,
+    get,
+    async () => {
+      const current = get().canvas;
+
+      if (!current) {
+        throw new Error('No canvas loaded');
+      }
+
+      const updated = await redoCanvas(current.id, current.revision);
+      set({
+        canvas: updated,
+        status: 'ready',
+        activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+      });
+    },
+    '无法重做',
+  );
+}
+
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvas: null,
   status: 'idle',
   error: null,
   requestedCanvasId: null,
   saving: false,
+  saveState: 'idle',
+  lastSavedAt: null,
+  saveError: null,
+  unsavedStrokes: 0,
+  canvasAlert: null,
+  canvasRetry: null,
   activeLayerId: null,
 
   createNewCanvas: async () => {
-    set({ status: 'loading', error: null });
+    set({ status: 'loading', error: null, ...resetSaveState() });
 
     try {
       const canvas = await createCanvas();
@@ -184,7 +370,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   loadCanvas: async (id: string) => {
-    set({ status: 'loading', error: null, requestedCanvasId: id });
+    set({ status: 'loading', error: null, requestedCanvasId: id, ...resetSaveState() });
 
     try {
       const canvas = await getCanvas(id);
@@ -225,6 +411,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
       });
     } catch (error) {
+      // A successful refresh must not clear the banner: the banner describes a
+      // mutation, while this is only a read. A failed one only sets the summary.
       set({
         error: error instanceof Error ? error.message : '无法刷新画布',
       });
@@ -236,6 +424,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
     await runMutation(
       set,
+      get,
       async () => {
         const updated = await createLayerWithRetry(get, set, input);
         created = updated.layers[updated.layers.length - 1] ?? null;
@@ -252,53 +441,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   },
 
   updateLayer: async (layerId: string, patch: UpdateLayerPatch) => {
-    await runMutation(
-      set,
-      async () => {
-        const current = get().canvas;
-
-        if (!current) {
-          throw new Error('No canvas loaded');
-        }
-
-        const updated = await updateLayerRequest(
-          current.id,
-          layerId,
-          patch,
-          current.revision,
-        );
-        set({ canvas: updated, status: 'ready' });
-      },
-      '无法更新图层',
-    );
-  },
-
-  deleteLayer: async (layerId: string) => {
-    await runMutation(
-      set,
-      async () => {
-        const current = get().canvas;
-
-        if (!current) {
-          throw new Error('No canvas loaded');
-        }
-
-        const updated = await deleteLayerRequest(current.id, layerId, current.revision);
-        set({
-          canvas: updated,
-          status: 'ready',
-          activeLayerId:
-            get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
-        });
-      },
-      '无法删除图层',
-    );
-  },
-
-  undo: async () => {
     try {
       await runMutation(
         set,
+        get,
         async () => {
           const current = get().canvas;
 
@@ -306,46 +452,120 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             throw new Error('No canvas loaded');
           }
 
-          const updated = await undoCanvas(current.id, current.revision);
+          const updated = await updateLayerRequest(
+            current.id,
+            layerId,
+            patch,
+            current.revision,
+          );
+          set({ canvas: updated, status: 'ready' });
+        },
+        '无法更新图层',
+      );
+    } catch (error) {
+      get().showCanvasAlert(`无法更新图层：${get().saveError ?? '未知原因'}`, () =>
+        get().updateLayer(layerId, patch),
+      );
+      throw error;
+    }
+  },
+
+  deleteLayer: async (layerId: string) => {
+    try {
+      await runMutation(
+        set,
+        get,
+        async () => {
+          const current = get().canvas;
+
+          if (!current) {
+            throw new Error('No canvas loaded');
+          }
+
+          const updated = await deleteLayerRequest(current.id, layerId, current.revision);
           set({
             canvas: updated,
             status: 'ready',
-            activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
+            activeLayerId:
+              get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
           });
         },
-        '无法撤销',
+        '无法删除图层',
       );
+    } catch (error) {
+      get().showCanvasAlert(`无法删除图层：${get().saveError ?? '未知原因'}`, () =>
+        get().deleteLayer(layerId),
+      );
+      throw error;
+    }
+  },
+
+  undo: async () => {
+    try {
+      await performUndo(set, get);
     } catch {
-      // runMutation already surfaced the error.
+      get().showCanvasAlert(`无法撤销：${get().saveError ?? '未知原因'}`, () =>
+        performUndo(set, get),
+      );
     }
   },
 
   redo: async () => {
     try {
-      await runMutation(
-        set,
-        async () => {
-          const current = get().canvas;
-
-          if (!current) {
-            throw new Error('No canvas loaded');
-          }
-
-          const updated = await redoCanvas(current.id, current.revision);
-          set({
-            canvas: updated,
-            status: 'ready',
-            activeLayerId: mergeActiveLayer(updated, get().activeLayerId),
-          });
-        },
-        '无法重做',
-      );
+      await performRedo(set, get);
     } catch {
-      // runMutation already surfaced the error.
+      get().showCanvasAlert(`无法重做：${get().saveError ?? '未知原因'}`, () =>
+        performRedo(set, get),
+      );
     }
   },
 
   setActiveLayer: (layerId: string | null) => {
     set({ activeLayerId: layerId });
+  },
+
+  showCanvasAlert: (message: string, retry: SaveRetry | null = null) => {
+    set({ canvasAlert: message, canvasRetry: retry });
+  },
+
+  dismissCanvasAlert: () => {
+    // Keep the retry so the status bar's "保存失败 · 重试" still works.
+    set({ canvasAlert: null });
+  },
+
+  retryCanvasAlert: async () => {
+    const retry = get().canvasRetry;
+
+    if (!retry) {
+      return;
+    }
+
+    try {
+      await retry();
+    } catch {
+      return;
+    }
+
+    if (get().canvasRetry === retry) {
+      set({ canvasAlert: null, canvasRetry: null });
+    }
+  },
+
+  setUnsavedStrokes: (count: number) => {
+    set({ unsavedStrokes: Math.max(0, count) });
+  },
+
+  markStrokesPersisted: () => {
+    if (get().unsavedStrokes > 0) {
+      return;
+    }
+
+    cancelSavedTimer();
+    set({
+      saveState: 'saved',
+      saving: false,
+      saveError: null,
+      lastSavedAt: Date.now(),
+    });
   },
 }));

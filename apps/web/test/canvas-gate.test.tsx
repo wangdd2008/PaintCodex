@@ -175,8 +175,9 @@ describe('CanvasStage 加载失败', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重试' }));
 
-    await screen.findByText('测试画布 · 1920 × 1080');
-    expect(container.querySelector('canvas')).toBeTruthy();
+    await waitFor(() => expect(container.querySelector('canvas')).toBeTruthy());
+    // The canvas name/size live only in the menu bar and status bar now.
+    expect(container.querySelector('.canvas-hint')).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     const retryCall = fetchMock.mock.calls[1]!;
