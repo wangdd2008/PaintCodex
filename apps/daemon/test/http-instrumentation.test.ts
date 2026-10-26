@@ -91,9 +91,13 @@ describe('HTTP instrumentation', () => {
 });
 
 describe('shouldLogHttpRequest', () => {
-  it('skips the monitor SSE endpoint but logs other requests', () => {
+  it('skips only the monitor SSE endpoint but logs other requests', () => {
     expect(shouldLogHttpRequest('/monitor/events')).toBe(false);
     expect(shouldLogHttpRequest('/monitor/events?probe=1')).toBe(false);
+    // Other monitor requests stay in the log as evidence; stats aggregation is
+    // what ignores them.
+    expect(shouldLogHttpRequest('/monitor/stats?windowMs=300000')).toBe(true);
+    expect(shouldLogHttpRequest('/monitor/logs?limit=50')).toBe(true);
     expect(shouldLogHttpRequest('/health')).toBe(true);
   });
 });
