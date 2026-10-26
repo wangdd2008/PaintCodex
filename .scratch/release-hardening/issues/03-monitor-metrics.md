@@ -38,3 +38,21 @@
   - **AI 成功率** = 非 `aborted` 且 `level='info'` 的 `chat_completed` / 非 `aborted` 的 `chat_completed`；`aborted:true` 单列「取消」且不进分母；分母 < 5 时比率为 `null`，界面显示 `—`，hint 仍写 `成功/次数 次对话 · N 取消`。
   - **统计聚合**排除 `payload.path` 以 `/monitor/` 开头的 HTTP 记录（`totalLogs`、分类计数、`requestCount`、平均耗时、错误计数一并排除）；`/monitor/logs` 与 trace 查询仍保留这些记录；`/monitor/events` 仍不写日志，避免 SSE 自反馈。
 - 测试落点：`apps/daemon/test/observability-repository.test.ts`（统计口径）、`apps/daemon/test/monitor-api.test.ts`（自轮询排除 + 证据保留）、`apps/web/test/monitor-format.test.ts`（hint 文案）、`apps/web/test/stats-panel.test.tsx`（卡片与 `—` 呈现）。
+
+### 2026-10-27 · 浏览器复核
+
+真实 daemon + Vite，监控页实测（截图 `.scratch/shots/09-monitor.png`）：
+
+```
+概览 · 最近 5 分钟 · 45 条日志
+请求/秒 0.08
+请求数 25            ← 不含监控请求
+HTTP 错误率 0.0%      ← hint: 0 失败 · 0 冲突 / 25 请求
+全部错误 0
+平均耗时 3ms
+AI 成功率 —           ← hint: 0/0 次对话 · 0 取消
+```
+
+- 分子分母可从 hint 直接复算（0/25），不再出现「0.0% / 1 个错误」那种自相矛盾。
+- 「请求数」旁明写「不含监控请求」，自观测排除在界面上可见，不只是后台行为。
+- AI 样本不足时成功率显示 `—`，hint 保留分母与取消数。
