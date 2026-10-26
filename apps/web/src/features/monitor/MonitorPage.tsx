@@ -201,7 +201,7 @@ export function MonitorPage() {
 
       {logsError ? (
         <p className="monitor-error" role="alert">
-          Logs: {logsError}
+          日志加载失败：{logsError}
         </p>
       ) : null}
 

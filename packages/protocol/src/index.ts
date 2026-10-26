@@ -102,6 +102,16 @@ export interface CreateCanvasRequest {
   backgroundColor?: string;
 }
 
+/**
+ * `name` is the only mutable canvas field: identity, not geometry. The length
+ * bound lives here so the daemon validator and the browser input cannot drift.
+ */
+export const MAX_CANVAS_NAME_LENGTH = 80;
+
+export interface UpdateCanvasRequest {
+  name: string;
+}
+
 export interface AiChatRequest {
   canvasId?: string;
   message: string;
@@ -191,15 +201,23 @@ export interface MonitorStats {
   totalLogs: number;
   /** Every error-level record in the window, across all categories. */
   errorCount: number;
-  /** Failed HTTP request ratio (warn/error HTTP records over HTTP requests). */
-  errorRate: number;
+  /** Failed HTTP request ratio; `null` when the window has no HTTP requests. */
+  errorRate: number | null;
   requestCount: number;
   requestsPerSecond: number;
+  /** HTTP requests that ended in a server failure (5xx, logged at `error`). */
+  httpFailureCount: number;
+  /** HTTP requests that ended in a client conflict (4xx, logged at `warn`). */
+  httpConflictCount: number;
   /** Mean duration of HTTP requests that recorded a duration. */
   avgDurationMs: number;
+  /** Completed AI chats excluding user cancellations (the success denominator). */
   aiChatCount: number;
   /** Completed AI chats at info level; aborted chats do not count as success. */
   aiChatSuccessCount: number;
-  aiChatSuccessRate: number;
+  /** Chats the user cancelled; kept out of the success rate and shown separately. */
+  aiChatAbortedCount: number;
+  /** `null` until five non-aborted chats completed, so small samples read as unknown. */
+  aiChatSuccessRate: number | null;
   categoryCounts: MonitorCategoryStats[];
 }

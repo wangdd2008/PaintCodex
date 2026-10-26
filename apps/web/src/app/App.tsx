@@ -1,27 +1,46 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
+import { CanvasNameEditor } from '../features/canvas/CanvasNameEditor';
 import { CanvasStage } from '../features/canvas/CanvasStage';
+import { NewCanvasConfirm } from '../features/canvas/NewCanvasConfirm';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { MonitorPage } from '../features/monitor/MonitorPage';
+import {
+  ConnectionStatus,
+  type ConnectionState,
+} from '../features/status-bar/ConnectionStatus';
+import { SaveStatus } from '../features/status-bar/SaveStatus';
 import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export';
-import { readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
+import { describeCanvasError, readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
+import { displayCanvasName } from '../services/naming';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
+import { useViewportStore } from '../services/viewport-store';
 import { buildViewUrl, readViewFromSearch, type AppView } from './view-route';
 
 export function App() {
   const canvas = useCanvasStore((state) => state.canvas);
   const status = useCanvasStore((state) => state.status);
   const error = useCanvasStore((state) => state.error);
+  const previousCanvasId = useCanvasStore((state) => state.previousCanvasId);
   const createNewCanvas = useCanvasStore((state) => state.createNewCanvas);
+  const returnToPreviousCanvas = useCanvasStore((state) => state.returnToPreviousCanvas);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
   const tool = useToolStore((state) => state.tool);
+  const zoomPercent = useViewportStore((state) => state.zoomPercent);
   const [exportError, setExportError] = useState<string | null>(null);
+  // 新建会覆盖地址栏里的画布，有画布时必须先让人确认。
+  const [confirmNewCanvas, setConfirmNewCanvas] = useState(false);
   const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
+  // 窄屏（≤860px）侧栏是覆盖式抽屉；桌面忽略这个状态，侧栏常驻。
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // SSE 连接状态只由 EventSource 的 open/error 驱动，不轮询、不手动重连。
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const drawerToggleRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const canvasId = readRememberedCanvasId();
@@ -38,8 +57,14 @@ export function App() {
       return;
     }
 
+    // 打开（或切换到）一张画布时先显示「连接中…」，直到 SSE 的 open 事件到达。
+    setConnectionState('connecting');
+
     return subscribeToCanvas(canvasId, {
-      onOpen: () => void refreshCanvas(),
+      onOpen: () => {
+        setConnectionState('live');
+        void refreshCanvas();
+      },
       onSnapshotChanged: (event) => {
         const current = useCanvasStore.getState().canvas;
 
@@ -51,6 +76,7 @@ export function App() {
           void refreshCanvas();
         }
       },
+      onError: () => setConnectionState('reconnecting'),
     });
   }, [canvasId, refreshCanvas]);
 
@@ -110,6 +136,26 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view]);
 
+  useEffect(() => {
+    if (!drawerOpen) {
+      return;
+    }
+
+    function handleDrawerKeyDown(event: KeyboardEvent) {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      setDrawerOpen(false);
+      // 抽屉由「图层」按钮打开，关闭后把焦点还回去。
+      drawerToggleRef.current?.focus();
+    }
+
+    window.addEventListener('keydown', handleDrawerKeyDown);
+
+    return () => window.removeEventListener('keydown', handleDrawerKeyDown);
+  }, [drawerOpen]);
+
   function navigate(next: AppView) {
     if (next === view) {
       return;
@@ -121,6 +167,13 @@ export function App() {
       buildViewUrl(window.location.href, next),
     );
     setView(next);
+  }
+
+  async function handleConfirmNewCanvas() {
+    // Keep the bar open (with a busy CTA) until the create settles, so a
+    // failure is visible instead of looking like nothing happened.
+    await createNewCanvas();
+    setConfirmNewCanvas(false);
   }
 
   function handleExportPng() {
@@ -135,12 +188,13 @@ export function App() {
         throw new Error('画布尚未准备好导出');
       }
 
-      downloadPng(dataUrl, canvasPngFilename(canvas.name));
+      downloadPng(
+        dataUrl,
+        canvasPngFilename(displayCanvasName(canvas.name), canvas.id),
+      );
       setExportError(null);
     } catch (caught) {
-      setExportError(
-        caught instanceof Error ? caught.message : '无法导出 PNG',
-      );
+      setExportError(describeCanvasError(caught, '无法导出 PNG'));
     }
   }
 
@@ -150,41 +204,24 @@ export function App() {
     }
 
     try {
-      downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
+      downloadCanvasJson(
+        canvas,
+        canvasJsonFilename(displayCanvasName(canvas.name), canvas.id),
+      );
       setExportError(null);
     } catch (caught) {
-      setExportError(
-        caught instanceof Error ? caught.message : '无法导出 JSON',
-      );
+      setExportError(describeCanvasError(caught, '无法导出 JSON'));
     }
   }
 
-  // Auto-save: export JSON every 30 seconds when a canvas is active
-  useEffect(() => {
-    if (!canvas) {
-      return;
-    }
-
-    const interval = window.setInterval(() => {
-      try {
-        downloadCanvasJson(canvas, canvasJsonFilename(canvas.name));
-      } catch {
-        // Silent failure for auto-save
-      }
-    }, 30_000);
-
-    return () => window.clearInterval(interval);
-  }, [canvas]);
-
+  // Persistence is handling saving (ADR-0008); export only runs on demand.
   const menuMessage = error ?? exportError;
 
   return (
     <div className={view === 'monitor' ? 'app-shell app-shell--monitor' : 'app-shell'}>
       <header className="menu-bar">
         <span className="brand">PaintCodex</span>
-        {view === 'canvas' && canvas ? (
-          <span className="document-name">{canvas.name}</span>
-        ) : null}
+        {view === 'canvas' && canvas ? <CanvasNameEditor /> : null}
         <span className="menu-spacer" />
         {view === 'canvas' && menuMessage ? (
           <span className="menu-status">{menuMessage}</span>
@@ -192,13 +229,38 @@ export function App() {
         {view === 'canvas' ? (
           <>
             <button
+              ref={drawerToggleRef}
               type="button"
-              className="menu-button"
-              onClick={() => void createNewCanvas()}
-              disabled={status === 'loading'}
+              className="menu-button drawer-toggle"
+              aria-expanded={drawerOpen}
+              aria-controls="side-panel"
+              onClick={() => setDrawerOpen((open) => !open)}
             >
-              {status === 'loading' ? '处理中…' : '新建画布'}
+              图层
             </button>
+            {/* Without a canvas the empty state holds the only creation CTA. */}
+            {canvas ? (
+              <>
+                {previousCanvasId ? (
+                  <button
+                    type="button"
+                    className="menu-button"
+                    onClick={() => void returnToPreviousCanvas()}
+                    disabled={status === 'loading'}
+                  >
+                    返回上一张
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="menu-button"
+                  onClick={() => setConfirmNewCanvas(true)}
+                  disabled={status === 'loading'}
+                >
+                  {status === 'loading' ? '处理中…' : '新建画布'}
+                </button>
+              </>
+            ) : null}
             <button
               type="button"
               className="menu-button"
@@ -234,9 +296,20 @@ export function App() {
       <div className={view === 'monitor' ? 'workspace app-hidden' : 'workspace'}>
         <Toolbox />
         <main className="canvas-area">
+          {confirmNewCanvas && canvas ? (
+            <NewCanvasConfirm
+              canvasName={canvas.name}
+              busy={status === 'loading'}
+              onConfirm={() => void handleConfirmNewCanvas()}
+              onCancel={() => setConfirmNewCanvas(false)}
+            />
+          ) : null}
           <CanvasStage key={canvas?.id ?? 'blank'} />
         </main>
-        <aside className="side-panel">
+        <aside
+          id="side-panel"
+          className={drawerOpen ? 'side-panel side-panel--open' : 'side-panel'}
+        >
           <LayerPanel />
           <AiChatPanel />
         </aside>
@@ -251,8 +324,13 @@ export function App() {
       {view === 'canvas' ? (
         <footer className="status-bar">
           <span>{canvas ? `${canvas.width} × ${canvas.height}` : '无画布'}</span>
-          <span>缩放: 100%</span>
+          <span>
+            缩放 {zoomPercent === null ? '—' : `${zoomPercent.toFixed(1)}%`}
+          </span>
           <span>{tool === 'brush' ? '画笔' : '选择'}</span>
+          <SaveStatus />
+          {/* 没有画布就没有 SSE 通道，不伪造连接状态。 */}
+          {canvasId ? <ConnectionStatus state={connectionState} /> : null}
         </footer>
       ) : null}
     </div>

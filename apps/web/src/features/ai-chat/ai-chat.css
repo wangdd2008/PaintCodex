@@ -98,10 +98,64 @@
 /* Own line inside the bubble so it reads as status, not as reply text. */
 .ai-chat__step {
   display: block;
-  margin-bottom: 4px;
   color: #9ea3b0;
   font-size: 11px;
   animation: ai-chat-step-in 160ms ease-out;
+}
+
+/* 步骤文案与「已用 Ns」计时共用一行状态。 */
+.ai-chat__progress {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ai-chat__progress .ai-chat__step {
+  margin-bottom: 0;
+}
+
+.ai-chat__timer {
+  color: #747785;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 运行结束后保留：空白气泡会让人看不出已经完成。 */
+.ai-chat__terminal {
+  color: #8f93a3;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 助手气泡下方的落地确认。 */
+.ai-chat__landing {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  color: #9ea3b0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ai-chat__landing-note {
+  color: #747785;
+}
+
+.ai-chat__landing-undo {
+  border: 0;
+  background: transparent;
+  color: #9db4e0;
+  padding: 4px 2px;
+  min-height: 24px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ai-chat__landing-undo:hover {
+  color: #c9d8f5;
+  text-decoration: underline;
 }
 
 .ai-chat__cancelled {
@@ -110,6 +164,14 @@
   color: #8f93a3;
   font-size: 11px;
   font-style: italic;
+}
+
+/* 失败气泡的占位：空内容时它就是气泡正文。 */
+.ai-chat__incomplete {
+  display: block;
+  margin-top: 2px;
+  color: #f2b8b5;
+  font-size: 11px;
 }
 
 @keyframes ai-chat-step-in {
@@ -123,12 +185,54 @@
 }
 
 .ai-chat__error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin: 0;
   padding: 8px 10px;
   border: 1px solid #6b3434;
   border-radius: 6px;
   background: #2a1b1d;
   color: #f2b8b5;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ai-chat__error-text {
+  flex: 1;
+}
+
+.ai-chat__retry {
+  flex: none;
+  border: 1px solid #6b3434;
+  border-radius: 6px;
+  padding: 4px 10px;
+  min-height: 28px;
+  background: #3a1f21;
+  color: #f2b8b5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__retry:hover:not(:disabled) {
+  background: #4a2628;
+}
+
+.ai-chat__retry:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Why the composer is disabled: AI actions need a canvas to land on. */
+.ai-chat__blocked {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid #4d4630;
+  border-radius: 6px;
+  background: #26231a;
+  color: #d8c48a;
   font-size: 12px;
   line-height: 1.45;
 }

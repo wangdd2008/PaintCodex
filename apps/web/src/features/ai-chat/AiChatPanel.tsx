@@ -1,7 +1,48 @@
 import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { useCanvasStore } from '../../services/canvas-store';
+import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
+import { describeChatFailure, type ChatFailure } from './chat-error';
 import './ai-chat.css';
+
+/** 这次回复落地的 AI 图层，以及撤销守卫要比较的 revision。 */
+interface ChatLayerConfirmation {
+  id: string;
+  name: string;
+  canvasId: string | null;
+  /** AI 图层生成后产生的 revision；只有当前 revision 与它相等时才允许撤销。 */
+  expectedRevision: number;
+  /** 用户已撤销这一步，避免撤销入口再次出现。 */
+  undone?: boolean;
+}
+
+/** 撤销入口的三种状态：可撤销、已有后续操作、不适用。 */
+type LayerUndoState = 'available' | 'stale' | 'hidden';
+
+/** 撤销守卫的唯一判定：撤销、陈旧提示与隐藏都从这里派生。 */
+function layerUndoState(
+  layer: ChatLayerConfirmation,
+  canvasId: string | null,
+  revision: number | null,
+): LayerUndoState {
+  if (
+    layer.undone === true ||
+    layer.canvasId === null ||
+    layer.canvasId !== canvasId ||
+    revision === null
+  ) {
+    return 'hidden';
+  }
+
+  if (revision === layer.expectedRevision) {
+    return 'available';
+  }
+
+  if (revision > layer.expectedRevision) {
+    return 'stale';
+  }
+
+  return 'hidden';
+}
 
 interface ChatMessage {
   id: number;
@@ -9,19 +50,96 @@ interface ChatMessage {
   content: string;
   /** Set on the pending reply when the user cancels it. */
   cancelled?: boolean;
+  /** 首个 delta 已到达：等待文案切换为「正在生成…」。 */
+  generating?: boolean;
+  /** done 时结算的固定用时；运行结束后继续保留。 */
+  durationSeconds?: number;
+  /** 从 `layerCreated` 帧消费到的落地确认。 */
+  layer?: ChatLayerConfirmation;
+  /** 这一轮失败了：气泡必须留下「未完成」，不能是空白。 */
+  incomplete?: boolean;
 }
 
 /** The protocol owns the step shape so frontend and daemon cannot drift. */
 type ChatStep = NonNullable<StreamPayload['step']>;
 
-const FALLBACK_ERROR =
-  'AI 助手无法响应。请检查 Codex CLI 是否已安装并已登录。';
+/** 错误条的一项：中文原因 + 重试所需的原始消息与气泡。 */
+interface ChatErrorState extends ChatFailure {
+  /** 失败那一轮发出的原文，重试原样重发。 */
+  text: string;
+  /** 失败那一轮的助手气泡 id，重试复用它而不是追加新消息。 */
+  assistantId: number;
+}
 
-/** The runner's timeout text is machine-facing; users get an actionable line. */
-function userFacingError(message: string): string {
-  return /Codex CLI timed out after \d+ms/.test(message)
-    ? '请求超时，请重试'
-    : message;
+/** 请求层错误的载体，让状态码与错误码能参与中文分类。 */
+class ChatRequestError extends Error {
+  readonly code: string | null;
+  readonly status: number | null;
+
+  constructor(message: string, code: string | null = null, status: number | null = null) {
+    super(message);
+    this.name = 'ChatRequestError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+/** 从 HTTP 错误体里取出 daemon 的结构化错误；非 JSON 时保持 null。 */
+async function readErrorPayload(
+  response: Response,
+): Promise<{ code: string | null; message: string | null }> {
+  try {
+    const body = (await response.json()) as { error?: { code?: unknown; message?: unknown } };
+    return {
+      code: typeof body.error?.code === 'string' ? body.error.code : null,
+      message: typeof body.error?.message === 'string' ? body.error.message : null,
+    };
+  } catch {
+    return { code: null, message: null };
+  }
+}
+
+/** 把任意抛错折进分类器；原始英文只作为分类输入。 */
+function describeThrownChatFailure(cause: unknown): ChatFailure {
+  if (cause instanceof ChatRequestError) {
+    return describeChatFailure({
+      code: cause.code,
+      status: cause.status,
+      message: cause.message,
+    });
+  }
+
+  // fetch 在连接被拒/断网时只抛 TypeError，没有状态码。
+  if (cause instanceof TypeError) {
+    return describeChatFailure({ networkError: true });
+  }
+
+  return describeChatFailure({
+    message: cause instanceof Error ? cause.message : null,
+  });
+}
+
+/**
+ * AI actions always need a canvas to land on. Explaining why the composer is
+ * disabled keeps the assistant from promising layers with nowhere to put them.
+ */
+function composerBlockedReason(
+  hasCanvas: boolean,
+  status: CanvasStatus,
+): string | null {
+  if (hasCanvas) {
+    return null;
+  }
+
+  if (status === 'loading') {
+    return '画布正在加载，请稍候。';
+  }
+
+  if (status === 'error') {
+    return '画布加载失败，请先重试或新建一张画布。';
+  }
+
+  return '先新建一张画布，再让 AI 作画。';
 }
 
 /** Hides the machine-readable canvas action from the chat bubble. */
@@ -59,18 +177,48 @@ export function AiChatPanel() {
   const [input, setInput] = useState('');
   const [lastInput, setLastInput] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ChatErrorState | null>(null);
   const [currentStep, setCurrentStep] = useState<ChatStep | null>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const canvas = useCanvasStore((state) => state.canvas);
+  const status = useCanvasStore((state) => state.status);
+  const currentCanvasId = useCanvasStore((state) => state.canvas?.id ?? null);
+  const currentRevision = useCanvasStore((state) => state.canvas?.revision ?? null);
+  const blockedReason = composerBlockedReason(canvas !== null, status);
 
   const nextId = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** 本次回复的墙钟起点，供每秒计时与终态用时共用。 */
+  const runStartedAt = useRef<number | null>(null);
+  /** 请求发出时的 revision，用来推算 AI 那一步的 revision。 */
+  const runStartRevision = useRef<number | null>(null);
+  /** 请求针对的画布；确认行绝不能撤销另一张画布。 */
+  const runCanvasId = useRef<string | null>(null);
 
   useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
   }, []);
+
+  // 每秒刷新一次计时；生成期间也继续计时。
+  useEffect(() => {
+    if (!inFlight) {
+      return;
+    }
+
+    const startedAt = runStartedAt.current;
+    if (startedAt === null) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [inFlight]);
 
   useEffect(() => {
     const node = scrollRef.current;
@@ -90,11 +238,43 @@ export function AiChatPanel() {
   };
 
   const appendToAssistant = (delta: string) => {
-    updateLastAssistant((last) => ({ ...last, content: last.content + delta }));
+    updateLastAssistant((last) => ({
+      ...last,
+      content: last.content + delta,
+      generating: true,
+    }));
   };
 
-  const markAssistantCancelled = () => {
-    updateLastAssistant((last) => ({ ...last, cancelled: true }));
+  const markAssistantCancelled = (assistantId: number) => {
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.id === assistantId
+          ? { ...message, cancelled: true, incomplete: false }
+          : message,
+      ),
+    );
+  };
+
+  /** 失败气泡必须明确标「未完成」，空白气泡看不出这一轮失败了。 */
+  const markAssistantIncomplete = (assistantId: number) => {
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.id === assistantId
+          ? { ...message, incomplete: true, generating: false }
+          : message,
+      ),
+    );
+  };
+
+  /** 重试前清空同一个气泡：不追加消息，也不保留上一次失败的半截回复。 */
+  const resetAssistant = (assistantId: number) => {
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.id === assistantId
+          ? { id: message.id, role: 'assistant', content: '' }
+          : message,
+      ),
+    );
   };
 
   const cancel = () => {
@@ -120,44 +300,60 @@ export function AiChatPanel() {
       }
     }
 
+    if (payload.layerCreated) {
+      const { id, name } = payload.layerCreated;
+
+      if (typeof id === 'string' && typeof name === 'string') {
+        // AI 图层只比发出时的 revision 多一步；运行期间又画了一笔、
+        // 另一个标签页写入或发生重试时，守卫保持关闭，
+        // 宁可不给撤销，也不撤掉不属于这一步的快照。
+        const startRevision = runStartRevision.current ?? 0;
+
+        updateLastAssistant((last) => ({
+          ...last,
+          layer: {
+            id,
+            name,
+            canvasId: runCanvasId.current,
+            expectedRevision: startRevision + 1,
+          },
+        }));
+        return;
+      }
+    }
+
     if (payload.done === true) {
+      const startedAt = runStartedAt.current;
+      const durationSeconds =
+        startedAt === null
+          ? 0
+          : Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+
+      setElapsedSeconds(durationSeconds);
+      updateLastAssistant((last) => ({ ...last, durationSeconds }));
       return;
     }
 
     if (payload.error) {
-      const detail =
+      const code =
+        typeof payload.error.code === 'string' ? payload.error.code : null;
+      const message =
         typeof payload.error.message === 'string' && payload.error.message.length > 0
           ? payload.error.message
-          : FALLBACK_ERROR;
-      throw new Error(detail);
+          : null;
+      throw new ChatRequestError(message ?? '', code);
     }
   };
 
-  const send = async (event?: FormEvent<HTMLFormElement>) => {
-    event?.preventDefault();
-
-    const message = input.trim();
-    if (message.length === 0 || inFlight) {
-      return;
-    }
-
-    setInput('');
-    setLastInput(null);
+  /** 跑一轮请求：发送与重试共用，区别只在重试复用已有气泡。 */
+  const run = async (text: string, assistantId: number) => {
     setError(null);
     setCurrentStep(null);
+    setElapsedSeconds(0);
+    runStartedAt.current = Date.now();
+    runStartRevision.current = useCanvasStore.getState().canvas?.revision ?? null;
+    runCanvasId.current = useCanvasStore.getState().canvas?.id ?? null;
     setInFlight(true);
-
-    const userMessage: ChatMessage = {
-      id: nextId.current++,
-      role: 'user',
-      content: message,
-    };
-    const assistantMessage: ChatMessage = {
-      id: nextId.current++,
-      role: 'assistant',
-      content: '',
-    };
-    setMessages((previous) => [...previous, userMessage, assistantMessage]);
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -167,25 +363,21 @@ export function AiChatPanel() {
       const response = await fetch('/paint/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, canvasId }),
+        body: JSON.stringify({ message: text, canvasId }),
         signal: controller.signal,
       });
 
       if (!response.ok) {
-        let detail = `AI request failed (${response.status})`;
-        try {
-          const body = (await response.json()) as { error?: { message?: unknown } };
-          if (typeof body.error?.message === 'string') {
-            detail = body.error.message;
-          }
-        } catch {
-          // Keep the status-based message when the body is not JSON.
-        }
-        throw new Error(detail);
+        const body = await readErrorPayload(response);
+        throw new ChatRequestError(
+          body.message ?? '',
+          body.code,
+          response.status,
+        );
       }
 
       if (!response.body) {
-        throw new Error('The daemon returned an empty response stream.');
+        throw new ChatRequestError('');
       }
 
       const reader = response.body.getReader();
@@ -210,19 +402,72 @@ export function AiChatPanel() {
       }
     } catch (cause) {
       if (controller.signal.aborted) {
-        markAssistantCancelled();
+        markAssistantCancelled(assistantId);
         return;
       }
-      setError(
-        userFacingError(cause instanceof Error ? cause.message : FALLBACK_ERROR),
-      );
+
+      const failure = describeThrownChatFailure(cause);
+      markAssistantIncomplete(assistantId);
+      setError({ ...failure, text, assistantId });
+      // 仅当输入框为空才恢复草稿；用户已经重新输入的内容不覆盖。
+      setInput((current) => (current.length === 0 ? text : current));
     } finally {
       if (abortRef.current === controller) {
         abortRef.current = null;
       }
+      runStartedAt.current = null;
+      runStartRevision.current = null;
+      runCanvasId.current = null;
       setCurrentStep(null);
       setInFlight(false);
     }
+  };
+
+  const send = async (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+
+    const message = input.trim();
+    if (message.length === 0 || inFlight) {
+      return;
+    }
+
+    if (!useCanvasStore.getState().canvas) {
+      return;
+    }
+
+    setInput('');
+    setLastInput(null);
+
+    const userMessage: ChatMessage = {
+      id: nextId.current++,
+      role: 'user',
+      content: message,
+    };
+    const assistantMessage: ChatMessage = {
+      id: nextId.current++,
+      role: 'assistant',
+      content: '',
+    };
+    setMessages((previous) => [...previous, userMessage, assistantMessage]);
+
+    await run(message, assistantMessage.id);
+  };
+
+  /** 重试复用失败那一轮的用户消息与助手气泡，不追加新消息。 */
+  const retry = () => {
+    if (inFlight || error === null || !error.retryable) {
+      return;
+    }
+
+    if (!useCanvasStore.getState().canvas) {
+      return;
+    }
+
+    const { text, assistantId } = error;
+    resetAssistant(assistantId);
+    // 输入框若还是刚恢复的那一句就清空；用户改写过的草稿保持原样。
+    setInput((current) => (current === text ? '' : current));
+    void run(text, assistantId);
   };
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -253,8 +498,44 @@ export function AiChatPanel() {
     setLastInput(null);
   };
 
+  /** 快照级撤销只在 AI 这一步仍是最新 revision 时安全。 */
+  const canUndoLayer = (layer: ChatLayerConfirmation): boolean =>
+    layerUndoState(layer, currentCanvasId, currentRevision) === 'available';
+
+  /** 后续 mutation 已越过 AI 这一步：只给纯文本，不给撤销入口。 */
+  const isLayerStale = (layer: ChatLayerConfirmation): boolean =>
+    layerUndoState(layer, currentCanvasId, currentRevision) === 'stale';
+
+  /** 只撤销 AI 这一步；revision 守卫已证明不会丢掉后续操作。 */
+  const undoLayer = async (messageId: number) => {
+    const message = messages.find((item) => item.id === messageId);
+    const layer = message?.layer;
+
+    if (!layer || !canUndoLayer(layer)) {
+      return;
+    }
+
+    await useCanvasStore.getState().undo();
+
+    const after = useCanvasStore.getState().canvas;
+    const layerStillThere =
+      after?.layers.some((item) => item.id === layer.id) ?? true;
+
+    if (!layerStillThere) {
+      setMessages((previous) =>
+        previous.map((item) =>
+          item.id === messageId && item.layer
+            ? { ...item, layer: { ...item.layer, undone: true } }
+            : item,
+        ),
+      );
+    }
+  };
+
+  const lastMessageId = messages[messages.length - 1]?.id ?? null;
+
   return (
-    <section className="ai-chat" aria-label="AI chat">
+    <section className="ai-chat" aria-label="AI 对话">
       <button
         type="button"
         className="ai-chat__toggle"
@@ -279,7 +560,23 @@ export function AiChatPanel() {
             ) : (
               messages.map((message) => {
                 const text = visibleAssistantText(message.content);
-                const step = inFlight && message.role === 'assistant' ? currentStep : null;
+                const isPending =
+                  inFlight &&
+                  message.role === 'assistant' &&
+                  message.id === lastMessageId;
+                const step = isPending ? currentStep : null;
+                // 最后两步描述结果落地，首个 token 之后仍继续显示，
+                // 不能一直停在「正在生成…」。
+                const applyStep =
+                  step?.id === 'action_parse' || step?.id === 'action_apply'
+                    ? step
+                    : null;
+                const progressLabel =
+                  applyStep?.label ??
+                  (message.generating ? '正在生成…' : step?.label ?? '思考中…');
+                const progressKey =
+                  applyStep?.id ??
+                  (message.generating ? 'generating' : step?.id ?? 'waiting');
 
                 return (
                   <article
@@ -290,21 +587,59 @@ export function AiChatPanel() {
                       {message.role === 'user' ? '你' : 'AI 助手'}
                     </span>
                     <p className="ai-chat__text">
-                      {step ? (
-                        // Keyed by step id so every backend step replays the fade-in.
-                        <span className="ai-chat__step" key={step.id}>
-                          {step.label}
+                      {isPending ? (
+                        <span className="ai-chat__progress">
+                          {/* Keyed by phase so every step replays the fade-in. */}
+                          <span className="ai-chat__step" key={progressKey}>
+                            {progressLabel}
+                          </span>
+                          <span className="ai-chat__timer">
+                            已用 {elapsedSeconds}s
+                          </span>
                         </span>
                       ) : null}
-                      {text.length > 0
-                        ? text
-                        : inFlight && message.role === 'assistant' && !step
-                          ? '思考中…'
-                          : ''}
+                      {text}
+                      {message.incomplete ? (
+                        <span className="ai-chat__incomplete">未完成</span>
+                      ) : null}
                       {message.cancelled ? (
                         <span className="ai-chat__cancelled">已取消</span>
                       ) : null}
                     </p>
+                    {/* 终态在运行结束后保留，不能清空为空白。 */}
+                    {!isPending && message.durationSeconds !== undefined ? (
+                      <span className="ai-chat__terminal">
+                        已完成 · 用时 {message.durationSeconds}s
+                      </span>
+                    ) : null}
+                    {message.layer ? (
+                      <div className="ai-chat__landing">
+                        <span className="ai-chat__landing-text">
+                          {message.layer.undone
+                            ? `已撤销添加图层「${message.layer.name}」`
+                            : `已添加图层「${message.layer.name}」`}
+                        </span>
+                        {canUndoLayer(message.layer) ? (
+                          <>
+                            <span aria-hidden="true"> · </span>
+                            <button
+                              type="button"
+                              className="ai-chat__landing-undo"
+                              onClick={() => void undoLayer(message.id)}
+                            >
+                              撤销
+                            </button>
+                          </>
+                        ) : isLayerStale(message.layer) ? (
+                          <>
+                            <span aria-hidden="true"> · </span>
+                            <span className="ai-chat__landing-note">
+                              已有后续操作，无法撤销
+                            </span>
+                          </>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </article>
                 );
               })
@@ -312,8 +647,24 @@ export function AiChatPanel() {
           </div>
 
           {error ? (
-            <p className="ai-chat__error" role="alert">
-              {error}
+            <div className="ai-chat__error" role="alert">
+              <span className="ai-chat__error-text">{error.message}</span>
+              {error.retryable ? (
+                <button
+                  type="button"
+                  className="ai-chat__retry"
+                  onClick={retry}
+                  disabled={inFlight}
+                >
+                  重试
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {blockedReason ? (
+            <p className="ai-chat__blocked" role="status">
+              {blockedReason}
             </p>
           ) : null}
 
@@ -325,7 +676,7 @@ export function AiChatPanel() {
               value={input}
               onChange={(event) => handleInputChange(event.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={inFlight}
+              disabled={inFlight || blockedReason !== null}
             />
             <div className="ai-chat__actions">
               {/* Draft actions stay hidden while a request runs, so the cancel
@@ -347,7 +698,7 @@ export function AiChatPanel() {
                 <button
                   type="submit"
                   className="ai-chat__send"
-                  disabled={input.trim().length === 0}
+                  disabled={input.trim().length === 0 || blockedReason !== null}
                 >
                   发送
                 </button>

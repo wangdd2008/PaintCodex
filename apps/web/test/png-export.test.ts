@@ -9,6 +9,21 @@ describe('canvasPngFilename', () => {
     expect(canvasPngFilename('Sunset Study')).toBe('Sunset-Study.png');
   });
 
+  it('appends the first 8 characters of the canvas id', () => {
+    expect(canvasPngFilename('未命名 2026-10-27 00:50', '3f9a1c2d-aaaa-bbbb')).toBe(
+      '未命名-2026-10-27-0050-3f9a1c2d.png',
+    );
+    expect(canvasPngFilename('A', '1234567890')).toBe('A-12345678.png');
+  });
+
+  it('keeps same-name canvases from overwriting each other', () => {
+    const name = '未命名 2026-10-27 00:50';
+
+    expect(canvasPngFilename(name, '3f9a1c2d-aaaa')).not.toBe(
+      canvasPngFilename(name, '9b8c7d6e-bbbb'),
+    );
+  });
+
   it('strips characters that are illegal on Windows', () => {
     expect(canvasPngFilename('a\\b/c:d*e?f"g<h>i|j')).toBe('abcdefghij.png');
   });
@@ -21,6 +36,12 @@ describe('canvasPngFilename', () => {
     expect(canvasPngFilename('   ')).toBe('paintcodex.png');
     expect(canvasPngFilename('')).toBe('paintcodex.png');
     expect(canvasPngFilename(null)).toBe('paintcodex.png');
+  });
+
+  it('keeps the fallback basename when the name is empty but an id exists', () => {
+    expect(canvasPngFilename('   ', '3f9a1c2d-aaaa')).toBe(
+      'paintcodex-3f9a1c2d.png',
+    );
   });
 
   it('does not add a second png extension', () => {

@@ -85,6 +85,11 @@ button {
   cursor: default;
 }
 
+/* 抽屉开关只在 ≤860px 出现，桌面始终看得到侧栏。 */
+.drawer-toggle {
+  display: none;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 300px;
@@ -95,18 +100,98 @@ button {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow-y: auto;
+  /* 侧栏本身不滚动：图层面板与 AI 面板各自消化溢出。 */
+  overflow: hidden;
   border-left: 1px solid #2c2d33;
   background: #1b1c21;
 }
 
+/* AI 面板保底高度，图层增长时优先让图层列表滚动而不是压扁对话。 */
+.side-panel > .ai-chat {
+  flex: 1;
+  min-height: 240px;
+}
+
 .canvas-area {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: #111216;
   min-width: 0;
+}
+
+/* 新建确认条贴在画布区顶部，覆盖显示以免推开画布；不弹原生 confirm。 */
+.new-canvas-confirm {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  width: min(640px, calc(100% - 24px));
+  padding: 10px 14px;
+  transform: translateX(-50%);
+  border: 1px solid #4a4d59;
+  border-radius: 8px;
+  background: #26272e;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  font-size: 13px;
+}
+
+.new-canvas-confirm__title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.new-canvas-confirm__text {
+  flex: 1 1 220px;
+  margin: 0;
+  color: #b9bcc7;
+  line-height: 1.5;
+}
+
+.new-canvas-confirm__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.new-canvas-confirm__button {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 1px solid #3a3c45;
+  border-radius: 6px;
+  background: #1f2026;
+  color: inherit;
+  cursor: pointer;
+}
+
+.new-canvas-confirm__button:hover:not(:disabled) {
+  background: #2f313a;
+}
+
+.new-canvas-confirm__button--primary {
+  border-color: #5b8def;
+  background: #2c3f66;
+  color: #eef3ff;
+}
+
+.new-canvas-confirm__button--primary:hover:not(:disabled) {
+  background: #36507f;
+}
+
+.new-canvas-confirm__button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.new-canvas-confirm__button:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
 }
 
 .canvas-viewport {
@@ -139,9 +224,155 @@ button {
   height: 100% !important;
 }
 
-.canvas-hint {
+/* Canvas-level error banner: one mutation failure, one line, retry or dismiss. */
+.canvas-alert {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #7a3b3b;
+  border-radius: 6px;
+  background: #33201f;
+  color: #ffd7d7;
+  font-size: 13px;
+}
+
+.canvas-alert__message {
+  flex: 1;
   margin: 0;
-  color: #8a8d99;
+  line-height: 1.5;
+}
+
+.canvas-alert__retry {
+  min-height: 32px;
+  padding: 0 16px;
+  border: 1px solid #a95a5a;
+  border-radius: 6px;
+  background: #4a2a2a;
+  color: #ffecec;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.canvas-alert__retry:hover {
+  background: #5a3333;
+}
+
+.canvas-alert__retry:focus-visible,
+.canvas-alert__dismiss:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+.canvas-alert__dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #d9a5a5;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-alert__dismiss:hover {
+  border-color: #7a3b3b;
+  color: #ffecec;
+}
+
+/* Covers the canvas area for the three non-ready states, so no white board is
+   ever rendered that looks drawable. */
+.canvas-gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 1100px;
+  min-height: 280px;
+  height: 100%;
+  padding: 32px;
+  border: 1px dashed #34363f;
+  border-radius: 8px;
+  background: #17181c;
+  text-align: center;
+}
+
+.canvas-gate__title {
+  margin: 0;
+  color: #e8e8ea;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.canvas-gate__description {
+  margin: 0;
+  max-width: 420px;
+  color: #9a9daa;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.canvas-gate__reason {
+  margin: 0;
+  max-width: 520px;
+  color: #e07a7a;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.canvas-gate__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+
+.canvas-gate__cta {
+  min-height: 44px;
+  padding: 0 24px;
+  border: 1px solid #5b8def;
+  border-radius: 6px;
+  background: #2c3f66;
+  color: #eef3ff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.canvas-gate__cta:hover:not(:disabled) {
+  background: #36507f;
+}
+
+.canvas-gate__cta:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.canvas-gate__cta:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+.canvas-gate__cta--secondary {
+  border-color: #3a3c45;
+  background: #26272e;
+  color: #e8e8ea;
+}
+
+.canvas-gate__cta--secondary:hover:not(:disabled) {
+  background: #2f313a;
+}
+
+.canvas-warning {
+  margin: 0;
+  color: #e07a7a;
   font-size: 12px;
 }
 
@@ -154,4 +385,188 @@ button {
   background: #1f2026;
   color: #9a9daa;
   font-size: 12px;
+}
+
+.status-bar__save {
+  color: #9a9daa;
+}
+
+.status-bar__retry {
+  min-height: 20px;
+  padding: 1px 8px;
+  border: 1px solid #7a3b3b;
+  border-radius: 4px;
+  background: #2a1e1e;
+  color: #f0b4b4;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.status-bar__retry:hover:not(:disabled) {
+  background: #3a2626;
+}
+
+.status-bar__retry:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.status-bar__retry:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 2px;
+}
+
+/*
+ * 连接状态：沿用监控页的「圆点 + 胶囊」视觉语言。
+ * 断线是琥珀色——它是等待恢复，不是红色错误（错误由画布区顶部的 role="alert" 横幅承载）。
+ */
+.status-bar__connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #2c2d33;
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: #9a9daa;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.status-bar__connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #747785;
+}
+
+.status-bar__connection--connecting .status-bar__connection-dot {
+  background: #f0c674;
+}
+
+.status-bar__connection--live {
+  color: #9fd6a8;
+  border-color: #33513a;
+}
+
+.status-bar__connection--live .status-bar__connection-dot {
+  background: #6fce82;
+  box-shadow: 0 0 0 3px rgb(111 206 130 / 15%);
+}
+
+.status-bar__connection--reconnecting {
+  color: #f0c674;
+  border-color: #5c4a22;
+}
+
+.status-bar__connection--reconnecting .status-bar__connection-dot {
+  background: #f0c674;
+  box-shadow: 0 0 0 3px rgb(240 198 116 / 15%);
+}
+
+/*
+ * 窄屏承诺：桌面优先，窄屏 ≥360px 可用。
+ * 完整移动端（触控手势、双指缩放、移动端专用工具栏）不在本轮。
+ * 三档断点只做布局收口，桌面布局保持在上面的默认规则里。
+ */
+
+/* 第一档：收窄工具条，侧栏按视口宽度在 260–320px 之间伸缩。 */
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: 48px minmax(0, 1fr) clamp(260px, 24vw, 320px);
+  }
+
+  /* 48px 工具条里给「画笔/选择」这类两字标签留出整行宽度。 */
+  .workspace .toolbox {
+    padding: 12px 4px;
+  }
+
+  .workspace .tool-button {
+    padding: 10px 2px;
+  }
+}
+
+/* 第二档：侧栏离开网格，变成覆盖式抽屉；菜单可换行，文档名让位。 */
+@media (max-width: 860px) {
+  .app-shell {
+    /* 菜单与状态栏换行后按内容取高，避免压住画布。 */
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+
+  .menu-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .document-name {
+    display: none;
+  }
+
+  .drawer-toggle {
+    display: inline-flex;
+  }
+
+  .workspace {
+    position: relative;
+    grid-template-columns: 48px minmax(0, 1fr);
+    /* 收起时抽屉在右侧视口外；裁掉它，否则 document 仍会被撑出横向滚动。 */
+    overflow: hidden;
+  }
+
+  .side-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10;
+    width: min(320px, 86vw);
+    border-left: 1px solid #2c2d33;
+    box-shadow: -12px 0 32px rgb(0 0 0 / 55%);
+    /* 收起时移出视口并隐藏，避免被读屏或 Tab 顺序摸到。 */
+    transform: translateX(100%);
+    visibility: hidden;
+    transition: transform 160ms ease, visibility 160ms ease;
+  }
+
+  .side-panel.side-panel--open {
+    transform: none;
+    visibility: visible;
+  }
+
+  .canvas-area {
+    padding: 16px;
+  }
+
+  .status-bar {
+    min-height: 28px;
+  }
+}
+
+/* 第三档：抽屉接近全宽，导出等按钮整体换行，画布贴边保住 280px 可用宽度。 */
+@media (max-width: 560px) {
+  .menu-bar {
+    column-gap: 8px;
+    padding: 8px 10px;
+  }
+
+  /* 占满整行的 spacer 把品牌留在第一行，其余按钮从第二行开始排。 */
+  .menu-spacer {
+    flex-basis: 100%;
+    height: 0;
+  }
+
+  .side-panel {
+    width: calc(100% - 16px);
+  }
+
+  .canvas-area {
+    padding: 0;
+  }
+
+  .status-bar {
+    flex-wrap: wrap;
+    gap: 2px 12px;
+    padding: 4px 12px;
+  }
 }

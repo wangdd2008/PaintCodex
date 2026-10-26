@@ -150,6 +150,206 @@ describe('AgentLogRepository', () => {
     ]);
   });
 
+  it('reports no HTTP error rate when the window has no requests', () => {
+    const repository = createRepository();
+
+    const stats = repository.stats({ now: 60_000, windowMs: 30_000 });
+
+    expect(stats.requestCount).toBe(0);
+    expect(stats.errorRate).toBeNull();
+    expect(stats.aiChatSuccessRate).toBeNull();
+  });
+
+  it('separates 4xx conflicts from 5xx failures while both count as failed requests', () => {
+    const repository = createRepository();
+
+    for (let index = 0; index < 21; index += 1) {
+      repository.insert({
+        timestamp: 10_000 + index,
+        level: 'info',
+        category: 'http',
+        message: 'http_request',
+        payload: { statusCode: 200 },
+      });
+    }
+
+    for (const statusCode of [404, 409]) {
+      repository.insert({
+        timestamp: 30_000,
+        level: 'warn',
+        category: 'http',
+        message: 'http_request',
+        payload: { statusCode },
+      });
+    }
+
+    repository.insert({
+      timestamp: 40_000,
+      level: 'error',
+      category: 'http',
+      message: 'http_request',
+      payload: { statusCode: 500 },
+    });
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.requestCount).toBe(24);
+    expect(stats.httpFailureCount).toBe(1);
+    expect(stats.httpConflictCount).toBe(2);
+    expect(stats.errorRate).toBe(0.125);
+    // `errorCount` stays the all-category error-level count: 4xx is a conflict,
+    // not an error-level record.
+    expect(stats.errorCount).toBe(1);
+  });
+
+  it('excludes aborted chats from the success denominator and counts cancellations', () => {
+    const repository = createRepository();
+
+    repository.insert({
+      timestamp: 10_000,
+      level: 'info',
+      category: 'ai-chat',
+      message: 'chat_completed',
+      payload: { aborted: false, actionApplied: true },
+    });
+    repository.insert({
+      timestamp: 20_000,
+      level: 'warn',
+      category: 'ai-chat',
+      message: 'chat_completed',
+      payload: { aborted: true, actionApplied: false },
+    });
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.aiChatCount).toBe(1);
+    expect(stats.aiChatSuccessCount).toBe(1);
+    expect(stats.aiChatAbortedCount).toBe(1);
+    // One sample is not a rate the UI may show as a definite percentage.
+    expect(stats.aiChatSuccessRate).toBeNull();
+  });
+
+  it('treats four completed chats as a small sample', () => {
+    const repository = createRepository();
+
+    for (let index = 0; index < 4; index += 1) {
+      repository.insert({
+        timestamp: 10_000 + index,
+        level: 'info',
+        category: 'ai-chat',
+        message: 'chat_completed',
+        payload: { aborted: false },
+      });
+    }
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.aiChatCount).toBe(4);
+    expect(stats.aiChatSuccessRate).toBeNull();
+  });
+
+  it('reports 100% once five chats all succeed', () => {
+    const repository = createRepository();
+
+    for (let index = 0; index < 5; index += 1) {
+      repository.insert({
+        timestamp: 10_000 + index,
+        level: 'info',
+        category: 'ai-chat',
+        message: 'chat_completed',
+        payload: { aborted: false },
+      });
+    }
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.aiChatCount).toBe(5);
+    expect(stats.aiChatSuccessCount).toBe(5);
+    expect(stats.aiChatSuccessRate).toBe(1);
+  });
+
+  it('reports a success rate once five non-aborted chats completed', () => {
+    const repository = createRepository();
+
+    for (let index = 0; index < 4; index += 1) {
+      repository.insert({
+        timestamp: 10_000 + index,
+        level: 'info',
+        category: 'ai-chat',
+        message: 'chat_completed',
+        payload: { aborted: false },
+      });
+    }
+
+    repository.insert({
+      timestamp: 20_000,
+      level: 'error',
+      category: 'ai-chat',
+      message: 'chat_completed',
+      payload: { aborted: false },
+      error: 'codex exited',
+    });
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.aiChatCount).toBe(5);
+    expect(stats.aiChatSuccessCount).toBe(4);
+    expect(stats.aiChatSuccessRate).toBe(0.8);
+  });
+
+  it('excludes monitor requests from aggregates while keeping them queryable', () => {
+    const repository = createRepository();
+
+    for (const path of [
+      '/monitor/stats?windowMs=300000',
+      '/monitor/logs?limit=50',
+      '/monitor/traces/trace-1',
+    ]) {
+      repository.insert({
+        timestamp: 10_000,
+        level: 'info',
+        category: 'http',
+        message: 'http_request',
+        payload: { method: 'GET', path, statusCode: 200 },
+        durationMs: 5,
+      });
+    }
+
+    repository.insert({
+      timestamp: 11_000,
+      level: 'info',
+      category: 'http',
+      message: 'http_request',
+      payload: { method: 'GET', path: '/health', statusCode: 200 },
+      durationMs: 15,
+    });
+    repository.insert({
+      timestamp: 12_000,
+      level: 'error',
+      category: 'http',
+      message: 'http_request',
+      payload: { method: 'GET', path: '/paint/canvas/missing', statusCode: 500 },
+      durationMs: 25,
+    });
+
+    const stats = repository.stats({ now: 60_000, windowMs: 60_000 });
+
+    expect(stats.requestCount).toBe(2);
+    expect(stats.totalLogs).toBe(2);
+    expect(stats.errorCount).toBe(1);
+    expect(stats.httpFailureCount).toBe(1);
+    expect(stats.httpConflictCount).toBe(0);
+    expect(stats.avgDurationMs).toBe(20);
+    expect(stats.categoryCounts.find((entry) => entry.category === 'http')).toEqual({
+      category: 'http',
+      count: 2,
+      errorCount: 1,
+    });
+
+    // The monitor's own requests stay in the log list as evidence.
+    expect(repository.query({ category: 'http' }).total).toBe(5);
+  });
+
   it('aggregates stats inside the window', () => {
     const repository = createRepository();
 
@@ -210,7 +410,8 @@ describe('AgentLogRepository', () => {
       avgDurationMs: 20,
       aiChatCount: 3,
       aiChatSuccessCount: 1,
-      aiChatSuccessRate: 0.333,
+      // Three samples are below the five-chat threshold, so the rate is unknown.
+      aiChatSuccessRate: null,
     });
     expect(stats.categoryCounts).toEqual([
       { category: 'codex-runner', count: 1, errorCount: 0 },
