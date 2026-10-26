@@ -108,7 +108,11 @@ const MONITOR_EVENTS_PATH = '/monitor/events';
 
 /**
  * The monitor SSE stream is long-lived, so logging its request would create a
- * span that only finishes when the client disconnects.
+ * span that only finishes when the client disconnects — and publishing that
+ * record back into the stream would feed itself. Every other request is
+ * logged, including the rest of `/monitor/*`: those records are evidence the
+ * operator can read. Stats aggregation is what ignores monitor requests, so
+ * the monitor never measures its own polling.
  */
 export function shouldLogHttpRequest(url: string): boolean {
   const queryIndex = url.indexOf('?');

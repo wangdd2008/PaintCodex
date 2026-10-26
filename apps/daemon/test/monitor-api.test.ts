@@ -1,7 +1,13 @@
 import { request as httpRequest } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
-import type { AgentLog, AgentTrace, AgentTraceNode, MonitorStats } from '@paintcodex/protocol';
+import type {
+  AgentLog,
+  AgentLogPage,
+  AgentTrace,
+  AgentTraceNode,
+  MonitorStats,
+} from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import type { NewAgentLogRecord } from '../src/observability/types.js';
 import { buildServer } from '../src/api/server.js';
@@ -584,7 +590,8 @@ describe('GET /monitor/stats', () => {
     expect(stats.avgDurationMs).toBe(100);
     expect(stats.aiChatCount).toBe(2);
     expect(stats.aiChatSuccessCount).toBe(1);
-    expect(stats.aiChatSuccessRate).toBe(0.5);
+    // Two samples are below the five-chat threshold: the rate reads as unknown.
+    expect(stats.aiChatSuccessRate).toBeNull();
     expect(stats.categoryCounts).toHaveLength(LOG_CATEGORIES.length);
     expect(stats.categoryCounts).toEqual(
       expect.arrayContaining([
@@ -593,6 +600,40 @@ describe('GET /monitor/stats', () => {
         { category: 'system', count: 0, errorCount: 0 },
       ]),
     );
+  });
+
+  it('keeps its own polling in the log but out of requestCount', async () => {
+    const app = createApp();
+    const now = Date.now();
+
+    seed(app, {
+      category: 'http',
+      message: 'http_request',
+      level: 'info',
+      timestamp: now,
+      durationMs: 12,
+      payload: { method: 'GET', path: '/health', statusCode: 200 },
+    });
+
+    // The first poll logs its own request after responding; the second poll is
+    // the first one that can observe it in the window.
+    await app.inject({ method: 'GET', url: '/monitor/stats' });
+    const second = await app.inject({ method: 'GET', url: '/monitor/stats' });
+
+    expect(second.statusCode).toBe(200);
+    expect(second.json()).toMatchObject({ requestCount: 1, totalLogs: 1 });
+
+    const logs = await app.inject({
+      method: 'GET',
+      url: '/monitor/logs?category=http&limit=50',
+    });
+    const paths = (logs.json() as AgentLogPage).items
+      .map((item) => (item.payload as { path?: string }).path ?? '')
+      .filter((path) => path.startsWith('/monitor/'));
+
+    // The poll records remain visible as evidence even though they are not
+    // aggregated.
+    expect(paths.length).toBeGreaterThanOrEqual(2);
   });
 
   it('honours an explicit windowMs covering older records', async () => {
