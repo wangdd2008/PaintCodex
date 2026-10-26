@@ -40,3 +40,4 @@
 - 测试：新增 `apps/web/test/canvas-gate.test.tsx` 8 个用例（无画布点击 0 fetch、唯一 CTA、Enter/Space、加载中、失败态「重试」1 次 GET 后恢复就绪、图层面板空态、画笔/选择禁用）；`ai-chat-panel.test.tsx` 新增 2 个禁用用例，既有用例改为以「就绪画布」为前置。web 73 passed，daemon 103 passed；`pnpm -r typecheck` 通过。
 - 未勾选项：`笔迹 1` 命名依赖票 05（本票未改 `Stroke N`，遵守不跨票做本地化）；`Untitled` 依赖票 04/05 的默认命名，本票只移除了无画布态的 `Blank`。
 - 需浏览器人工复核：无画布时 Tab 焦点环与 Enter/Space 实际触发；真实 Fabric 未初始化、拖拽不产生笔画；加载失败「重试」成功后真实渲染与尺寸；AI 禁用态视觉与读屏播报。jsdom 测试 mock 了 Fabric，无法覆盖真实 pointer/path:created。
+- 合并 `feat/release-hardening`（已含票 06 的 `61c5520`）：merge commit `db097ae`，自动合并无冲突；合并后 web 78 passed（本票 73 + 票 06 的 5），daemon 103 passed，`pnpm -r typecheck` 通过。
