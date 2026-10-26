@@ -25,7 +25,7 @@
 
 ## Comments
 
-**2026-10-26**
+**2026-10-26 — implementation commit `1bc0783`**
 
 - 实现：`apps/web/src/app/app.css` 侧栏改 `overflow: hidden`，新增 `.side-panel > .ai-chat { flex: 1; min-height: 240px; }`；`apps/web/src/features/layer-panel/layer-panel.css` 面板改为限高 300px 的纵向 flex（`max-height: 300px`），列表 `flex: 1 1 auto; min-height: 0; overflow-y: auto` 接管滚动；`LayerPanel.tsx` 的 `<ul>` 成为滚动容器并带 `ref`，effect 只在**同一画布新增图层**时对最新一层调用 `scrollIntoView({ block: 'nearest' })`（切换画布只重置基线、既有图层更新不滚动）。
 - 测试：`pnpm --filter @paintcodex/web test` 通过 68/68（新增 `apps/web/test/layer-panel-layout.test.ts` 5 条）；`pnpm -r typecheck` 三个包全部通过。
