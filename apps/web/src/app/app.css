@@ -417,6 +417,54 @@ button {
 }
 
 /*
+ * 连接状态：沿用监控页的「圆点 + 胶囊」视觉语言。
+ * 断线是琥珀色——它是等待恢复，不是红色错误（错误由画布区顶部的 role="alert" 横幅承载）。
+ */
+.status-bar__connection {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #2c2d33;
+  border-radius: 999px;
+  padding: 1px 8px;
+  color: #9a9daa;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.status-bar__connection-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #747785;
+}
+
+.status-bar__connection--connecting .status-bar__connection-dot {
+  background: #f0c674;
+}
+
+.status-bar__connection--live {
+  color: #9fd6a8;
+  border-color: #33513a;
+}
+
+.status-bar__connection--live .status-bar__connection-dot {
+  background: #6fce82;
+  box-shadow: 0 0 0 3px rgb(111 206 130 / 15%);
+}
+
+.status-bar__connection--reconnecting {
+  color: #f0c674;
+  border-color: #5c4a22;
+}
+
+.status-bar__connection--reconnecting .status-bar__connection-dot {
+  background: #f0c674;
+  box-shadow: 0 0 0 3px rgb(240 198 116 / 15%);
+}
+
+/*
  * 窄屏承诺：桌面优先，窄屏 ≥360px 可用。
  * 完整移动端（触控手势、双指缩放、移动端专用工具栏）不在本轮。
  * 三档断点只做布局收口，桌面布局保持在上面的默认规则里。
