@@ -65,11 +65,11 @@ body: {"name": string}          // 只接受 name；trim 后 1–80 字符
 **测试数字**
 
 - 实现提交 `05a786c` 时：`pnpm --filter @paintcodex/daemon test` **132 passed / 18 files**（新增 `canvas-identity.test.ts` 21 条：POST 名称校验 7、PATCH 14）；`pnpm --filter @paintcodex/web test` **109 passed / 12 files**（新增 `canvas-identity.test.tsx` 7 条）；`pnpm -r typecheck` 通过（protocol / daemon / web 三包）。
-- 合并集成分支后复跑：daemon **132 passed / 18 files** 不变（合并没有改 daemon）；web **146 passed / 20 files**（integration 已并入 02/08/15 的测试）；`pnpm -r typecheck` 通过。
+- 合并集成分支后复跑：第一次合并（含 02/08/15）后 web **146 passed / 20 files**；第二次合并（含 11/13）后 web **156 passed / 22 files**。daemon 两次合并都未改动，仍为 **132 passed / 18 files**。`pnpm -r typecheck` 两次均通过。
 
 **合并集成分支**
 
-开工时 `feat/release-hardening` 是 `be23d3f`（含 01/03/06/07/14）；收尾再合并时它已前进到 `747a2c3`（又并入 02、08、15）。`apps/web/src/app/App.tsx`、`apps/web/src/app/app.css` 自动合并成功；唯一冲突在 `apps/web/src/services/canvas-store.ts` 的 `createNewCanvas` 起始 `set`，解决为同时保留 `const previous = get().canvas`（本票，用于 `previousCanvasId`）与 `...resetSaveState()`（02 的保存状态）；`returnToPreviousCanvas` 也补了 `...resetSaveState()`，避免切换画布后残留上一张的「已保存」状态。合并后 `Auto-save`（02 已删）、`SaveStatus`、`返回上一张`、`CanvasNameEditor`、`NewCanvasConfirm` 在 `App.tsx` 里共存，无需进一步改动。
+开工时 `feat/release-hardening` 是 `be23d3f`（含 01/03/06/07/14）。收尾期间集成分支又前进了两次：`747a2c3`（并入 02、08、15）与 `6e7e7b7`（并入 11、13），两次都在本分支合并（`258cf92`、`06bb111`）。`apps/web/src/app/App.tsx`、`apps/web/src/app/app.css` 自动合并成功；唯一冲突在 `apps/web/src/services/canvas-store.ts` 的 `createNewCanvas` 起始 `set`，解决为同时保留 `const previous = get().canvas`（本票，用于 `previousCanvasId`）与 `...resetSaveState()`（02 的保存状态）；`returnToPreviousCanvas` 也补了 `...resetSaveState()`，避免切换画布后残留上一张的「已保存」状态。合并后 `SaveStatus`、`ConnectionStatus`、`返回上一张`、`CanvasNameEditor`、`NewCanvasConfirm` 在 `App.tsx` 与状态栏里共存，无需进一步改动；第二次合并没有代码冲突。
 
 **关于 `history.back()`**
 
