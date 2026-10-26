@@ -17,6 +17,18 @@ import type {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 5 * 60_000;
+/** Below this many non-aborted chats a success rate is shown as unknown. */
+const MIN_AI_CHAT_SAMPLE = 5;
+/** Payload flag written by the AI chat route when the client cancels a chat. */
+const ABORTED_FLAG = `COALESCE(json_extract(payload, '$.aborted'), 0)`;
+/**
+ * `/monitor/*` requests are logged so the log list keeps the evidence, but they
+ * never reach an aggregate: the monitor must not measure its own polling.
+ */
+const EXCLUDE_MONITOR_HTTP = `NOT (
+  category = 'http'
+  AND COALESCE(json_extract(payload, '$.path'), '') LIKE '/monitor/%'
+)`;
 
 interface AgentLogRow {
   id: number;
@@ -131,10 +143,12 @@ export class AgentLogRepository {
         `SELECT category,
                 COUNT(*) AS count,
                 SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count,
-                SUM(CASE WHEN category = 'http' AND level IN ('warn', 'error')
-                         THEN 1 ELSE 0 END) AS http_failure_count
+                SUM(CASE WHEN category = 'http' AND level = 'error'
+                         THEN 1 ELSE 0 END) AS http_failure_count,
+                SUM(CASE WHEN category = 'http' AND level = 'warn'
+                         THEN 1 ELSE 0 END) AS http_conflict_count
          FROM agent_logs
-         WHERE timestamp >= ?
+         WHERE timestamp >= ? AND ${EXCLUDE_MONITOR_HTTP}
          GROUP BY category`,
       )
       .all(since) as Array<{
@@ -142,6 +156,7 @@ export class AgentLogRepository {
       count: number;
       error_count: number;
       http_failure_count: number;
+      http_conflict_count: number;
     }>;
 
     const counts = new Map(
@@ -156,39 +171,58 @@ export class AgentLogRepository {
       (sum, row) => sum + row.http_failure_count,
       0,
     );
+    const httpConflictCount = categoryRows.reduce(
+      (sum, row) => sum + row.http_conflict_count,
+      0,
+    );
     const requestCount = counts.get('http')?.count ?? 0;
 
     const durationRow = this.db
       .prepare(
         `SELECT AVG(duration_ms) AS average
          FROM agent_logs
-         WHERE timestamp >= ? AND category = 'http' AND duration_ms IS NOT NULL`,
+         WHERE timestamp >= ? AND category = 'http' AND duration_ms IS NOT NULL
+           AND ${EXCLUDE_MONITOR_HTTP}`,
       )
       .get(since) as { average: number | null } | undefined;
 
     const aiRow = this.db
       .prepare(
         `SELECT COUNT(*) AS count,
-                SUM(CASE WHEN level = 'info' THEN 1 ELSE 0 END) AS success
+                SUM(CASE WHEN ${ABORTED_FLAG} = 1 THEN 1 ELSE 0 END) AS aborted,
+                SUM(CASE WHEN level = 'info' AND ${ABORTED_FLAG} = 0
+                         THEN 1 ELSE 0 END) AS success
          FROM agent_logs
          WHERE timestamp >= ? AND category = 'ai-chat' AND message = 'chat_completed'`,
       )
-      .get(since) as { count: number; success: number | null } | undefined;
+      .get(since) as
+      | { count: number; aborted: number | null; success: number | null }
+      | undefined;
 
-    const aiChatCount = aiRow?.count ?? 0;
+    // Cancelling is a user decision, not an AI failure: aborted chats are
+    // counted separately and never enter the success-rate denominator.
+    const aiChatAbortedCount = aiRow?.aborted ?? 0;
+    const aiChatCount = Math.max(0, (aiRow?.count ?? 0) - aiChatAbortedCount);
     const aiChatSuccessCount = aiRow?.success ?? 0;
+    const aiChatSuccessRate =
+      aiChatCount >= MIN_AI_CHAT_SAMPLE
+        ? ratioOrNull(aiChatSuccessCount, aiChatCount)
+        : null;
 
     return {
       windowMs,
       totalLogs,
       errorCount,
-      errorRate: ratio(httpFailureCount, requestCount),
+      errorRate: ratioOrNull(httpFailureCount + httpConflictCount, requestCount),
       requestCount,
       requestsPerSecond: round(requestCount / (windowMs / 1000)),
       avgDurationMs: round(durationRow?.average ?? 0),
+      httpFailureCount,
+      httpConflictCount,
       aiChatCount,
       aiChatSuccessCount,
-      aiChatSuccessRate: ratio(aiChatSuccessCount, aiChatCount),
+      aiChatAbortedCount,
+      aiChatSuccessRate,
       categoryCounts: LOG_CATEGORIES.map((category) => ({
         category,
         count: counts.get(category)?.count ?? 0,
@@ -304,8 +338,9 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, Math.trunc(value)));
 }
 
-function ratio(numerator: number, denominator: number): number {
-  return denominator === 0 ? 0 : round(numerator / denominator);
+/** Ratios with a zero denominator are unknown, not zero. */
+function ratioOrNull(numerator: number, denominator: number): number | null {
+  return denominator === 0 ? null : round(numerator / denominator);
 }
 
 function round(value: number): number {

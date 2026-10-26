@@ -1,5 +1,11 @@
 import type { MonitorStats } from '@paintcodex/protocol';
-import { formatDuration, formatPercent } from './monitor-format';
+import {
+  formatAiChatHint,
+  formatDuration,
+  formatErrorBreakdown,
+  formatHttpErrorHint,
+  formatPercent,
+} from './monitor-format';
 
 interface StatsPanelProps {
   stats: MonitorStats | null;
@@ -39,18 +45,28 @@ export function StatsPanel({ stats, error }: StatsPanelProps) {
 
       <div className="stat-cards">
         <StatCard label="请求/秒" value={stats.requestsPerSecond.toFixed(2)} />
-        <StatCard label="请求数" value={String(stats.requestCount)} />
         <StatCard
-          label="错误率"
+          label="请求数"
+          value={String(stats.requestCount)}
+          hint="不含监控请求"
+        />
+        <StatCard
+          label="HTTP 错误率"
           value={formatPercent(stats.errorRate)}
-          hint={`${stats.errorCount} 个错误`}
-          tone={stats.errorRate > 0 ? 'danger' : undefined}
+          hint={formatHttpErrorHint(stats)}
+          tone={(stats.errorRate ?? 0) > 0 ? 'danger' : undefined}
+        />
+        <StatCard
+          label="全部错误"
+          value={String(stats.errorCount)}
+          hint={formatErrorBreakdown(stats.categoryCounts) ?? undefined}
+          tone={stats.errorCount > 0 ? 'danger' : undefined}
         />
         <StatCard label="平均耗时" value={formatDuration(stats.avgDurationMs)} />
         <StatCard
           label="AI 成功率"
           value={formatPercent(stats.aiChatSuccessRate)}
-          hint={`${stats.aiChatSuccessCount} / ${stats.aiChatCount} chats`}
+          hint={formatAiChatHint(stats)}
         />
       </div>
 
