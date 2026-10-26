@@ -51,6 +51,15 @@ export function getCanvas(id: string): Promise<CanvasDocument> {
   return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(id)}`);
 }
 
+/** Canvas identity is the only mutable canvas field; geometry stays immutable. */
+export function renameCanvas(id: string, name: string): Promise<CanvasDocument> {
+  return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+}
+
 export function createLayer(
   canvasId: string,
   input: CreateLayerInput,

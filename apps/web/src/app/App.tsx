@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
+import { CanvasNameEditor } from '../features/canvas/CanvasNameEditor';
 import { CanvasStage } from '../features/canvas/CanvasStage';
+import { NewCanvasConfirm } from '../features/canvas/NewCanvasConfirm';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { MonitorPage } from '../features/monitor/MonitorPage';
 import {
@@ -22,12 +24,16 @@ export function App() {
   const canvas = useCanvasStore((state) => state.canvas);
   const status = useCanvasStore((state) => state.status);
   const error = useCanvasStore((state) => state.error);
+  const previousCanvasId = useCanvasStore((state) => state.previousCanvasId);
   const createNewCanvas = useCanvasStore((state) => state.createNewCanvas);
+  const returnToPreviousCanvas = useCanvasStore((state) => state.returnToPreviousCanvas);
   const loadCanvas = useCanvasStore((state) => state.loadCanvas);
   const refreshCanvas = useCanvasStore((state) => state.refreshCanvas);
   const tool = useToolStore((state) => state.tool);
   const zoomPercent = useViewportStore((state) => state.zoomPercent);
   const [exportError, setExportError] = useState<string | null>(null);
+  // 新建会覆盖地址栏里的画布，有画布时必须先让人确认。
+  const [confirmNewCanvas, setConfirmNewCanvas] = useState(false);
   const [view, setView] = useState<AppView>(() => readViewFromSearch(window.location.search));
   // 窄屏（≤860px）侧栏是覆盖式抽屉；桌面忽略这个状态，侧栏常驻。
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -162,6 +168,13 @@ export function App() {
     setView(next);
   }
 
+  async function handleConfirmNewCanvas() {
+    // Keep the bar open (with a busy CTA) until the create settles, so a
+    // failure is visible instead of looking like nothing happened.
+    await createNewCanvas();
+    setConfirmNewCanvas(false);
+  }
+
   function handleExportPng() {
     if (!canvas) {
       return;
@@ -205,9 +218,7 @@ export function App() {
     <div className={view === 'monitor' ? 'app-shell app-shell--monitor' : 'app-shell'}>
       <header className="menu-bar">
         <span className="brand">PaintCodex</span>
-        {view === 'canvas' && canvas ? (
-          <span className="document-name">{canvas.name}</span>
-        ) : null}
+        {view === 'canvas' && canvas ? <CanvasNameEditor /> : null}
         <span className="menu-spacer" />
         {view === 'canvas' && menuMessage ? (
           <span className="menu-status">{menuMessage}</span>
@@ -226,14 +237,26 @@ export function App() {
             </button>
             {/* Without a canvas the empty state holds the only creation CTA. */}
             {canvas ? (
-              <button
-                type="button"
-                className="menu-button"
-                onClick={() => void createNewCanvas()}
-                disabled={status === 'loading'}
-              >
-                {status === 'loading' ? '处理中…' : '新建画布'}
-              </button>
+              <>
+                {previousCanvasId ? (
+                  <button
+                    type="button"
+                    className="menu-button"
+                    onClick={() => void returnToPreviousCanvas()}
+                    disabled={status === 'loading'}
+                  >
+                    返回上一张
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="menu-button"
+                  onClick={() => setConfirmNewCanvas(true)}
+                  disabled={status === 'loading'}
+                >
+                  {status === 'loading' ? '处理中…' : '新建画布'}
+                </button>
+              </>
             ) : null}
             <button
               type="button"
@@ -270,6 +293,14 @@ export function App() {
       <div className={view === 'monitor' ? 'workspace app-hidden' : 'workspace'}>
         <Toolbox />
         <main className="canvas-area">
+          {confirmNewCanvas && canvas ? (
+            <NewCanvasConfirm
+              canvasName={canvas.name}
+              busy={status === 'loading'}
+              onConfirm={() => void handleConfirmNewCanvas()}
+              onCancel={() => setConfirmNewCanvas(false)}
+            />
+          ) : null}
           <CanvasStage key={canvas?.id ?? 'blank'} />
         </main>
         <aside

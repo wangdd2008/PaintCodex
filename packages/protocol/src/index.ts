@@ -102,6 +102,16 @@ export interface CreateCanvasRequest {
   backgroundColor?: string;
 }
 
+/**
+ * `name` is the only mutable canvas field: identity, not geometry. The length
+ * bound lives here so the daemon validator and the browser input cannot drift.
+ */
+export const MAX_CANVAS_NAME_LENGTH = 80;
+
+export interface UpdateCanvasRequest {
+  name: string;
+}
+
 export interface AiChatRequest {
   canvasId?: string;
   message: string;

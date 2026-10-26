@@ -1,0 +1,74 @@
+/* 菜单栏里的画布名：双击或点 ✎ 进入行内编辑。 */
+.canvas-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.canvas-name__text {
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+}
+
+/* 命中区 24×24，字形保持 12px。 */
+.canvas-name__edit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #9a9daa;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-name__edit:hover:not(:disabled) {
+  border-color: #3a3c45;
+  background: #2a2c35;
+  color: #e6e8ef;
+}
+
+.canvas-name__edit:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.canvas-name__input {
+  width: 22ch;
+  min-height: 24px;
+  padding: 0 6px;
+  border: 1px solid #5b8def;
+  border-radius: 6px;
+  background: #17181c;
+  color: #e8e8ea;
+  font-size: 12px;
+}
+
+.canvas-name__edit:focus-visible,
+.canvas-name__input:focus-visible {
+  outline: 2px solid #5b8def;
+  outline-offset: 2px;
+}
+
+/* 改名失败的就地提示（菜单栏内），不弹窗也不静默。 */
+.canvas-name__error {
+  max-width: 28ch;
+  overflow: hidden;
+  color: #e07a7a;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

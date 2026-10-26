@@ -8,12 +8,25 @@ import {
 import { useCanvasStore } from '../../services/canvas-store';
 import './layer-panel.css';
 
+/** 删除后的恢复条存活 8 秒；连续删除时后一条替换前一条并重新计时。 */
+export const DELETE_RESTORE_TIMEOUT_MS = 8000;
+
 /** 读屏用的类型名：界面上的类型文字另有呈现，这里只为播报服务。 */
 const LAYER_TYPE_LABELS: Record<Layer['type'], string> = {
   raster: '位图',
   vector: '笔迹',
   'ai-generated': 'AI 生成',
 };
+
+interface DeleteRestore {
+  layerId: string;
+  name: string;
+  /**
+   * 删除请求返回的 revision。撤销仍是快照级（ADR-0003），只有当前 revision
+   * 仍等于它时撤销才安全；任何后续操作都会让它降级成纯文本。
+   */
+  revision: number;
+}
 
 /**
  * 一行图层的完整读屏名称。选中态不写进名称：`aria-selected` 已经承担，
@@ -50,10 +63,10 @@ function VisibilityIcon({ visible }: { visible: boolean }) {
 export function LayerPanel() {
   const canvas = useCanvasStore((state) => state.canvas);
   const activeLayerId = useCanvasStore((state) => state.activeLayerId);
-  const saving = useCanvasStore((state) => state.saving);
   const setActiveLayer = useCanvasStore((state) => state.setActiveLayer);
   const updateLayer = useCanvasStore((state) => state.updateLayer);
   const deleteLayer = useCanvasStore((state) => state.deleteLayer);
+  const undo = useCanvasStore((state) => state.undo);
 
   const listRef = useRef<HTMLUListElement>(null);
   const knownLayerIds = useRef<Set<string>>(new Set());
@@ -64,8 +77,47 @@ export function LayerPanel() {
    * keyboard users would have to tab through dozens of layers to leave.
    */
   const [focusedLayerId, setFocusedLayerId] = useState<string | null>(null);
+  /** One restore bar only: a newer delete replaces the older one. */
+  const [restore, setRestore] = useState<DeleteRestore | null>(null);
+  const [deletingLayerId, setDeletingLayerId] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
+  const restoreTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const layers = canvas?.layers ?? [];
+  const canvasId = canvas?.id ?? null;
+  const restoreStale =
+    restore !== null &&
+    (canvas === null || canvas.revision !== restore.revision);
+
+  function clearRestoreTimer() {
+    if (restoreTimer.current !== null) {
+      clearTimeout(restoreTimer.current);
+      restoreTimer.current = null;
+    }
+  }
+
+  // 换画布就作废：撤销会作用到当前画布，上一张画布的删除无法这样恢复。
+  useEffect(() => {
+    clearRestoreTimer();
+    setRestore(null);
+  }, [canvasId]);
+
+  useEffect(() => clearRestoreTimer, []);
+
+  // 工具栏撤销（Ctrl+Z）也会把图层放回来；图层回来即说明恢复条已无意义。
+  useEffect(() => {
+    if (!restore) {
+      return;
+    }
+
+    if (!canvas?.layers.some((layer) => layer.id === restore.layerId)) {
+      return;
+    }
+
+    clearRestoreTimer();
+    setRestore(null);
+  }, [canvas, restore]);
+
   const focusedStillExists =
     focusedLayerId !== null && layers.some((layer) => layer.id === focusedLayerId);
   const rovingLayerId = focusedStillExists
@@ -124,15 +176,64 @@ export function LayerPanel() {
     }
   }
 
-  function handleDelete(layer: Layer) {
-    // The delete button is disabled while a mutation is in flight; the Delete
-    // shortcut must not queue a second delete behind it.
-    if (saving) {
+  async function handleDelete(layer: Layer) {
+    // One delete at a time: the row buttons are disabled while it is in flight,
+    // and the Delete shortcut must not queue a second one behind it.
+    if (deletingLayerId !== null) {
       return;
     }
 
-    if (window.confirm(`删除图层 "${layer.name}"?`)) {
-      void deleteLayer(layer.id).catch(() => undefined);
+    setDeletingLayerId(layer.id);
+
+    let deletedRevision: number | null = null;
+
+    try {
+      const updated = await deleteLayer(layer.id);
+      deletedRevision = updated.revision;
+    } catch {
+      // 失败原因与重试由画布顶部横幅承载（票 02）。重试仍走本组件的删除流程，
+      // 这样重试成功后同样会出现恢复条，而不是「删掉了但没有撤销入口」。
+      const state = useCanvasStore.getState();
+      state.showCanvasAlert(
+        state.canvasAlert ?? `无法删除图层：${state.saveError ?? '未知原因'}`,
+        () => handleDelete(layer),
+      );
+      return;
+    } finally {
+      setDeletingLayerId(null);
+    }
+
+    if (deletedRevision === null) {
+      return;
+    }
+
+    const state = useCanvasStore.getState();
+
+    // 上一次删除失败的横幅已经不再成立；成功一次就撤掉，避免「删掉了还挂着报错」。
+    if (state.canvasAlert?.startsWith('无法删除图层：')) {
+      state.dismissCanvasAlert();
+    }
+
+    clearRestoreTimer();
+    setRestore({ layerId: layer.id, name: layer.name, revision: deletedRevision });
+    restoreTimer.current = setTimeout(() => {
+      restoreTimer.current = null;
+      setRestore(null);
+    }, DELETE_RESTORE_TIMEOUT_MS);
+  }
+
+  async function handleRestore() {
+    if (restoring || !restore || !canvas || canvas.revision !== restore.revision) {
+      return;
+    }
+
+    setRestoring(true);
+
+    try {
+      // 快照级撤销（ADR-0003）：名称、可见性、内容与像素都由服务端快照恢复。
+      await undo();
+    } finally {
+      setRestoring(false);
     }
   }
 
@@ -206,7 +307,7 @@ export function LayerPanel() {
 
       case 'Delete': {
         event.preventDefault();
-        handleDelete(layer);
+        void handleDelete(layer);
         return;
       }
 
@@ -218,6 +319,30 @@ export function LayerPanel() {
   return (
     <section className="layer-panel" aria-label="图层">
       <h2 className="panel-title">图层</h2>
+
+      {restore ? (
+        <div className="layer-restore" role="status">
+          <p className="layer-restore__message">
+            已删除「{restore.name}」
+            {restoreStale ? '· 已有后续操作' : null}
+          </p>
+          {restoreStale ? null : (
+            <>
+              <span className="layer-restore__separator" aria-hidden="true">
+                ·{' '}
+              </span>
+              <button
+                type="button"
+                className="layer-restore__undo"
+                disabled={restoring}
+                onClick={() => void handleRestore()}
+              >
+                撤销
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
 
       {!canvas ? (
         <p className="panel-empty">还没有画布</p>
@@ -278,10 +403,10 @@ export function LayerPanel() {
                   type="button"
                   className="layer-item__delete"
                   aria-label={`删除 ${layer.name}`}
-                  disabled={saving}
+                  disabled={deletingLayerId !== null}
                   onClick={(event) => {
                     event.stopPropagation();
-                    handleDelete(layer);
+                    void handleDelete(layer);
                   }}
                 >
                   ×

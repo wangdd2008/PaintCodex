@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { MAX_CANVAS_NAME_LENGTH } from '@paintcodex/protocol';
 import type {
   Actor,
   ApplyActionRequest,
@@ -7,6 +8,7 @@ import type {
   HistoryRequest,
   LayerContent,
   LayerType,
+  UpdateCanvasRequest,
   UpdateLayerPatch,
 } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
@@ -56,6 +58,25 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
 
     return canvas;
   });
+
+  app.patch<{ Params: { id: string }; Body: UpdateCanvasRequest }>(
+    '/paint/canvas/:id',
+    async (request, reply) => {
+      const validationError = validateUpdateCanvas(request.body);
+
+      if (validationError) {
+        return reply.code(400).send({
+          error: { code: 'invalid_canvas', message: validationError },
+        });
+      }
+
+      try {
+        return dispatcher.renameCanvas(request.params.id, request.body.name.trim());
+      } catch (error) {
+        return sendPaintError(reply, error);
+      }
+    },
+  );
 
   app.post<{ Params: { id: string }; Body: LayerCreateBody }>(
     '/paint/canvas/:id/layers',
@@ -244,12 +265,58 @@ function invalidRevision(reply: FastifyReply) {
 }
 
 function validateCreateCanvas(input: CreateCanvasRequest): string | null {
+  if (input.name !== undefined) {
+    const nameError = validateCanvasName(input.name);
+
+    if (nameError) {
+      return nameError;
+    }
+  }
+
   if (input.width !== undefined && !isValidDimension(input.width)) {
     return `宽度必须是 1 到 ${MAX_CANVAS_DIMENSION} 之间的整数`;
   }
 
   if (input.height !== undefined && !isValidDimension(input.height)) {
     return `高度必须是 1 到 ${MAX_CANVAS_DIMENSION} 之间的整数`;
+  }
+
+  return null;
+}
+
+/** `PATCH /paint/canvas/:id` accepts `name` and nothing else — no geometry. */
+function validateUpdateCanvas(input: unknown): string | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return '请求体必须是包含 name 的对象';
+  }
+
+  const entries = Object.entries(input as Record<string, unknown>);
+  const unknownField = entries.find(([key]) => key !== 'name');
+
+  if (unknownField) {
+    return `画布更新只接受 name，不接受字段 ${unknownField[0]}`;
+  }
+
+  if (entries.length === 0) {
+    return '画布更新需要提供 name';
+  }
+
+  return validateCanvasName((input as { name?: unknown }).name);
+}
+
+function validateCanvasName(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return '画布名称必须是字符串';
+  }
+
+  const trimmed = value.trim();
+
+  if (trimmed.length === 0) {
+    return '画布名称不能为空';
+  }
+
+  if (trimmed.length > MAX_CANVAS_NAME_LENGTH) {
+    return `画布名称不能超过 ${MAX_CANVAS_NAME_LENGTH} 个字符`;
   }
 
   return null;
