@@ -65,7 +65,8 @@ interface CanvasState {
   refreshCanvas: () => Promise<void>;
   createLayer: (input: CreateLayerInput) => Promise<Layer | null>;
   updateLayer: (layerId: string, patch: UpdateLayerPatch) => Promise<void>;
-  deleteLayer: (layerId: string) => Promise<void>;
+  /** Resolves with the canvas produced by the delete (row disappears on success only). */
+  deleteLayer: (layerId: string) => Promise<CanvasDocument>;
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   setActiveLayer: (layerId: string | null) => void;
@@ -210,17 +211,18 @@ function finishMutationFailure(
   set({ saveState: 'error', saving: false, saveError: message });
 }
 
-async function runMutation(
+async function runMutation<T>(
   set: SetState,
   get: GetState,
-  task: () => Promise<void>,
+  task: () => Promise<T>,
   fallbackError: string,
-): Promise<void> {
+): Promise<T> {
   beginMutation(set, get);
 
   try {
-    await enqueueMutation(task);
+    const result = await enqueueMutation(task);
     finishMutationSuccess(set, get);
+    return result;
   } catch (error) {
     finishMutationFailure(set, get, describeSaveFailure(error, fallbackError));
     throw error;
@@ -485,7 +487,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   deleteLayer: async (layerId: string) => {
     try {
-      await runMutation(
+      return await runMutation(
         set,
         get,
         async () => {
@@ -502,13 +504,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
             activeLayerId:
               get().activeLayerId === layerId ? topLayerId(updated) : get().activeLayerId,
           });
+          return updated;
         },
         '无法删除图层',
       );
     } catch (error) {
-      get().showCanvasAlert(`无法删除图层：${get().saveError ?? '未知原因'}`, () =>
-        get().deleteLayer(layerId),
-      );
+      get().showCanvasAlert(`无法删除图层：${get().saveError ?? '未知原因'}`, async () => {
+        await get().deleteLayer(layerId);
+      });
       throw error;
     }
   },
