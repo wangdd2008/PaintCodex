@@ -164,6 +164,12 @@ function finishMutationSuccess(set: SetState, get: GetState): void {
     return;
   }
 
+  // Nothing is in flight any more, so controls must not stay disabled while the
+  // display debounce keeps showing "保存中" for up to SAVE_DEBOUNCE_MS.
+  if (get().saving) {
+    set({ saving: false });
+  }
+
   // A failed mutation keeps the state honest until it is retried, and failed
   // strokes keep it honest until they are persisted.
   if (get().unsavedStrokes > 0 || get().saveState === 'error') {
