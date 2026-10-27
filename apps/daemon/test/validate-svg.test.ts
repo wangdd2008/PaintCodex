@@ -1,32 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  CANVAS_ACTION_MARKER,
-  isSafeSvg,
-  parseCanvasAction,
-} from '../src/paint/agent/canvas-action.js';
-
-function actionText(svg: string): string {
-  return `Sure.\n${CANVAS_ACTION_MARKER}\n${JSON.stringify({
-    name: 'AI — Test',
-    svg,
-  })}`;
-}
-
-describe('canvas action parsing', () => {
-  it('extracts a safe SVG action', () => {
-    const svg =
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="10"/></svg>';
-
-    expect(parseCanvasAction(actionText(svg))).toEqual({
-      name: 'AI — Test',
-      svg,
-    });
-  });
-
-  it('ignores ordinary conversation', () => {
-    expect(parseCanvasAction('Paris is the capital of France.')).toBeNull();
-  });
-});
+import { isSafeSvg, unsafeSvgReason } from '../src/paint/agent/runtime/validate-svg.js';
 
 describe('SVG safety', () => {
   const unsafe = [
@@ -50,13 +23,19 @@ describe('SVG safety', () => {
 
   it.each(unsafe)('rejects %s', (_label, svg) => {
     expect(isSafeSvg(svg)).toBe(false);
+    expect(unsafeSvgReason(svg)).not.toBeNull();
   });
 
   it('accepts a plain shape', () => {
-    expect(
-      isSafeSvg(
-        '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>',
-      ),
-    ).toBe(true);
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10"/></svg>';
+
+    expect(isSafeSvg(svg)).toBe(true);
+    expect(unsafeSvgReason(svg)).toBeNull();
+  });
+
+  it('rejects an empty or overlong document', () => {
+    expect(isSafeSvg('')).toBe(false);
+    expect(isSafeSvg(`<svg>${'x'.repeat(200_001)}</svg>`)).toBe(false);
   });
 });

@@ -1,14 +1,28 @@
 import { buildServer } from './api/server.js';
+import { probeCodexVersion } from './paint/agent/runtime/codex-runtime.js';
 
 const port = Number(process.env.PORT ?? 3210);
 const host = process.env.HOST ?? '127.0.0.1';
 
-const app = buildServer();
+// The app-server protocol is experimental, so the CLI floor is checked before
+// the daemon starts serving: an old CLI disables the AI route with a reason
+// `/health` can report, rather than failing on the first conversation.
+const codexVersion = probeCodexVersion();
+const app = buildServer({ codexVersion });
 
 app.observability.log({
   category: 'system',
   message: 'db_migrated',
   payload: { ready: true },
+});
+
+app.observability.log({
+  category: 'system',
+  level: codexVersion.available ? 'info' : 'warn',
+  message: codexVersion.available ? 'ai_route_ready' : 'ai_route_disabled',
+  payload: codexVersion.available
+    ? { codexVersion: codexVersion.version }
+    : { reason: codexVersion.reason },
 });
 
 async function shutdown(signal: string) {

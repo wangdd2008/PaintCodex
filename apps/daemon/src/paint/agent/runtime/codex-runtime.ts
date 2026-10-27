@@ -1,0 +1,977 @@
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import type { LogLevel } from '@paintcodex/protocol';
+import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
+import type {
+  AgentMessageDeltaNotification,
+  DynamicToolCallParams,
+  DynamicToolCallResponse,
+  InitializeParams,
+  InitializeResponse,
+  JsonRpcError,
+  JsonRpcId,
+  JsonRpcRequest,
+  ThreadStartParams,
+  ThreadStartResult,
+  TurnCompletedNotification,
+  TurnStartParams,
+  TurnStartResult,
+} from './protocol.js';
+import type {
+  CanvasToolContext,
+  CanvasToolResult,
+  CanvasToolSet,
+} from './tools.js';
+
+/** One user message's worth of work inside a thread. */
+export interface CodexTurnInput {
+  /** Canvas of the conversation; null means a per-turn, tool-less thread. */
+  canvasId: string | null;
+  /** Full prompt sent to the model (canvas summary + user message). */
+  prompt: string;
+  /** Raw user message, stored on layers the agent creates. Defaults to `prompt`. */
+  userMessage?: string;
+  tools: CanvasToolSet;
+  onDelta(text: string): void;
+  onLayerCreated?(layer: { id: string; name: string }): void;
+  signal?: AbortSignal;
+  trace?: TraceContext;
+}
+
+export interface CodexTurnResult {
+  text: string;
+  toolCallCount: number;
+}
+
+export interface ActiveTurnInfo {
+  threadId: string;
+  turnId: string | null;
+  canvasId: string | null;
+}
+
+/**
+ * The only seam between the daemon and the Codex protocol. One process, one
+ * thread per canvas (in memory for this slice), one turn per user message.
+ */
+export interface CodexRuntime {
+  startTurn(input: CodexTurnInput): Promise<CodexTurnResult>;
+  /** Interrupts the active turn of a canvas; a no-op when nothing is running. */
+  interrupt(canvasId: string | null): Promise<void>;
+  getThreadId(canvasId: string): string | null;
+  getActiveTurn(canvasId: string | null): ActiveTurnInfo | null;
+  close(): Promise<void>;
+}
+
+export type CodexVersionProbe =
+  | { available: true; version: string }
+  | { available: false; reason: string };
+
+export interface CodexRuntimeOptions {
+  /** Executable name or path. Defaults to `PAINTCODEX_CODEX_BIN` or `codex`/`codex.cmd`. */
+  command?: string;
+  /** Arguments after the executable. Defaults to `['app-server']`. */
+  args?: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  /** Sink for `codex-runtime` lifecycle events. Logging is skipped when omitted. */
+  logger?: ObservabilityLogger;
+  /** Per JSON-RPC request deadline (initialize / thread start / turn start). */
+  requestTimeoutMs?: number;
+  /** Upper bound on one tool execution before answering the model with a failure. */
+  toolTimeoutMs?: number;
+  clientInfo?: { name: string; version: string };
+}
+
+export const MINIMUM_CODEX_VERSION = '0.164.0';
+
+const DEFAULT_ARGS = ['app-server'];
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_TOOL_TIMEOUT_MS = 30_000;
+const STDERR_TAIL_LENGTH = 8_192;
+
+function defaultCommand(): string {
+  return process.platform === 'win32' ? 'codex.cmd' : 'codex';
+}
+
+function quoteForCmd(value: string): string {
+  return /[\s"&|<>^]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function needsShell(command: string): boolean {
+  return process.platform === 'win32' && /\.(cmd|bat)$/i.test(command);
+}
+
+export function probeCodexVersion(
+  options: { command?: string; args?: string[] } = {},
+): CodexVersionProbe {
+  const command =
+    options.command ?? process.env.PAINTCODEX_CODEX_BIN ?? defaultCommand();
+  const args = options.args ?? ['--version'];
+  const invocation = needsShell(command)
+    ? {
+        command: process.env.ComSpec ?? 'cmd.exe',
+        args: ['/d', '/s', '/c', [command, ...args].map(quoteForCmd).join(' ')],
+      }
+    : { command, args };
+
+  const result = spawnSync(invocation.command, invocation.args, {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: 10_000,
+  });
+  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
+
+  if (result.error) {
+    return {
+      available: false,
+      reason: `未找到 codex CLI（${command}），AI 功能不可用。请安装 codex CLI ${MINIMUM_CODEX_VERSION} 或更高版本。`,
+    };
+  }
+
+  if (result.status !== 0 && output.length === 0) {
+    return {
+      available: false,
+      reason: `codex --version 运行失败（退出代码 ${String(result.status)}），AI 功能不可用。请确认 codex CLI 可用。`,
+    };
+  }
+
+  const match = /(\d+)\.(\d+)\.(\d+)/.exec(output);
+
+  if (!match) {
+    return {
+      available: false,
+      reason: `无法识别 codex CLI 版本（输出：${output.slice(0, 200)}），需要 ${MINIMUM_CODEX_VERSION} 或更高版本。`,
+    };
+  }
+
+  const version = `${match[1]}.${match[2]}.${match[3]}`;
+
+  if (!versionAtLeast(version, MINIMUM_CODEX_VERSION)) {
+    return {
+      available: false,
+      reason: `codex CLI 版本过低（当前 ${version}，需要 ${MINIMUM_CODEX_VERSION} 或更高版本）。请运行 npm install -g @openai/codex@latest 升级。`,
+    };
+  }
+
+  return { available: true, version };
+}
+
+function versionAtLeast(version: string, minimum: string): boolean {
+  const actual = version.split('.').map(Number);
+  const required = minimum.split('.').map(Number);
+
+  for (let index = 0; index < required.length; index += 1) {
+    const left = actual[index] ?? 0;
+    const right = required[index] ?? 0;
+
+    if (left !== right) {
+      return left > right;
+    }
+  }
+
+  return true;
+}
+
+interface PendingRequest {
+  method: string;
+  resolve(result: unknown): void;
+  reject(error: Error): void;
+  timer: NodeJS.Timeout;
+}
+
+interface MutableActiveTurn extends ActiveTurnInfo {
+  prompt: string;
+  tools: CanvasToolSet;
+  text: string;
+  toolCallCount: number;
+  onDelta(text: string): void;
+  onLayerCreated?: (layer: { id: string; name: string }) => void;
+  trace?: TraceContext;
+  signal?: AbortSignal;
+  settled: boolean;
+  abortRequested: boolean;
+  resolve(result: CodexTurnResult): void;
+  reject(error: Error): void;
+  onAbort(): void;
+}
+
+export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRuntime {
+  const command =
+    options.command ?? process.env.PAINTCODEX_CODEX_BIN ?? defaultCommand();
+  const args = options.args ?? DEFAULT_ARGS;
+  const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const toolTimeoutMs = options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+  const clientInfo = options.clientInfo ?? { name: 'paintcodex', version: '0.1.0' };
+
+  let child: ChildProcess | null = null;
+  let ready: Promise<void> | null = null;
+  let closing = false;
+  let nextRequestId = 1;
+  let stdoutBuffer = '';
+  let stderrTail = '';
+
+  const pending = new Map<number, PendingRequest>();
+  const threads = new Map<string, string>();
+  const activeTurns = new Map<string, MutableActiveTurn>();
+
+  const log = (
+    level: LogLevel,
+    message: string,
+    details: {
+      payload?: unknown;
+      error?: unknown;
+      durationMs?: number;
+      canvasId?: string | null;
+      trace?: TraceContext;
+    } = {},
+  ) => {
+    options.logger?.log({
+      category: 'codex-runtime',
+      level,
+      message,
+      payload: details.payload,
+      error: details.error,
+      durationMs: details.durationMs ?? null,
+      canvasId: details.canvasId ?? null,
+      actor: 'agent',
+      traceId: details.trace?.traceId ?? null,
+      parentId: details.trace?.spanId ?? null,
+    });
+  };
+
+  const abortError = (message = 'AI 轮次已中断'): Error => {
+    const error = new Error(message);
+    error.name = 'AbortError';
+    return error;
+  };
+
+  const processFailure = (exitCode: number | null, signal: string | null): Error =>
+    new Error(
+      `Codex app-server 进程意外退出（代码 ${exitCode ?? 'null'}${
+        signal ? `，信号 ${signal}` : ''
+      }${stderrTail.trim().length > 0 ? `：${stderrTail.trim().slice(-500)}` : ''}）`,
+    );
+
+  const write = (message: JsonRpcRequest | Record<string, unknown>) => {
+    if (!child || !child.stdin || child.stdin.destroyed) {
+      throw new Error('Codex app-server 未运行');
+    }
+
+    child.stdin.write(`${JSON.stringify(message)}\n`);
+  };
+
+  const request = <TResult>(
+    method: string,
+    params: unknown,
+    timeoutMs = requestTimeoutMs,
+  ): Promise<TResult> => {
+    const id = nextRequestId++;
+
+    return new Promise<TResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Codex app-server 请求超时：${method}`));
+      }, timeoutMs);
+
+      pending.set(id, {
+        method,
+        timer,
+        resolve: (result) => resolve(result as TResult),
+        reject,
+      });
+
+      try {
+        write({ id, method, params });
+      } catch (error) {
+        clearTimeout(timer);
+        pending.delete(id);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  };
+
+  const settle = (
+    active: MutableActiveTurn,
+    complete: () => void,
+  ): void => {
+    if (active.settled) {
+      return;
+    }
+
+    active.settled = true;
+    activeTurns.delete(active.threadId);
+    active.signal?.removeEventListener('abort', active.onAbort);
+    complete();
+  };
+
+  const sendInterrupt = async (threadId: string, turnId: string): Promise<void> => {
+    try {
+      await request('turn/interrupt', { threadId, turnId });
+    } catch (error) {
+      log('warn', 'interrupt_failed', { error });
+    }
+  };
+
+  const rejectPending = (error: Error) => {
+    for (const [id, entry] of pending) {
+      clearTimeout(entry.timer);
+      pending.delete(id);
+      entry.reject(error);
+    }
+  };
+
+  const failEverything = (error: Error) => {
+    rejectPending(error);
+
+    for (const active of [...activeTurns.values()]) {
+      settle(active, () => active.reject(error));
+    }
+  };
+
+  const handleResponse = (
+    id: JsonRpcId,
+    record: { result?: unknown; error?: JsonRpcError },
+  ) => {
+    if (typeof id !== 'number') {
+      return;
+    }
+
+    const entry = pending.get(id);
+
+    if (!entry) {
+      return;
+    }
+
+    pending.delete(id);
+    clearTimeout(entry.timer);
+
+    if (record.error) {
+      entry.reject(
+        new Error(
+          `Codex app-server ${entry.method} 失败：${record.error.message}`,
+        ),
+      );
+      return;
+    }
+
+    entry.resolve(record.result);
+  };
+
+  const handleNotification = (method: string, params: unknown) => {
+    if (method === 'item/agentMessage/delta') {
+      const delta = params as Partial<AgentMessageDeltaNotification>;
+
+      if (
+        typeof delta.threadId !== 'string' ||
+        typeof delta.delta !== 'string'
+      ) {
+        return;
+      }
+
+      const active = activeTurns.get(delta.threadId);
+
+      if (!active || active.settled) {
+        return;
+      }
+
+      active.text += delta.delta;
+
+      try {
+        active.onDelta(delta.delta);
+      } catch (error) {
+        log('error', 'delta_handler_failed', {
+          error,
+          canvasId: active.canvasId,
+          trace: active.trace,
+        });
+        settle(active, () =>
+          active.reject(
+            error instanceof Error ? error : new Error(String(error)),
+          ),
+        );
+      }
+
+      return;
+    }
+
+    if (method === 'turn/completed') {
+      const completed = params as Partial<TurnCompletedNotification>;
+      const threadId = completed.threadId;
+
+      if (typeof threadId !== 'string') {
+        return;
+      }
+
+      const active = activeTurns.get(threadId);
+
+      if (!active) {
+        return;
+      }
+
+      const status = completed.turn?.status;
+      const turnId = completed.turn?.id ?? active.turnId;
+
+      if (status === 'inProgress') {
+        return;
+      }
+
+      if (status === 'failed') {
+        const failure = new Error(
+          completed.turn?.error?.message ?? 'AI 轮次失败',
+        );
+        log('error', 'turn_failed', {
+          payload: { threadId, turnId },
+          error: failure,
+          canvasId: active.canvasId,
+          trace: active.trace,
+        });
+        settle(active, () => active.reject(failure));
+        return;
+      }
+
+      if (status === 'interrupted') {
+        log('warn', 'turn_interrupted', {
+          payload: { threadId, turnId },
+          canvasId: active.canvasId,
+          trace: active.trace,
+        });
+        settle(active, () => active.reject(abortError()));
+        return;
+      }
+
+      log('info', 'turn_complete', {
+        payload: {
+          threadId,
+          turnId,
+          status: status ?? 'completed',
+          toolCallCount: active.toolCallCount,
+          textLength: active.text.length,
+        },
+        canvasId: active.canvasId,
+        trace: active.trace,
+      });
+      settle(active, () =>
+        active.resolve({
+          text: active.text,
+          toolCallCount: active.toolCallCount,
+        }),
+      );
+    }
+  };
+
+  const executeWithTimeout = async (
+    tools: CanvasToolSet,
+    tool: string,
+    toolArgs: unknown,
+    context: CanvasToolContext,
+  ): Promise<CanvasToolResult> => {
+    let timer: NodeJS.Timeout | undefined;
+    // `Promise.resolve().then` also catches a tool that throws synchronously:
+    // every invocation must produce a response, or the turn hangs forever.
+    const execution = Promise.resolve()
+      .then(() => tools.execute(tool, toolArgs, context))
+      .catch(
+        (error: unknown): CanvasToolResult => ({
+          ok: false,
+          code: 'tool_failed',
+          message: error instanceof Error ? error.message : '画布工具执行失败',
+        }),
+      );
+    const timeout = new Promise<CanvasToolResult>((resolve) => {
+      timer = setTimeout(() => {
+        log('warn', 'tool_timeout', {
+          payload: { tool, toolTimeoutMs },
+          canvasId: context.canvasId,
+          trace: context.trace,
+        });
+        resolve({
+          ok: false,
+          code: 'tool_timeout',
+          message: `画布工具执行超时（${toolTimeoutMs}ms）`,
+        });
+      }, toolTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([execution, timeout]);
+    } finally {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    }
+  };
+
+  const handleServerRequest = async (
+    id: JsonRpcId,
+    method: string,
+    params: unknown,
+  ) => {
+    if (method !== 'item/tool/call') {
+      write({
+        id,
+        error: { code: -32601, message: `不支持的服务端请求：${method}` },
+      });
+      return;
+    }
+
+    const call = (params ?? {}) as Partial<DynamicToolCallParams>;
+    const active =
+      typeof call.threadId === 'string' ? activeTurns.get(call.threadId) : undefined;
+    let result: CanvasToolResult;
+
+    if (typeof call.tool !== 'string') {
+      result = {
+        ok: false,
+        code: 'invalid_arguments',
+        message: '工具调用参数不完整',
+      };
+    } else if (!active || active.settled) {
+      result = {
+        ok: false,
+        code: 'no_active_turn',
+        message: '工具调用没有对应的进行中轮次',
+      };
+    } else {
+      log('debug', 'tool_call', {
+        payload: { tool: call.tool, callId: call.callId },
+        canvasId: active.canvasId,
+        trace: active.trace,
+      });
+      result = await executeWithTimeout(active.tools, call.tool, call.arguments, {
+        canvasId: active.canvasId,
+        prompt: active.prompt,
+        trace: active.trace,
+      });
+      active.toolCallCount += 1;
+
+      const layer = result.ok ? result.layer : undefined;
+
+      if (
+        typeof layer === 'object' &&
+        layer !== null &&
+        typeof (layer as { id?: unknown }).id === 'string' &&
+        typeof (layer as { name?: unknown }).name === 'string'
+      ) {
+        try {
+          active.onLayerCreated?.(layer as { id: string; name: string });
+        } catch (error) {
+          log('error', 'layer_handler_failed', {
+            error,
+            canvasId: active.canvasId,
+            trace: active.trace,
+          });
+        }
+      }
+    }
+
+    const response: DynamicToolCallResponse = {
+      success: result.ok,
+      contentItems: [{ type: 'inputText', text: JSON.stringify(result) }],
+    };
+
+    write({ id, result: response });
+  };
+
+  const handleLine = (line: string) => {
+    let message: unknown;
+
+    try {
+      message = JSON.parse(line);
+    } catch {
+      log('warn', 'runtime_line_invalid', {
+        payload: { lineLength: line.length },
+      });
+      return;
+    }
+
+    if (typeof message !== 'object' || message === null) {
+      log('warn', 'runtime_line_invalid', {
+        payload: { lineLength: line.length },
+      });
+      return;
+    }
+
+    const record = message as {
+      id?: JsonRpcId;
+      method?: unknown;
+      params?: unknown;
+      result?: unknown;
+      error?: JsonRpcError;
+    };
+    const hasId = typeof record.id === 'number' || typeof record.id === 'string';
+    const method = typeof record.method === 'string' ? record.method : null;
+
+    if (method !== null && hasId) {
+      void handleServerRequest(record.id as JsonRpcId, method, record.params).catch(
+        (error: unknown) => {
+          log('error', 'runtime_server_request_failed', {
+            error,
+            payload: { method },
+          });
+        },
+      );
+      return;
+    }
+
+    if (method !== null) {
+      handleNotification(method, record.params);
+      return;
+    }
+
+    if (hasId) {
+      handleResponse(record.id as JsonRpcId, record);
+      return;
+    }
+
+    log('warn', 'runtime_message_invalid', {
+      payload: { keys: Object.keys(record).slice(0, 8) },
+    });
+  };
+
+  const drainStdout = () => {
+    let newline = stdoutBuffer.indexOf('\n');
+
+    while (newline >= 0) {
+      const line = stdoutBuffer.slice(0, newline).replace(/\r$/, '');
+      stdoutBuffer = stdoutBuffer.slice(newline + 1);
+
+      if (line.trim().length > 0) {
+        handleLine(line);
+      }
+
+      newline = stdoutBuffer.indexOf('\n');
+    }
+  };
+
+  const attachProcess = (process: ChildProcess) => {
+    process.stdout?.setEncoding('utf8');
+    process.stdout?.on('data', (chunk: string) => {
+      stdoutBuffer += chunk;
+      drainStdout();
+    });
+
+    process.stderr?.setEncoding('utf8');
+    process.stderr?.on('data', (chunk: string) => {
+      stderrTail = `${stderrTail}${chunk}`.slice(-STDERR_TAIL_LENGTH);
+    });
+
+    process.stdin?.on('error', () => {
+      // The process may already be gone; exit handling reports the real cause.
+    });
+
+    process.on('error', (error) => {
+      if (child !== process) {
+        return;
+      }
+
+      log('error', 'runtime_process_error', { error });
+      failEverything(error);
+      child = null;
+      ready = null;
+    });
+
+    process.on('close', (code, signal) => {
+      if (child !== process) {
+        return;
+      }
+
+      child = null;
+      ready = null;
+      threads.clear();
+
+      if (closing) {
+        return;
+      }
+
+      const failure = processFailure(code, signal);
+      log('error', 'runtime_exit', {
+        payload: {
+          exitCode: code,
+          signal,
+          stderr: stderrTail.trim().slice(-500),
+        },
+        error: failure,
+      });
+      failEverything(failure);
+    });
+  };
+
+  const spawnProcess = (): ChildProcess => {
+    const spawnOptions = {
+      cwd: options.cwd ?? process.cwd(),
+      env: options.env ?? process.env,
+      windowsHide: true,
+      stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
+    };
+
+    if (!needsShell(command)) {
+      return spawn(command, args, spawnOptions);
+    }
+
+    const shellCommand = [command, ...args].map(quoteForCmd).join(' ');
+
+    return spawn(
+      process.env.ComSpec ?? 'cmd.exe',
+      ['/d', '/s', '/c', shellCommand],
+      spawnOptions,
+    );
+  };
+
+  const ensureReady = async (): Promise<void> => {
+    if (closing) {
+      throw new Error('Codex runtime 已关闭');
+    }
+
+    if (ready) {
+      return ready;
+    }
+
+    ready = (async () => {
+      const process = spawnProcess();
+      child = process;
+      stdoutBuffer = '';
+      stderrTail = '';
+      attachProcess(process);
+
+      log('info', 'runtime_spawn', {
+        payload: { command, argCount: args.length },
+      });
+
+      try {
+        const params: InitializeParams = {
+          clientInfo,
+          capabilities: { experimentalApi: true },
+        };
+        const result = await request<InitializeResponse>('initialize', params);
+        log('info', 'runtime_ready', {
+          payload: {
+            userAgent: result.userAgent,
+            platformFamily: result.platformFamily,
+          },
+        });
+      } catch (error) {
+        failEverything(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+        terminate(process);
+        throw error;
+      }
+    })().catch((error: unknown) => {
+      ready = null;
+      throw error;
+    });
+
+    return ready;
+  };
+
+  const startEphemeralThread = async (tools: CanvasToolSet): Promise<string> => {
+    const params: ThreadStartParams = {
+      cwd: options.cwd ?? process.cwd(),
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      ephemeral: true,
+      dynamicTools: tools.declarations,
+    };
+
+    const result = await request<ThreadStartResult>('thread/start', params);
+    return result.thread.id;
+  };
+
+  const ensureThread = async (
+    canvasId: string,
+    tools: CanvasToolSet,
+  ): Promise<string> => {
+    const existing = threads.get(canvasId);
+
+    if (existing) {
+      return existing;
+    }
+
+    const params: ThreadStartParams = {
+      cwd: options.cwd ?? process.cwd(),
+      sandbox: 'read-only',
+      approvalPolicy: 'never',
+      ephemeral: true,
+      dynamicTools: tools.declarations,
+    };
+    const result = await request<ThreadStartResult>('thread/start', params);
+
+    threads.set(canvasId, result.thread.id);
+    log('info', 'thread_start', {
+      payload: {
+        threadId: result.thread.id,
+        sandbox: 'read-only',
+        toolCount: tools.declarations.length,
+      },
+      canvasId,
+    });
+    return result.thread.id;
+  };
+
+  const interrupt = async (canvasId: string | null): Promise<void> => {
+    const active = [...activeTurns.values()].find(
+      (turn) => turn.canvasId === canvasId,
+    );
+
+    if (!active || active.turnId === null) {
+      return;
+    }
+
+    await sendInterrupt(active.threadId, active.turnId);
+  };
+
+  const close = async (): Promise<void> => {
+    closing = true;
+    ready = null;
+    threads.clear();
+
+    const shutdownError = abortError('Codex runtime 已关闭');
+    failEverything(shutdownError);
+
+    const process = child;
+    child = null;
+
+    if (!process || process.exitCode !== null || process.signalCode !== null) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, 1_000);
+      process.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      terminate(process);
+    });
+  };
+
+  return {
+    async startTurn(input) {
+      await ensureReady();
+
+      let threadId: string | null =
+        input.canvasId === null ? null : (threads.get(input.canvasId) ?? null);
+
+      if (threadId === null) {
+        threadId = await (input.canvasId === null
+          ? startEphemeralThread(input.tools)
+          : ensureThread(input.canvasId, input.tools));
+      }
+
+      if (activeTurns.has(threadId)) {
+        throw new Error('该画布已有进行中的 AI 轮次');
+      }
+
+      const active: MutableActiveTurn = {
+        threadId,
+        turnId: null,
+        canvasId: input.canvasId,
+        prompt: input.userMessage ?? input.prompt,
+        tools: input.tools,
+        text: '',
+        toolCallCount: 0,
+        onDelta: input.onDelta,
+        onLayerCreated: input.onLayerCreated,
+        trace: input.trace,
+        settled: false,
+        abortRequested: false,
+        resolve: () => {},
+        reject: () => {},
+        onAbort: () => {},
+        signal: input.signal,
+      };
+      const outcome = new Promise<CodexTurnResult>((resolve, reject) => {
+        active.resolve = resolve;
+        active.reject = reject;
+      });
+      // A rejected outcome may be observed only after the turn/start request
+      // settles; keep Node from reporting it as unhandled in the meantime.
+      void outcome.catch(() => {});
+
+      active.onAbort = () => {
+        active.abortRequested = true;
+
+        if (active.turnId !== null) {
+          void sendInterrupt(active.threadId, active.turnId);
+        }
+
+        settle(active, () => active.reject(abortError()));
+      };
+
+      activeTurns.set(threadId, active);
+
+      if (input.signal?.aborted) {
+        active.onAbort();
+        return outcome;
+      }
+
+      input.signal?.addEventListener('abort', active.onAbort, { once: true });
+
+      try {
+        const params: TurnStartParams = {
+          threadId,
+          input: [{ type: 'text', text: input.prompt }],
+        };
+        const started = await request<TurnStartResult>('turn/start', params);
+        active.turnId = started.turn.id;
+
+        if (active.abortRequested) {
+          // The abort arrived while turn/start was in flight; stop the turn now
+          // that its id is known.
+          void sendInterrupt(active.threadId, started.turn.id);
+        } else {
+          log('info', 'turn_start', {
+            payload: {
+              threadId,
+              turnId: started.turn.id,
+              promptLength: input.prompt.length,
+            },
+            canvasId: input.canvasId,
+            trace: input.trace,
+          });
+        }
+      } catch (error) {
+        settle(active, () =>
+          active.reject(error instanceof Error ? error : new Error(String(error))),
+        );
+      }
+
+      return outcome;
+    },
+
+    interrupt,
+
+    getThreadId(canvasId) {
+      return threads.get(canvasId) ?? null;
+    },
+
+    getActiveTurn(canvasId) {
+      const active = [...activeTurns.values()].find(
+        (turn) => turn.canvasId === canvasId,
+      );
+
+      return active ?? null;
+    },
+
+    close,
+  };
+}
+
+function terminate(proc: ChildProcess): void {
+  if (!proc.pid) {
+    return;
+  }
+
+  if (process.platform === 'win32') {
+    const killer = spawn('taskkill', ['/pid', String(proc.pid), '/t', '/f'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    });
+    killer.on('error', () => {
+      proc.kill();
+    });
+    killer.unref();
+    return;
+  }
+
+  proc.kill('SIGTERM');
+}

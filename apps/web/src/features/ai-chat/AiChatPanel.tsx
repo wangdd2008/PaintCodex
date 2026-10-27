@@ -1,4 +1,4 @@
-import { CANVAS_ACTION_MARKER, type StreamPayload } from '@paintcodex/protocol';
+import type { StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
 import { describeChatFailure, type ChatFailure } from './chat-error';
@@ -140,13 +140,6 @@ function composerBlockedReason(
   }
 
   return '先新建一张画布，再让 AI 作画。';
-}
-
-/** Hides the machine-readable canvas action from the chat bubble. */
-function visibleAssistantText(content: string): string {
-  const markerIndex = content.indexOf(CANVAS_ACTION_MARKER);
-
-  return markerIndex >= 0 ? content.slice(0, markerIndex).trim() : content;
 }
 
 function parseFrame(frame: string): StreamPayload | null {
@@ -559,7 +552,7 @@ export function AiChatPanel() {
               </p>
             ) : (
               messages.map((message) => {
-                const text = visibleAssistantText(message.content);
+                const text = message.content;
                 const isPending =
                   inFlight &&
                   message.role === 'assistant' &&

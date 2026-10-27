@@ -1,5 +1,3 @@
-export const CANVAS_ACTION_MARKER = '<<<CANVAS_ACTION>>>';
-
 export type Actor = 'user' | 'agent';
 
 export type LayerType = 'raster' | 'vector' | 'ai-generated';
@@ -143,6 +141,8 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export const LOG_CATEGORIES = [
   'codex-runner',
+  'codex-runtime',
+  'canvas-tool',
   'ai-chat',
   'canvas-action',
   'http',
