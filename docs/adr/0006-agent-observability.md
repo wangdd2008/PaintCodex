@@ -113,3 +113,7 @@ New types added to `packages/protocol`:
 | In-memory only (no persistence) | Survives only as long as the daemon process. Debugging crashes or reviewing historical runs is impossible. |
 | Client-side logging (web only) | Misses backend agent execution (Codex CLI, canvas mutations) entirely. |
 | External observability platform (Datadog, Grafana Cloud) | Requires network egress and API keys; contradicts the local-first, offline-capable design of Phase 1. |
+
+## Errata
+
+- **2026-10-27（Codex 原生工具切片 2）**：`codex-runner` 分类随旧 `CodexRunner` 一并移除，职责由两个新分类承接：`codex-runtime` 记录 app-server 进程与 JSON-RPC 生命周期，`canvas-tool` 每次工具调用记录名称、参数摘要、结果码与耗时。分类清单以此为准：`codex-runtime`、`canvas-tool`、`ai-chat`、`canvas-action`、`http`、`sse`、`system`。`tool_call` 取代旧 runner 事件，成为 AI 行为统计的锚点。ADR 正文与其余决定保持不变。

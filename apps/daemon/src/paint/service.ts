@@ -29,6 +29,13 @@ export const DEFAULT_CANVAS_HEIGHT = 1080;
 export const MAX_CANVAS_DIMENSION = 8192;
 export const SNAPSHOT_LIMIT = 20;
 
+/** The snapshot the undo cursor points at: the action a user would undo next. */
+export interface UndoTargetSnapshot {
+  revision: number;
+  actor: Actor;
+  action: string;
+}
+
 /**
  * A canvas without a name is still a document the user must be able to tell
  * apart from the next one, so the default carries the local wall-clock time
@@ -129,6 +136,32 @@ export class PaintService {
     });
 
     return this.toDocument(renamed);
+  }
+
+  /**
+   * Read-only view of the top of the undo stack, so the agent lane can check
+   * attribution before it asks for an undo. REST undo semantics stay untouched:
+   * this accessor only reads the same cursor `undo()` would leave.
+   */
+  getUndoTarget(canvasId: string): UndoTargetSnapshot | null {
+    const canvas = this.canvases.findById(canvasId);
+
+    if (!canvas) {
+      return null;
+    }
+
+    const cursor = this.cursor(canvas);
+    const snapshot = cursor === null ? null : this.snapshots.at(canvasId, cursor);
+
+    if (!snapshot) {
+      return null;
+    }
+
+    return {
+      revision: snapshot.revision,
+      actor: snapshot.actor,
+      action: snapshot.action,
+    };
   }
 
   applyAction(canvasId: string, request: ApplyActionRequest): CanvasDocument {

@@ -123,8 +123,17 @@ export interface StreamPayload {
   delta?: unknown;
   done?: unknown;
   error?: { code?: unknown; message?: unknown };
-  /** Progress notification for the pending reply; `label` is UI copy. */
-  step?: { id: string; label: string };
+  /**
+   * One dynamic-tool call from the running turn. Emitted at `item/started`
+   * (`running`) and `item/completed` (`ok` / `failed`); `code` names the failure
+   * so the UI can localize it without parsing prose.
+   */
+  tool?: {
+    id: string;
+    name: string;
+    status: 'running' | 'ok' | 'failed';
+    code?: string;
+  };
   layerCreated?: { id: string; name: string };
 }
 
@@ -140,7 +149,6 @@ export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export const LOG_CATEGORIES = [
-  'codex-runner',
   'codex-runtime',
   'canvas-tool',
   'ai-chat',

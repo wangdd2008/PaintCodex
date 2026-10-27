@@ -189,27 +189,6 @@ describe('AiChatPanel clear input', () => {
   });
 });
 
-describe('AiChatPanel step progress', () => {
-  it('shows the current backend step inside the assistant bubble until the reply lands', async () => {
-    const stream = controlledStream();
-    stubFetch(stream.body);
-
-    render(<AiChatPanel />);
-    await sendMessage('Paint a cat');
-
-    stream.push({ step: { id: 'prompt_built', label: '正在构建请求…' } });
-    stream.push({ step: { id: 'codex_exec', label: 'AI 正在思考…' } });
-    expect(await screen.findByText('AI 正在思考…')).toBeTruthy();
-
-    stream.push({ delta: 'A cat appears.' });
-    stream.push({ done: true });
-    stream.close();
-
-    expect(await screen.findByText('A cat appears.')).toBeTruthy();
-    expect(screen.queryByText('AI 正在思考…')).toBeNull();
-  });
-});
-
 describe('AiChatPanel cancel', () => {
   it('replaces 发送 with 取消, aborts the request and marks the bubble 已取消', async () => {
     const stream = controlledStream();
