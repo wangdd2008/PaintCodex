@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import type { ChildProcess } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentLog } from '@paintcodex/protocol';
 import {
@@ -102,7 +104,7 @@ function harness(options: {
 }
 
 /** Polls until `probe` returns a truthy value; used to observe in-flight turns. */
-async function waitFor<T>(probe: () => T | null, timeoutMs = 3_000): Promise<T> {
+async function waitFor<T>(probe: () => T | null, timeoutMs = 20_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -136,6 +138,54 @@ function start(
     tools: stubTools(async () => ({ ok: true })),
     onDelta: () => {},
     ...overrides,
+  });
+}
+
+/**
+ * In-process stand-in for a spawned app-server. The crash tests drive `exit`
+ * and `close` themselves, so the assertion never races a real child's startup
+ * against a request deadline (which is what made the old subprocess test flaky
+ * under `pnpm -r test`).
+ */
+class FakeAppServerProcess extends EventEmitter {
+  readonly pid = 4242;
+  readonly writes: string[] = [];
+  exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
+  readonly stdin = {
+    destroyed: false,
+    write: (chunk: string) => {
+      this.writes.push(chunk);
+      return true;
+    },
+    on: () => this.stdin,
+  };
+  readonly stdout = Object.assign(new EventEmitter(), { setEncoding: () => {} });
+  readonly stderr = Object.assign(new EventEmitter(), { setEncoding: () => {} });
+
+  respond(value: unknown): void {
+    this.stdout.emit('data', `${JSON.stringify(value)}\n`);
+  }
+
+  crash(code: number): void {
+    this.exitCode = code;
+    this.emit('exit', code, null);
+    this.emit('close', code, null);
+  }
+}
+
+function parsedWrite(process: FakeAppServerProcess, index: number) {
+  const raw = process.writes[index];
+
+  expect(raw).toBeTruthy();
+
+  return JSON.parse(raw as string) as { id: number; method: string };
+}
+
+function runtimeWithFakeProcess(process: FakeAppServerProcess): CodexRuntime {
+  return createCodexRuntime({
+    spawn: () => process as unknown as ChildProcess,
+    requestTimeoutMs: 30_000,
   });
 }
 
@@ -185,22 +235,64 @@ describe('Codex runtime handshake and turns', () => {
     await expect(start(harnessed)).rejects.toThrow(/model exploded/);
   });
 
-  it('rejects pending work when the app-server crashes', async () => {
-    const runtime = createCodexRuntime({
-      command: process.execPath,
-      args: ['-e', 'process.exit(7)'],
-      requestTimeoutMs: 2_000,
-    });
+  it('rejects a pending request with the exit code when the app-server crashes', async () => {
+    const child = new FakeAppServerProcess();
+    const runtime = runtimeWithFakeProcess(child);
     runtimes.push(runtime);
+    const pending = runtime.startTurn({
+      canvasId: 'canvas-1',
+      prompt: 'draw',
+      tools: stubTools(async () => ({ ok: true })),
+      onDelta: () => {},
+    });
+    const rejection = expect(pending).rejects.toThrow(/代码 7/);
 
-    await expect(
-      runtime.startTurn({
-        canvasId: 'canvas-1',
-        prompt: 'draw',
-        tools: stubTools(async () => ({ ok: true })),
-        onDelta: () => {},
-      }),
-    ).rejects.toThrow(/代码 7/);
+    child.emit('spawn');
+    await waitFor(() => (child.writes.length >= 1 ? child.writes.length : null));
+    child.crash(7);
+
+    await rejection;
+  });
+
+  it('settles the in-flight turn when the app-server crashes', async () => {
+    const child = new FakeAppServerProcess();
+    const runtime = runtimeWithFakeProcess(child);
+    runtimes.push(runtime);
+    const pending = runtime.startTurn({
+      canvasId: 'canvas-1',
+      prompt: 'draw',
+      tools: stubTools(async () => ({ ok: true })),
+      onDelta: () => {},
+    });
+    const rejection = expect(pending).rejects.toThrow(/代码 7/);
+
+    child.emit('spawn');
+
+    await waitFor(() => (child.writes.length >= 1 ? child.writes.length : null));
+    const initialize = parsedWrite(child, 0);
+    child.respond({
+      id: initialize.id,
+      result: {
+        userAgent: 'fake',
+        codexHome: '/',
+        platformFamily: 'windows',
+        platformOs: 'windows',
+      },
+    });
+
+    await waitFor(() => (child.writes.length >= 2 ? child.writes.length : null));
+    const threadStart = parsedWrite(child, 1);
+    child.respond({ id: threadStart.id, result: { thread: { id: THREAD_ID } } });
+
+    await waitFor(() => (child.writes.length >= 3 ? child.writes.length : null));
+    const turnStart = parsedWrite(child, 2);
+    child.respond({ id: turnStart.id, result: { turn: { id: TURN_ID } } });
+
+    await waitFor(() => runtime.getActiveTurn('canvas-1')?.turnId ?? null);
+    child.crash(7);
+
+    await rejection;
+    expect(runtime.getActiveTurn('canvas-1')).toBeNull();
   });
 });
 
