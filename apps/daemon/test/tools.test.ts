@@ -133,6 +133,25 @@ describe('canvas tool declarations', () => {
         inputSchema: expect.objectContaining({
           type: 'object',
           required: ['canvasId', 'layerId', 'patch'],
+          properties: expect.objectContaining({
+            expectedRevision: expect.objectContaining({
+              type: 'integer',
+              description: expect.stringContaining('last observed'),
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(tools.declarations).toContainEqual(
+      expect.objectContaining({
+        type: 'function',
+        name: 'canvas_delete_layer',
+        inputSchema: expect.objectContaining({
+          properties: expect.objectContaining({
+            expectedRevision: expect.objectContaining({
+              description: expect.stringContaining('last observed'),
+            }),
+          }),
         }),
       }),
     );
@@ -434,6 +453,30 @@ describe('canvas_create_layer', () => {
     ).resolves.toMatchObject({ ok: false, code: 'invalid_arguments' });
   });
 
+  it('refuses a stale observed revision instead of overwriting a newer edit', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    const result = await tools.execute(
+      'canvas_create_layer',
+      {
+        canvasId: canvas.id,
+        name: 'AI',
+        svg: RED_CIRCLE_SVG,
+        expectedRevision: 7,
+      },
+      context(canvas.id),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'revision_conflict',
+      currentRevision: 0,
+    });
+    expect(harness.service.getCanvas(canvas.id)!.layers).toEqual([]);
+  });
+
   it('maps a revision conflict to a result the model can read', async () => {
     const harness = createHarness();
     const canvas = harness.service.createCanvas();
@@ -587,6 +630,31 @@ describe('canvas_update_layer', () => {
     });
   });
 
+  it('rejects a stale expectedRevision with the current revision', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_update_layer',
+      {
+        canvasId: canvas.id,
+        layerId,
+        patch: { name: 'must not apply' },
+        expectedRevision: 0,
+      },
+      context(canvas.id),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'revision_conflict',
+      currentRevision: 1,
+    });
+    expect(harness.service.getCanvas(canvas.id)!.layers[0]?.name).toBe('Base');
+  });
+
   it('rejects an empty or malformed patch', async () => {
     const harness = createHarness();
     const tools = createCanvasToolSet(harness);
@@ -732,6 +800,63 @@ describe('canvas_delete_layer', () => {
     expect(result).toMatchObject({ ok: false, code: 'layer_not_found' });
     expect(asked).toEqual([]);
     expect(harness.service.getCanvas(canvas.id)!.revision).toBe(1);
+  });
+
+  it('fails fast on a stale expectedRevision without asking the user', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+    const asked: ConfirmationRequest[] = [];
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId, expectedRevision: 0 },
+      context(canvas.id, '删掉它', confirmWith('approved', asked)),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'revision_conflict',
+      currentRevision: 1,
+    });
+    // A delete that cannot happen must not spend the user's one answer.
+    expect(asked).toEqual([]);
+    expect(harness.service.getCanvas(canvas.id)!.layers).toHaveLength(1);
+  });
+
+  it('conflicts when the user edits the canvas while the delete confirmation is open', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId, expectedRevision: 1 },
+      context(canvas.id, '删掉它', async () => {
+        // The user keeps painting while deciding whether to approve.
+        harness.dispatcher.dispatch(canvas.id, {
+          actor: 'user',
+          expectedRevision: 1,
+          action: {
+            type: 'canvas_update_layer',
+            layerId,
+            patch: { name: 'user was here' },
+          },
+        });
+        return 'approved';
+      }),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'revision_conflict',
+      currentRevision: 2,
+    });
+    expect(harness.service.getCanvas(canvas.id)!.layers[0]?.name).toBe(
+      'user was here',
+    );
   });
 
   it('still reports a revision conflict that happens after approval', async () => {

@@ -90,7 +90,10 @@ const CREATE_LAYER_DECLARATION: DynamicToolSpec = {
   description:
     'Create one new SVG layer on the canvas. The SVG must be a standalone <svg> ' +
     'document with a viewBox matching the canvas. Scripts, event handlers, embedded ' +
-    'images, and remote references are rejected. Returns the created layer id.',
+    'images, and remote references are rejected. Read the canvas with ' +
+    'canvas_get_context first, then pass the revision it returned as expectedRevision ' +
+    'so a concurrent user edit is not overwritten. Returns the created layer id and ' +
+    'the resulting canvas revision.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -99,6 +102,11 @@ const CREATE_LAYER_DECLARATION: DynamicToolSpec = {
       svg: { type: 'string', description: 'Complete standalone SVG markup.' },
       visible: { type: 'boolean', description: 'Defaults to true.' },
       opacity: { type: 'number', minimum: 0, maximum: 1, description: 'Defaults to 1.' },
+      expectedRevision: {
+        type: 'integer',
+        minimum: 0,
+        description: 'The canvas revision you last observed from canvas_get_context.',
+      },
     },
     required: ['canvasId', 'name', 'svg'],
     additionalProperties: false,
@@ -112,8 +120,10 @@ const UPDATE_LAYER_DECLARATION: DynamicToolSpec = {
     'Change one existing layer in place. Pass only the fields that change: name, ' +
     'visible, opacity, or a complete replacement SVG (`patch.svg`). The SVG rules ' +
     'are the same as for canvas_create_layer: standalone <svg>, canvas viewBox, no ' +
-    'scripts, handlers, embedded images, or remote references. Read the canvas ' +
-    'first so the layer id is real.',
+    'scripts, handlers, embedded images, or remote references. Read the canvas with ' +
+    'canvas_get_context first, then pass the revision it returned as expectedRevision ' +
+    'so a concurrent user edit is not overwritten. Returns the resulting canvas ' +
+    'revision.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -133,6 +143,11 @@ const UPDATE_LAYER_DECLARATION: DynamicToolSpec = {
         },
         additionalProperties: false,
       },
+      expectedRevision: {
+        type: 'integer',
+        minimum: 0,
+        description: 'The canvas revision you last observed from canvas_get_context.',
+      },
     },
     required: ['canvasId', 'layerId', 'patch'],
     additionalProperties: false,
@@ -145,13 +160,20 @@ const DELETE_LAYER_DECLARATION: DynamicToolSpec = {
   description:
     'Delete one layer by id. This is irreversible for the user, so the user is ' +
     'asked to confirm before it runs; say what you are deleting in your reply. ' +
-    'If the user declines or does not answer, the tool returns user_declined and ' +
-    'nothing is deleted.',
+    'Read the canvas with canvas_get_context first, then pass the revision it ' +
+    'returned as expectedRevision so an edit made while the user decides turns ' +
+    'into a revision_conflict instead of a silent overwrite. If the user declines ' +
+    'or does not answer, the tool returns user_declined and nothing is deleted.',
   inputSchema: {
     type: 'object',
     properties: {
       canvasId: { type: 'string', description: 'Canvas id to change.' },
       layerId: { type: 'string', description: 'Id of the layer to delete.' },
+      expectedRevision: {
+        type: 'integer',
+        minimum: 0,
+        description: 'The canvas revision you last observed from canvas_get_context.',
+      },
     },
     required: ['canvasId', 'layerId'],
     additionalProperties: false,
@@ -444,10 +466,19 @@ function createLayer(
     return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
   }
 
+  const requestedRevision = readExpectedRevision(object.expectedRevision);
+
+  if (requestedRevision === null) {
+    return invalidArguments('expectedRevision 必须是整数');
+  }
+
   try {
     const updated = dispatcher.dispatch(canvasId, {
       actor: 'agent',
-      expectedRevision: canvas.revision,
+      // Without an observation the tool keeps its old behaviour (write against
+      // the revision it just read); with one, the dispatcher rejects a stale
+      // write instead of overwriting the user's edit.
+      expectedRevision: requestedRevision ?? canvas.revision,
       action: {
         type: 'canvas_create_layer',
         layer: {
@@ -579,10 +610,16 @@ function updateLayer(
     return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
   }
 
+  const requestedRevision = readExpectedRevision(object.expectedRevision);
+
+  if (requestedRevision === null) {
+    return invalidArguments('expectedRevision 必须是整数');
+  }
+
   try {
     const updated = dispatcher.dispatch(canvasId, {
       actor: 'agent',
-      expectedRevision: canvas.revision,
+      expectedRevision: requestedRevision ?? canvas.revision,
       action: { type: 'canvas_update_layer', layerId, patch },
     });
     const layer = updated.layers.find((candidate) => candidate.id === layerId);
@@ -638,6 +675,20 @@ async function deleteLayer(
     return { ok: false, code: 'layer_not_found', message: '图层不存在' };
   }
 
+  const requestedRevision = readExpectedRevision(object.expectedRevision);
+
+  if (requestedRevision === null) {
+    return invalidArguments('expectedRevision 必须是整数');
+  }
+
+  // Fail fast: a model working from a stale read should be told to re-read
+  // *before* the user is asked to approve anything.
+  const observedRevision = requestedRevision ?? canvas.revision;
+
+  if (observedRevision !== canvas.revision) {
+    return revisionConflict(observedRevision, canvas.revision);
+  }
+
   const refusal = await requireConfirmation(context, {
     title: `删除图层「${layer.name}」`,
     detail: '这是不可逆操作：确认后该图层会从画布上移除。',
@@ -647,10 +698,24 @@ async function deleteLayer(
     return refusal;
   }
 
+  // The user may have edited the canvas while deciding. Re-check what the
+  // confirmation was raised against; the delete must not silently discard that
+  // edit. This is a real check, not a spurious one: a confirmation is passive,
+  // so an unchanged canvas has exactly the observed revision.
+  const afterApproval = service.getCanvas(canvasId);
+
+  if (!afterApproval) {
+    return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
+  }
+
+  if (afterApproval.revision !== observedRevision) {
+    return revisionConflict(observedRevision, afterApproval.revision);
+  }
+
   try {
     const updated = dispatcher.dispatch(canvasId, {
       actor: 'agent',
-      expectedRevision: canvas.revision,
+      expectedRevision: observedRevision,
       action: { type: 'canvas_delete_layer', layerId },
     });
 
@@ -1030,6 +1095,30 @@ function readLayerName(value: unknown): string | { reason: string } {
 
 function invalidArguments(message: string): CanvasToolResult {
   return { ok: false, code: 'invalid_arguments', message };
+}
+
+/**
+ * `undefined` means the model did not observe a revision (legacy behaviour);
+ * `null` means it supplied something that is not a revision. The distinction
+ * matters: only an explicit observation may turn a write into a conflict.
+ */
+function readExpectedRevision(value: unknown): number | undefined | null {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0
+    ? value
+    : null;
+}
+
+function revisionConflict(expected: number, current: number): CanvasToolResult {
+  return {
+    ok: false,
+    code: 'revision_conflict',
+    message: new RevisionConflictError(expected, current).message,
+    currentRevision: current,
+  };
 }
 
 /**

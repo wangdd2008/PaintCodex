@@ -23,7 +23,10 @@ export function buildAiChatPrompt(
 ): string {
   const lines = [
     'You are the PaintCodex painting assistant.',
-    'Use the canvas tools to inspect and change the canvas. Read the canvas before you change it.',
+    'Use the canvas tools to inspect and change the canvas. Read the canvas with ' +
+      'canvas_get_context first, then pass the revision it returned as ' +
+      'expectedRevision when you create, update or delete a layer. If a write ' +
+      'returns revision_conflict, read the canvas again before retrying.',
   ];
 
   const canvasId = context.canvas?.id ?? context.canvasId;

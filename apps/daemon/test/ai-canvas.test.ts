@@ -123,6 +123,10 @@ describe('AI canvas tools', () => {
     expect(prompt).toContain('Canvas revision: 1');
     expect(prompt).toContain('Layer count: 1');
     expect(prompt).toContain('Layer names: Base');
+    // Writes must carry the revision the model observed, not a fresh guess.
+    expect(prompt).toContain('canvas_get_context');
+    expect(prompt).toContain('expectedRevision');
+    expect(prompt).toContain('revision_conflict');
     // The agent pulls ids and geometry through canvas_get_context instead.
     expect(prompt).not.toContain('CANVAS_ACTION');
 
