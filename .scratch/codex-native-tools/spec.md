@@ -126,6 +126,7 @@ interface StreamPayload {
 | 2 | update / delete / undo + 工具事件行 | 02 |
 | 3 | 确认通道 + actor 归属 | 03、05 |
 | 4 | render_preview + thread 落库与恢复 | 04 |
+| 5 | 导出工具 + 确认（依赖 03、04 的通道） | 06 |
 
 独立缺陷：`05-actor-attribution.md`（今天的 undo/redo 归属就是错的，与切片并行修）。
 

@@ -122,6 +122,12 @@ export interface CodexRuntimeOptions {
    */
   threadStore?: CodexThreadStore;
   clientInfo?: { name: string; version: string };
+  /**
+   * Test seam: replaces `child_process.spawn` so process-lifecycle behaviour
+   * (crash, exit codes) can be driven deterministically, without racing a real
+   * child's startup against a request deadline.
+   */
+  spawn?: () => ChildProcess;
 }
 
 export const MINIMUM_CODEX_VERSION = '0.164.0';
@@ -256,6 +262,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   let nextRequestId = 1;
   let stdoutBuffer = '';
   let stderrTail = '';
+  /**
+   * Failure of the most recent app-server process. A request timeout must not
+   * mask it: if the process is already gone, the caller should see the exit
+   * code, not "request timed out".
+   */
+  let processGone: Error | null = null;
 
   const pending = new Map<number, PendingRequest>();
   const threads = new Map<string, string>();
@@ -323,7 +335,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     return new Promise<TResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
-        reject(new Error(`Codex app-server 请求超时：${method}`));
+        reject(
+          processGone ?? new Error(`Codex app-server 请求超时：${method}`),
+        );
       }, timeoutMs);
 
       pending.set(id, {
@@ -794,6 +808,38 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   };
 
   const attachProcess = (process: ChildProcess) => {
+    // `error`, `exit` and `close` can all report the same death; the first one
+    // wins so pending requests are rejected exactly once, immediately.
+    let settled = false;
+
+    const finish = (failure: Error, message: string) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      processGone = failure;
+
+      if (child === process) {
+        child = null;
+        ready = null;
+        threads.clear();
+      }
+
+      if (!closing) {
+        log('error', message, {
+          payload: {
+            exitCode: process.exitCode,
+            signal: process.signalCode,
+            stderr: stderrTail.trim().slice(-500),
+          },
+          error: failure,
+        });
+      }
+
+      failEverything(failure);
+    };
+
     process.stdout?.setEncoding('utf8');
     process.stdout?.on('data', (chunk: string) => {
       stdoutBuffer += chunk;
@@ -810,41 +856,55 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     });
 
     process.on('error', (error) => {
-      if (child !== process) {
-        return;
-      }
+      finish(error, 'runtime_process_error');
+    });
 
-      log('error', 'runtime_process_error', { error });
-      failEverything(error);
-      child = null;
-      ready = null;
+    // `exit` fires before `close` on Windows, so pending requests see the exit
+    // code even when stdio draining delays the close event.
+    process.on('exit', (code, signal) => {
+      finish(processFailure(code, signal), 'runtime_exit');
     });
 
     process.on('close', (code, signal) => {
-      if (child !== process) {
-        return;
-      }
-
-      child = null;
-      ready = null;
-      threads.clear();
-
-      if (closing) {
-        return;
-      }
-
-      const failure = processFailure(code, signal);
-      log('error', 'runtime_exit', {
-        payload: {
-          exitCode: code,
-          signal,
-          stderr: stderrTail.trim().slice(-500),
-        },
-        error: failure,
-      });
-      failEverything(failure);
+      finish(processFailure(code, signal), 'runtime_exit');
     });
   };
+
+  /**
+   * Resolves once the OS has actually started the process. Request deadlines
+   * only make sense from that point: on a loaded machine the spawn itself can
+   * take seconds, and a request timeout must not fire before the process it is
+   * waiting on exists.
+   */
+  const waitForSpawn = (process: ChildProcess): Promise<void> =>
+    new Promise((resolve, reject) => {
+      if (process.exitCode !== null) {
+        resolve();
+        return;
+      }
+
+      const cleanup = () => {
+        process.off('spawn', onSpawn);
+        process.off('error', onError);
+        process.off('exit', onExit);
+      };
+      const onSpawn = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        cleanup();
+        reject(processFailure(code, signal));
+      };
+
+      process.once('spawn', onSpawn);
+      process.once('error', onError);
+      process.once('exit', onExit);
+    });
 
   const spawnProcess = (): ChildProcess => {
     const spawnOptions = {
@@ -867,6 +927,8 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     );
   };
 
+  const launchProcess = options.spawn ?? spawnProcess;
+
   const ensureReady = async (): Promise<void> => {
     if (closing) {
       throw new Error('Codex runtime 已关闭');
@@ -877,8 +939,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     }
 
     ready = (async () => {
-      const process = spawnProcess();
+      const process = launchProcess();
       child = process;
+      processGone = null;
       stdoutBuffer = '';
       stderrTail = '';
       attachProcess(process);
@@ -888,6 +951,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       });
 
       try {
+        await waitForSpawn(process);
+
+        if (process.exitCode !== null) {
+          throw processGone ?? processFailure(process.exitCode, process.signalCode);
+        }
+
         const params: InitializeParams = {
           clientInfo,
           capabilities: { experimentalApi: true },
@@ -903,7 +972,11 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         failEverything(
           error instanceof Error ? error : new Error(String(error)),
         );
-        terminate(process);
+
+        if (process.exitCode === null && process.signalCode === null) {
+          terminate(process);
+        }
+
         throw error;
       }
     })().catch((error: unknown) => {
