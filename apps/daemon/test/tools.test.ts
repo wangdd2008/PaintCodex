@@ -35,9 +35,24 @@ function createHarness() {
     service,
     dispatcher: new CommandDispatcher(service),
     logger: observability.logger,
+    db,
     logs: (): AgentLog[] =>
       observability.repository.query({ category: 'canvas-tool', limit: 100 }).items,
   };
+}
+
+/** The undo stack is the snapshots table: a UI signal must not add a row to it. */
+function snapshotCount(
+  db: ReturnType<typeof openDatabase>,
+  canvasId: string,
+): number {
+  const row = db
+    .prepare<[string], { count: number }>(
+      'SELECT COUNT(*) AS count FROM snapshots WHERE canvasId = ?',
+    )
+    .get(canvasId);
+
+  return row?.count ?? 0;
 }
 
 function context(
@@ -90,11 +105,13 @@ describe('canvas tool declarations', () => {
     const tools = createCanvasToolSet(harness);
     const names = tools.declarations.map((declaration) => declaration.name);
 
+    // The documented set is seven tools (ADR-0009): the code must not be one short.
     expect(names).toEqual([
       'canvas_get_context',
       'canvas_create_layer',
       'canvas_update_layer',
       'canvas_delete_layer',
+      'canvas_select',
       'canvas_export_png',
       'canvas_undo',
       'canvas_render_preview',
@@ -119,6 +136,145 @@ describe('canvas tool declarations', () => {
         }),
       }),
     );
+  });
+});
+
+describe('canvas_select', () => {
+  it('rejects a call that names neither a layer nor a region, and one that names both', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    await expect(
+      tools.execute('canvas_select', { canvasId: canvas.id }, context(canvas.id)),
+    ).resolves.toMatchObject({ ok: false, code: 'invalid_arguments' });
+
+    await expect(
+      tools.execute(
+        'canvas_select',
+        {
+          canvasId: canvas.id,
+          layerId,
+          region: { x: 0, y: 0, width: 10, height: 10 },
+        },
+        context(canvas.id),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'invalid_arguments' });
+  });
+
+  it('points the browser at an existing layer without writing anything', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+    const snapshotsBefore = snapshotCount(harness.db, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_select',
+      { canvasId: canvas.id, layerId },
+      context(canvas.id),
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      selection: { canvasId: canvas.id, layerId },
+    });
+    // No DB write, no snapshot, no revision bump, no undo entry.
+    expect(harness.service.getCanvas(canvas.id)!.revision).toBe(1);
+    expect(snapshotCount(harness.db, canvas.id)).toBe(snapshotsBefore);
+    expect(harness.service.getUndoTarget(canvas.id)).toMatchObject({
+      revision: 1,
+      actor: 'user',
+      action: 'canvas_create_layer',
+    });
+  });
+
+  it('reports an unknown layer as layer_not_found without writing anything', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    seedLayer(harness, canvas.id);
+    const snapshotsBefore = snapshotCount(harness.db, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_select',
+      { canvasId: canvas.id, layerId: 'missing' },
+      context(canvas.id),
+    );
+
+    expect(result).toMatchObject({ ok: false, code: 'layer_not_found' });
+    expect(harness.service.getCanvas(canvas.id)!.revision).toBe(1);
+    expect(snapshotCount(harness.db, canvas.id)).toBe(snapshotsBefore);
+  });
+
+  it('clamps an out-of-bounds region into the canvas and says so instead of failing', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas({ width: 800, height: 600 });
+    const snapshotsBefore = snapshotCount(harness.db, canvas.id);
+
+    const clamped = await tools.execute(
+      'canvas_select',
+      {
+        canvasId: canvas.id,
+        region: { x: -100, y: 500, width: 200, height: 400 },
+      },
+      context(canvas.id),
+    );
+
+    expect(clamped).toMatchObject({
+      ok: true,
+      selection: {
+        canvasId: canvas.id,
+        // Intersection of the requested box with 800 × 600.
+        region: { x: 0, y: 500, width: 200, height: 100 },
+        clamped: true,
+      },
+      message: expect.stringContaining('裁剪'),
+    });
+
+    const inside = await tools.execute(
+      'canvas_select',
+      {
+        canvasId: canvas.id,
+        region: { x: 10, y: 20, width: 100, height: 50 },
+      },
+      context(canvas.id),
+    );
+
+    expect(inside).toEqual({
+      ok: true,
+      selection: {
+        canvasId: canvas.id,
+        region: { x: 10, y: 20, width: 100, height: 50 },
+      },
+    });
+
+    // Circling an area is a UI hint too: still no write, no snapshot.
+    expect(harness.service.getCanvas(canvas.id)!.revision).toBe(0);
+    expect(snapshotCount(harness.db, canvas.id)).toBe(snapshotsBefore);
+  });
+
+  it('rejects a region that is not a rectangle of numbers', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    for (const region of [
+      { x: 0, y: 0, width: 10 },
+      { x: 0, y: 0, width: 0, height: 10 },
+      { x: 'a', y: 0, width: 10, height: 10 },
+      [],
+    ]) {
+      await expect(
+        tools.execute(
+          'canvas_select',
+          { canvasId: canvas.id, region },
+          context(canvas.id),
+        ),
+      ).resolves.toMatchObject({ ok: false, code: 'invalid_arguments' });
+    }
   });
 });
 
@@ -687,7 +843,7 @@ describe('unknown canvas tools', () => {
     const tools = createCanvasToolSet(harness);
 
     await expect(
-      tools.execute('canvas_select', {}, context('canvas-1')),
+      tools.execute('canvas_zoom', {}, context('canvas-1')),
     ).resolves.toMatchObject({ ok: false, code: 'unknown_tool' });
   });
 });

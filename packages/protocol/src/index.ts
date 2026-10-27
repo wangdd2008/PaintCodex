@@ -152,6 +152,30 @@ export interface AiExportResultRequest {
 }
 
 /**
+ * A rectangle in canvas coordinates: the same units as `CanvasDocument.width`
+ * and `height`, origin at the top-left corner.
+ */
+export interface CanvasRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * `canvas_select`'s UI signal: point the user at one layer or one area. It is a
+ * one-way notification (the browser answers nothing), and it never touches the
+ * document, so it carries no revision and no undo/redo meaning.
+ */
+export interface CanvasSelectFrame {
+  canvasId: string;
+  layerId?: string;
+  region?: CanvasRegion;
+  /** True when `region` was clipped into the canvas bounds; the region is clipped. */
+  clamped?: boolean;
+}
+
+/**
  * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
  * frame carries exactly one of the optional members.
  */
@@ -194,6 +218,12 @@ export interface StreamPayload {
    * tool result carries only the filename and byte count.
    */
   exportRequest?: { id: string; canvasId: string };
+  /**
+   * The running tool asks the browser to move the UI focus: make `layerId` the
+   * active layer, or circle `region` on the canvas. One-way and ephemeral; the
+   * browser does not answer and nothing is persisted.
+   */
+  select?: CanvasSelectFrame;
   /** A short, non-fatal status line; the turn keeps running after it. */
   notice?: string;
 }
