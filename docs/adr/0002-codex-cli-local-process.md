@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — amended by [ADR-0009](/docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md): the child process is now a long-lived `codex app-server` driven by JSON-RPC, not a one-shot `codex exec`. The local-process decision itself is unchanged.
 
 ## Context
 

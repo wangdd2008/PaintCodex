@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted — amended by [ADR-0009](/docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md): the SVG is now produced through a `canvas_create_layer` tool call instead of an inline `<<<CANVAS_ACTION>>>` payload. The SVG-only rule itself is unchanged.
 
 ## Context
 
