@@ -35,3 +35,5 @@ select?: { canvasId: string; layerId?: string; region?: CanvasRegion; clamped?: 
 **Web**：`AiChatPanel` 消费 `select` 帧 → `canvas-store.selectFromAi()`。它设置 `activeLayerId` 但**不** bump `activeLayerRequest`，因此不会触发「显式选择」那条会把工具切到 `select` 的路径（这正是会打断笔画的地方）；`CanvasStage` 用 DOM 覆盖层（不碰 Fabric 对象）画 3 秒高亮，时长与 store 的 3000ms 单一来源；`mouse:down`/`mouse:up`/`path:created` 维护 `isDrawing`，绘制中高亮推迟到笔画结束，且全程不动焦点。
 
 **验证**：`pnpm -r typecheck`、`pnpm -r test` 连续两轮通过（daemon 254、web 224，两轮数字一致）。新增测试：`tools.test.ts`（声明、二选一校验、成功、未知图层、裁剪、无写入）、`ai-select.test.ts`（SSE `select` 帧）、`codex-runtime.test.ts`（runtime 转发）、`ai-select-store.test.ts`（选中/3 秒到期/跨画布忽略）、`ai-select-canvas.test.tsx`（图层与区域高亮、淡出、绘制不被打断）、`ai-chat-select.test.tsx`（帧→活动图层、不抢焦点）。
+
+2026-10-28 — 合入 `feat/codex-native-tools`（合并提交 `0a4447f`，仅 README 一处文档改动，无冲突）。合并后 `pnpm -r typecheck` / `pnpm -r test` 再连续两轮通过，仍是 daemon 254、web 224。
