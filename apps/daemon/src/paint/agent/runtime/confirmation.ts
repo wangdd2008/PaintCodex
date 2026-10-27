@@ -24,6 +24,11 @@ export interface ConfirmationRequest {
   title: string;
   /** One sentence explaining what happens if approved. */
   detail: string;
+  /**
+   * CTA wording for this action (e.g. 「下载 PNG」). Omitted means the web keeps
+   * its default delete wording.
+   */
+  approveLabel?: string;
 }
 
 export interface ConfirmationRequestOptions {
@@ -201,7 +206,14 @@ export function createConfirmationChannel(
       });
 
       try {
-        requestOptions.onConfirm?.({ id, title: request.title, detail: request.detail });
+        requestOptions.onConfirm?.({
+          id,
+          title: request.title,
+          detail: request.detail,
+          ...(request.approveLabel === undefined
+            ? {}
+            : { approveLabel: request.approveLabel }),
+        });
       } catch (error) {
         // A broken sink must not leave the tool suspended with no way to answer.
         log('error', 'confirmation_emit_failed', entry, {

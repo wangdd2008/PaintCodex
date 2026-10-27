@@ -1,4 +1,5 @@
 import type {
+  AiExportResultRequest,
   AiRenderResultRequest,
   CanvasDocument,
   CreateCanvasRequest,
@@ -134,6 +135,26 @@ export function postRenderResult(requestId: string, imageUrl: string): Promise<v
   const payload: AiRenderResultRequest = { requestId, imageUrl };
 
   return request<void>('/paint/ai/render-result', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
+ * Answers an `exportRequest` SSE frame. The browser already downloaded the
+ * file, so only the filename and byte count travel back — never the image.
+ */
+export function postExportResult(
+  requestId: string,
+  outcome: { filename: string; bytes: number } | { error: string },
+): Promise<void> {
+  const payload: AiExportResultRequest =
+    'error' in outcome
+      ? { requestId, error: outcome.error }
+      : { requestId, filename: outcome.filename, bytes: outcome.bytes };
+
+  return request<void>('/paint/ai/export-result', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),

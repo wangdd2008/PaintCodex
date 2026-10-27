@@ -95,6 +95,7 @@ describe('canvas tool declarations', () => {
       'canvas_create_layer',
       'canvas_update_layer',
       'canvas_delete_layer',
+      'canvas_export_png',
       'canvas_undo',
       'canvas_render_preview',
     ]);
@@ -686,8 +687,135 @@ describe('unknown canvas tools', () => {
     const tools = createCanvasToolSet(harness);
 
     await expect(
-      tools.execute('canvas_export_png', {}, context('canvas-1')),
+      tools.execute('canvas_select', {}, context('canvas-1')),
     ).resolves.toMatchObject({ ok: false, code: 'unknown_tool' });
+  });
+});
+
+describe('canvas_export_png', () => {
+  it('declares an export tool that warns the user before downloading', () => {
+    const harness = createHarness();
+    const declaration = createCanvasToolSet(harness).declarations.find(
+      (candidate) => candidate.name === 'canvas_export_png',
+    );
+
+    expect(declaration).toMatchObject({
+      type: 'function',
+      inputSchema: expect.objectContaining({
+        type: 'object',
+        required: ['canvasId'],
+      }),
+    });
+    expect(declaration?.description.toLowerCase()).toContain('png');
+  });
+
+  it('asks to download a PNG and returns only the filename and size', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas({ name: '海报' });
+    const seen: ConfirmationRequest[] = [];
+    const exported: string[] = [];
+
+    const result = await tools.execute('canvas_export_png', {}, {
+      ...context(canvas.id, '把这张图导出来', confirmWith('approved', seen)),
+      requestExport: async (canvasId) => {
+        exported.push(canvasId);
+        return { ok: true, filename: '海报-canvas-1.png', bytes: 4321 };
+      },
+    });
+
+    expect(exported).toEqual([canvas.id]);
+    // The model gets a pointer to the download, never the image itself.
+    expect(result).toEqual({
+      ok: true,
+      filename: '海报-canvas-1.png',
+      bytes: 4321,
+    });
+    expect(result).not.toHaveProperty('imageUrl');
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.title).toContain('海报');
+    expect(seen[0]?.detail).toContain('下载');
+    expect(seen[0]?.detail).toContain('PNG');
+    // The delete copy explains an irreversible removal; export must not.
+    expect(seen[0]?.detail).not.toContain('移除');
+    expect(seen[0]?.approveLabel).toBe('下载 PNG');
+  });
+
+  it('does not export when the user declines or never answers', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    let called = false;
+    const requestExport = async () => {
+      called = true;
+      return { ok: true as const, filename: 'a.png', bytes: 1 };
+    };
+
+    for (const outcome of [
+      'declined',
+      'timeout',
+      'disconnected',
+      'interrupted',
+    ] as const) {
+      await expect(
+        tools.execute('canvas_export_png', {}, {
+          ...context(canvas.id, '导出', confirmWith(outcome)),
+          requestExport,
+        }),
+      ).resolves.toMatchObject({ ok: false, code: 'user_declined' });
+    }
+
+    expect(called).toBe(false);
+  });
+
+  it('fails closed when no confirmation channel is available', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    let called = false;
+
+    const result = await tools.execute('canvas_export_png', {}, {
+      ...context(canvas.id),
+      requestExport: async () => {
+        called = true;
+        return { ok: true as const, filename: 'a.png', bytes: 1 };
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false, code: 'user_declined' });
+    expect(called).toBe(false);
+  });
+
+  it('reports export_unavailable when no browser is connected', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    await expect(
+      tools.execute('canvas_export_png', {}, {
+        ...context(canvas.id, '导出', confirmWith('approved')),
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'export_unavailable' });
+  });
+
+  it('passes a busy or unavailable export back to the model', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    for (const code of ['export_busy', 'export_unavailable'] as const) {
+      await expect(
+        tools.execute('canvas_export_png', {}, {
+          ...context(canvas.id, '导出', confirmWith('approved')),
+          requestExport: async () => ({
+            ok: false as const,
+            code,
+            message: '稍后再试',
+          }),
+        }),
+      ).resolves.toMatchObject({ ok: false, code });
+    }
   });
 });
 

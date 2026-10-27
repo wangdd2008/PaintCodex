@@ -38,6 +38,7 @@ import type {
   RenderPreviewRequester,
   RenderPreviewResult,
 } from './render-preview.js';
+import type { ExportRequester, ExportResult } from './export-png.js';
 
 /** One `tool` SSE frame: the protocol owns the shape so daemon and web agree. */
 export type ToolFrameEvent = NonNullable<StreamPayload['tool']>;
@@ -63,6 +64,12 @@ export interface CodexTurnInput {
    * leave a render request pending.
    */
   requestRender?: RenderPreviewRequester;
+  /**
+   * Asks the browser that opened this chat stream to download the canvas as a
+   * PNG. Bound to the turn's abort signal like the preview request, so an
+   * interrupted turn cannot leave an export pending.
+   */
+  requestExport?: ExportRequester;
   /**
    * A short, non-fatal status worth showing in the assistant bubble, such as a
    * recovered conversation. The turn continues after a notice.
@@ -254,6 +261,7 @@ interface MutableActiveTurn extends ActiveTurnInfo {
   onToolEvent?: (event: ToolFrameEvent) => void;
   onConfirm?: (event: ConfirmFrameEvent) => void;
   requestRender?: RenderPreviewRequester;
+  requestExport?: ExportRequester;
   onNotice?: (notice: string) => void;
   trace?: TraceContext;
   signal?: AbortSignal;
@@ -730,12 +738,38 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
             }
           };
 
+    const requestExport =
+      active.requestExport === undefined
+        ? undefined
+        : async (exportCanvasId: string): Promise<ExportResult> => {
+            if (finished) {
+              // A browser round-trip started after the tool gave up has nobody
+              // left to consume its answer.
+              return {
+                ok: false,
+                code: 'export_unavailable',
+                message: '画布工具已结束，无法导出画布',
+              };
+            }
+
+            // Same human wait as the preview: pause the tool deadline with the
+            // existing helper rather than growing a second suspension mechanism.
+            suspendTimeout();
+
+            try {
+              return await active.requestExport!(exportCanvasId, waitSignal);
+            } finally {
+              resumeTimeout();
+            }
+          };
+
     const context: CanvasToolContext = {
       canvasId,
       prompt: active.prompt,
       trace: active.trace,
       ...(requestConfirmation === undefined ? {} : { requestConfirmation }),
       ...(requestRender === undefined ? {} : { requestRender }),
+      ...(requestExport === undefined ? {} : { requestExport }),
     };
 
     // `Promise.resolve().then` also catches a tool that throws synchronously:
@@ -1334,6 +1368,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         onToolEvent: input.onToolEvent,
         onConfirm: input.onConfirm,
         requestRender: input.requestRender,
+        requestExport: input.requestExport,
         onNotice: input.onNotice,
         trace: input.trace,
         settled: false,

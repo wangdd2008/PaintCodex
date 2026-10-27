@@ -137,6 +137,21 @@ export interface AiRenderResultRequest {
 }
 
 /**
+ * The browser's answer to an `exportRequest` frame: the file it just downloaded
+ * and its size, or the reason it could not export. The PNG itself never travels
+ * back — the browser already saved it, and the tool result must not carry bytes.
+ */
+export interface AiExportResultRequest {
+  requestId: string;
+  /** Download filename; present only when the export succeeded. */
+  filename?: string;
+  /** Size of the downloaded PNG in bytes; present only on success. */
+  bytes?: number;
+  /** Why the browser could not export; the tool answers export_unavailable. */
+  error?: string;
+}
+
+/**
  * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
  * frame carries exactly one of the optional members.
  */
@@ -164,6 +179,8 @@ export interface StreamPayload {
     id: string;
     title: string;
     detail: string;
+    /** CTA wording for this specific action; the web defaults to 「删除」. */
+    approveLabel?: string;
   };
   layerCreated?: { id: string; name: string };
   /**
@@ -171,6 +188,12 @@ export interface StreamPayload {
    * `POST /paint/ai/render-result` and the same request id.
    */
   renderRequest?: { id: string; canvasId: string };
+  /**
+   * The running tool asks the browser to download the canvas as a PNG. The
+   * browser answers with `POST /paint/ai/export-result` and the same id; the
+   * tool result carries only the filename and byte count.
+   */
+  exportRequest?: { id: string; canvasId: string };
   /** A short, non-fatal status line; the turn keeps running after it. */
   notice?: string;
 }
