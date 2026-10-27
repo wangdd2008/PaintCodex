@@ -29,3 +29,4 @@
   - 偏差：`layerCreated` 帧保留（Web 落地确认与撤销守卫仍依赖它），但 runtime 只在工具名为 `canvas_create_layer` 时才触发 `onLayerCreated`；改写图层不再被误报成「已添加图层」。
   - 偏差：Web 端保留「思考中…/正在生成…」与 `已用 Ns` 计时（终态「已完成 · 用时 Ns」不变），只删四步进度文案与 `step` 协议字段。
   - 合并提示（给 03/04）：`item/tool/call` 已按 thread 串行排队，确认通道若在工具内部挂起，会阻塞同一画布后续工具调用——03 应把确认放在工具执行前（队列内 await 用户答复）并给挂起加超时，否则 turn 会卡住；`callId` 是 `item` 帧 id 与工具结果码的关联键，04 的 thread 落库不要丢这个映射。生产 `codex app-server` 的 `item/started` 可能早于 `item/tool/call`，代码按 callId 关联，不依赖到达顺序。
+  - 后续 `23c0638 test(daemon): widen fake app-server request timeout under load`：假 app-server 的单请求超时从 5s 放宽到 15s。`pnpm -r test` 并行跑全仓时曾因编译负载出现过一次 5s 超时抖动；测试逻辑未变，挂起的 runtime 仍会在 15s 失败。
