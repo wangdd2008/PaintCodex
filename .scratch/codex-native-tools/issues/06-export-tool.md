@@ -26,3 +26,5 @@
   - 偏差：并发第二个导出返回新失败码 `export_busy`（票面只要求「明确 code」）。
   - 偏差：浏览器拿不到 `exportActiveCanvasPng()` 结果时立即回传 `{ error }`，工具快速降级为 `export_unavailable`；浏览器完全不答仍由 10s 超时兜底。
   - 未执行：真实 codex + 浏览器的手工验收（本环境无交互浏览器）；其余 DoD 已满足。
+
+- 2026-10-28 — 合并 `feat/codex-native-tools`（merge `4c5c3be`）：无冲突（上游仅新增票 07 文档与 `apps/web/vite.config.ts` 的 jsdom 测试预算）。合并后 `pnpm -r typecheck` 通过，`pnpm -r test` 连续两轮全绿（daemon 28 文件 246 用例，web 31 文件 216 用例）。
