@@ -1,10 +1,11 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiChatRequest } from '@paintcodex/protocol';
+import type { AiChatRequest, AiConfirmRequest } from '@paintcodex/protocol';
 import type { PaintService } from '../paint/service.js';
 import {
   EMPTY_CANVAS_TOOLS,
   type CanvasToolSet,
 } from '../paint/agent/runtime/tools.js';
+import type { ConfirmationChannel } from '../paint/agent/runtime/confirmation.js';
 import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
 import { buildAiChatPrompt } from '../paint/agent/prompt.js';
 import type {
@@ -132,6 +133,9 @@ export function registerAiChatRoute(
           onToolEvent: (event) => {
             send({ tool: event });
           },
+          onConfirm: (event) => {
+            send({ confirm: event });
+          },
         });
 
         turnSpan.finish({
@@ -214,6 +218,68 @@ function isAiChatRequest(value: unknown): value is AiChatRequest {
   const candidate = value as { message?: unknown; canvasId?: unknown };
 
   if (typeof candidate.message !== 'string' || candidate.message.trim().length === 0) {
+    return false;
+  }
+
+  return candidate.canvasId === undefined || typeof candidate.canvasId === 'string';
+}
+
+/**
+ * The answer half of the confirmation channel. The endpoint deliberately has no
+ * knowledge of turns: it resolves whichever request carries the id, and refuses
+ * an answer whose canvas does not match the one that asked.
+ */
+export function registerAiConfirmRoute(
+  app: FastifyInstance,
+  confirmations: ConfirmationChannel,
+): void {
+  app.post('/paint/ai/confirm', async (request, reply) => {
+    const body: unknown = request.body;
+
+    if (!isAiConfirmRequest(body)) {
+      return reply.code(400).send({
+        error: {
+          code: 'invalid_request',
+          message: 'requestId 与 approved 不能为空',
+        },
+      });
+    }
+
+    const result = confirmations.answer(body.requestId, body.approved, body.canvasId);
+
+    if (!result) {
+      return reply.code(404).send({
+        error: {
+          code: 'confirmation_not_found',
+          message: '确认请求不存在或已失效',
+        },
+      });
+    }
+
+    return {
+      ok: true,
+      status: result.outcome,
+      duplicate: result.status === 'duplicate',
+    };
+  });
+}
+
+function isAiConfirmRequest(value: unknown): value is AiConfirmRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as {
+    requestId?: unknown;
+    approved?: unknown;
+    canvasId?: unknown;
+  };
+
+  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) {
+    return false;
+  }
+
+  if (typeof candidate.approved !== 'boolean') {
     return false;
   }
 

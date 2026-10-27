@@ -119,6 +119,38 @@ describe('POST /paint/ai/chat', () => {
     await app.close();
   });
 
+  it('forwards a suspended tool as a confirm frame', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onConfirm?.({
+        id: 'confirm-1',
+        title: '删除图层「红圆」',
+        detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+      });
+
+      return { text: '', toolCallCount: 1 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: '删掉红圆', canvasId: 'canvas-1' },
+    });
+
+    expect(frames(response.payload)).toEqual([
+      {
+        confirm: {
+          id: 'confirm-1',
+          title: '删除图层「红圆」',
+          detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+        },
+      },
+      { done: true },
+    ]);
+
+    await app.close();
+  });
+
   it('declares no canvas tools when the conversation has no canvas', async () => {
     let toolCount = -1;
     const runtime = fakeRuntime(async (input) => {

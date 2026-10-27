@@ -22,6 +22,14 @@ import type {
   CanvasToolResult,
   CanvasToolSet,
 } from './tools.js';
+import {
+  createConfirmationChannel,
+  type ConfirmFrameEvent,
+  type ConfirmationCancelReason,
+  type ConfirmationChannel,
+  type ConfirmationOutcome,
+  type ConfirmationRequest,
+} from './confirmation.js';
 
 /** One `tool` SSE frame: the protocol owns the shape so daemon and web agree. */
 export type ToolFrameEvent = NonNullable<StreamPayload['tool']>;
@@ -39,6 +47,8 @@ export interface CodexTurnInput {
   onLayerCreated?(layer: { id: string; name: string }): void;
   /** Fires on `item/started` / `item/completed` for dynamic tool calls. */
   onToolEvent?(event: ToolFrameEvent): void;
+  /** Fires when a tool suspends for a human confirmation. */
+  onConfirm?(event: ConfirmFrameEvent): void;
   signal?: AbortSignal;
   trace?: TraceContext;
 }
@@ -84,6 +94,8 @@ export interface CodexRuntimeOptions {
   requestTimeoutMs?: number;
   /** Upper bound on one tool execution before answering the model with a failure. */
   toolTimeoutMs?: number;
+  /** Shared confirmation registry; created internally when omitted. */
+  confirmations?: ConfirmationChannel;
   clientInfo?: { name: string; version: string };
   /**
    * Test seam: replaces `child_process.spawn` so process-lifecycle behaviour
@@ -200,6 +212,7 @@ interface MutableActiveTurn extends ActiveTurnInfo {
   onDelta(text: string): void;
   onLayerCreated?: (layer: { id: string; name: string }) => void;
   onToolEvent?: (event: ToolFrameEvent) => void;
+  onConfirm?: (event: ConfirmFrameEvent) => void;
   trace?: TraceContext;
   signal?: AbortSignal;
   settled: boolean;
@@ -216,6 +229,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const toolTimeoutMs = options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
   const clientInfo = options.clientInfo ?? { name: 'paintcodex', version: '0.1.0' };
+  const confirmations =
+    options.confirmations ??
+    createConfirmationChannel({ logger: options.logger });
 
   let child: ChildProcess | null = null;
   let ready: Promise<void> | null = null;
@@ -321,9 +337,16 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   const settle = (
     active: MutableActiveTurn,
     complete: () => void,
+    cancelReason: ConfirmationCancelReason = 'interrupted',
   ): void => {
     if (active.settled) {
       return;
+    }
+
+    // A tool suspended on the human must never outlive its turn: settle the
+    // confirmation first, then reject or resolve the turn as usual.
+    if (active.canvasId !== null) {
+      confirmations.cancelCanvas(active.canvasId, cancelReason);
     }
 
     active.settled = true;
@@ -350,6 +373,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
 
   const failEverything = (error: Error) => {
     rejectPending(error);
+    confirmations.cancelAll('interrupted');
 
     for (const active of [...activeTurns.values()]) {
       settle(active, () => active.reject(error));
@@ -538,16 +562,107 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   };
 
   const executeWithTimeout = async (
-    tools: CanvasToolSet,
+    active: MutableActiveTurn,
     tool: string,
     toolArgs: unknown,
-    context: CanvasToolContext,
   ): Promise<CanvasToolResult> => {
+    let remainingMs = toolTimeoutMs;
+    let runningSince = Date.now();
     let timer: NodeJS.Timeout | undefined;
+    let suspendedCount = 0;
+    let finished = false;
+    let resolveTimeout: (result: CanvasToolResult) => void = () => {};
+
+    const armTimer = () => {
+      runningSince = Date.now();
+      timer = setTimeout(() => {
+        timer = undefined;
+
+        if (finished) {
+          return;
+        }
+
+        log('warn', 'tool_timeout', {
+          payload: { tool, toolTimeoutMs },
+          canvasId: active.canvasId,
+          trace: active.trace,
+        });
+        resolveTimeout({
+          ok: false,
+          code: 'tool_timeout',
+          message: `画布工具执行超时（${toolTimeoutMs}ms）`,
+        });
+      }, remainingMs);
+    };
+
+    // Waiting for the user is not tool compute time: the deadline is paused
+    // while a confirmation is pending, so the 60s confirmation policy is not
+    // silently truncated by the 30s tool budget.
+    const suspendTimeout = () => {
+      suspendedCount += 1;
+
+      if (suspendedCount > 1 || finished) {
+        return;
+      }
+
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+
+      remainingMs = Math.max(0, remainingMs - (Date.now() - runningSince));
+    };
+
+    const resumeTimeout = () => {
+      suspendedCount = Math.max(0, suspendedCount - 1);
+
+      if (suspendedCount > 0 || finished || timer) {
+        return;
+      }
+
+      armTimer();
+    };
+
+    const timeout = new Promise<CanvasToolResult>((resolve) => {
+      resolveTimeout = resolve;
+    });
+    armTimer();
+
+    const canvasId = active.canvasId;
+    const requestConfirmation =
+      canvasId === null
+        ? undefined
+        : async (request: ConfirmationRequest): Promise<ConfirmationOutcome> => {
+            if (finished) {
+              // The tool already timed out; a late question would hang forever
+              // with no listener.
+              return 'timeout';
+            }
+
+            suspendTimeout();
+
+            try {
+              return await confirmations.requestConfirmation(canvasId, request, {
+                onConfirm: active.onConfirm,
+                trace: active.trace,
+                signal: active.signal,
+              });
+            } finally {
+              resumeTimeout();
+            }
+          };
+
+    const context: CanvasToolContext = {
+      canvasId,
+      prompt: active.prompt,
+      trace: active.trace,
+      ...(requestConfirmation === undefined ? {} : { requestConfirmation }),
+    };
+
     // `Promise.resolve().then` also catches a tool that throws synchronously:
     // every invocation must produce a response, or the turn hangs forever.
     const execution = Promise.resolve()
-      .then(() => tools.execute(tool, toolArgs, context))
+      .then(() => active.tools.execute(tool, toolArgs, context))
       .catch(
         (error: unknown): CanvasToolResult => ({
           ok: false,
@@ -555,24 +670,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
           message: error instanceof Error ? error.message : '画布工具执行失败',
         }),
       );
-    const timeout = new Promise<CanvasToolResult>((resolve) => {
-      timer = setTimeout(() => {
-        log('warn', 'tool_timeout', {
-          payload: { tool, toolTimeoutMs },
-          canvasId: context.canvasId,
-          trace: context.trace,
-        });
-        resolve({
-          ok: false,
-          code: 'tool_timeout',
-          message: `画布工具执行超时（${toolTimeoutMs}ms）`,
-        });
-      }, toolTimeoutMs);
-    });
 
     try {
       return await Promise.race([execution, timeout]);
     } finally {
+      finished = true;
+
       if (timer) {
         clearTimeout(timer);
       }
@@ -627,11 +730,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         canvasId: active.canvasId,
         trace: active.trace,
       });
-      result = await executeWithTimeout(active.tools, call.tool, call.arguments, {
-        canvasId: active.canvasId,
-        prompt: active.prompt,
-        trace: active.trace,
-      });
+      result = await executeWithTimeout(active, call.tool, call.arguments);
       active.toolCallCount += 1;
 
       // The matching `item/completed` notification carries success but not the
@@ -998,6 +1097,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       return;
     }
 
+    // Do not wait for the `turn/completed` round-trip: the suspended tool must
+    // stop waiting for the human the moment the turn is cancelled.
+    if (canvasId !== null) {
+      confirmations.cancelCanvas(canvasId, 'interrupted');
+    }
+
     await sendInterrupt(active.threadId, active.turnId);
   };
 
@@ -1055,6 +1160,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         onDelta: input.onDelta,
         onLayerCreated: input.onLayerCreated,
         onToolEvent: input.onToolEvent,
+        onConfirm: input.onConfirm,
         trace: input.trace,
         settled: false,
         abortRequested: false,
@@ -1078,7 +1184,11 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
           void sendInterrupt(active.threadId, active.turnId);
         }
 
-        settle(active, () => active.reject(abortError()));
+        if (active.canvasId !== null) {
+          confirmations.cancelCanvas(active.canvasId, 'disconnected');
+        }
+
+        settle(active, () => active.reject(abortError()), 'disconnected');
       };
 
       activeTurns.set(threadId, active);

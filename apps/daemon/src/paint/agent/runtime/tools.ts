@@ -8,6 +8,10 @@ import {
 } from '../../errors.js';
 import type { PaintService } from '../../service.js';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
+import type {
+  ConfirmationOutcome,
+  ConfirmationRequest,
+} from './confirmation.js';
 import type { DynamicToolSpec } from './protocol.js';
 import { unsafeSvgReason } from './validate-svg.js';
 
@@ -26,6 +30,13 @@ export interface CanvasToolContext {
   /** The user message that opened this turn, stored on created layers. */
   prompt: string;
   trace?: TraceContext;
+  /**
+   * Ask the user before an irreversible action. The runtime binds this to the
+   * turn that owns the call; a tool that needs confirmation just awaits it.
+   */
+  requestConfirmation?(
+    request: ConfirmationRequest,
+  ): Promise<ConfirmationOutcome>;
 }
 
 export interface CanvasToolSet {
@@ -120,8 +131,10 @@ const DELETE_LAYER_DECLARATION: DynamicToolSpec = {
   type: 'function',
   name: 'canvas_delete_layer',
   description:
-    'Delete one layer by id. This is irreversible for the user, so mention what ' +
-    'you are deleting in your reply.',
+    'Delete one layer by id. This is irreversible for the user, so the user is ' +
+    'asked to confirm before it runs; say what you are deleting in your reply. ' +
+    'If the user declines or does not answer, the tool returns user_declined and ' +
+    'nothing is deleted.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -498,12 +511,12 @@ function updateLayer(
   }
 }
 
-function deleteLayer(
+async function deleteLayer(
   dispatcher: Pick<CommandDispatcher, 'dispatch'>,
   service: Pick<PaintService, 'getCanvas'>,
   args: unknown,
   context: CanvasToolContext,
-): CanvasToolResult {
+): Promise<CanvasToolResult> {
   const object = asObject(args);
 
   if (!object) {
@@ -531,8 +544,24 @@ function deleteLayer(
     return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
   }
 
+  const layer = canvas.layers.find((candidate) => candidate.id === layerId);
+
+  // Asking to confirm a delete that cannot happen would waste the user's one
+  // answer; validate the target first.
+  if (!layer) {
+    return { ok: false, code: 'layer_not_found', message: '图层不存在' };
+  }
+
+  const refusal = await requireConfirmation(context, {
+    title: `删除图层「${layer.name}」`,
+    detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+  });
+
+  if (refusal) {
+    return refusal;
+  }
+
   try {
-    // Ticket 03 adds the human confirmation in front of this dispatch.
     const updated = dispatcher.dispatch(canvasId, {
       actor: 'agent',
       expectedRevision: canvas.revision,
@@ -662,6 +691,62 @@ function readLayerName(value: unknown): string | { reason: string } {
 
 function invalidArguments(message: string): CanvasToolResult {
   return { ok: false, code: 'invalid_arguments', message };
+}
+
+/**
+ * The one call a destructive tool makes before it acts. `null` means the user
+ * approved; any other result is the model-readable refusal to return instead.
+ * A context without a channel fails closed: no confirmation, no irreversible
+ * action.
+ */
+async function requireConfirmation(
+  context: CanvasToolContext,
+  request: ConfirmationRequest,
+): Promise<CanvasToolResult | null> {
+  const ask = context.requestConfirmation;
+
+  if (!ask) {
+    return {
+      ok: false,
+      code: 'user_declined',
+      message: '确认通道不可用，操作已取消。',
+    };
+  }
+
+  let outcome: ConfirmationOutcome;
+
+  try {
+    outcome = await ask(request);
+  } catch {
+    return {
+      ok: false,
+      code: 'user_declined',
+      message: '确认请求发送失败，操作已取消。',
+    };
+  }
+
+  if (outcome === 'approved') {
+    return null;
+  }
+
+  return {
+    ok: false,
+    code: 'user_declined',
+    message: refusalMessage(outcome),
+  };
+}
+
+function refusalMessage(outcome: ConfirmationOutcome): string {
+  switch (outcome) {
+    case 'timeout':
+      return '用户未答复（超过 60 秒），操作已取消。';
+    case 'disconnected':
+      return '用户已离开对话，操作已取消。';
+    case 'interrupted':
+      return '用户中断了本轮对话，操作已取消。';
+    default:
+      return '用户取消了这次操作。';
+  }
 }
 
 /**

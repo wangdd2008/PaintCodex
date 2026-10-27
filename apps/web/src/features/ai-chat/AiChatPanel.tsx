@@ -52,6 +52,26 @@ interface ChatToolLine {
   code?: string;
 }
 
+/** 挂起中的危险操作：确认条在答复前一直是气泡的一部分。 */
+interface ChatConfirmation {
+  id: string;
+  title: string;
+  detail: string;
+  status: 'pending' | 'submitting' | 'approved' | 'declined' | 'expired';
+  /** 提交失败的原因；确认条保持可重试。 */
+  error?: string;
+}
+
+/** 60 秒内不答复即视为拒绝，和 daemon 的硬超时一致。 */
+const CONFIRM_TIMEOUT_MS = 60_000;
+
+const CONFIRM_STATUS_TEXT: Partial<Record<ChatConfirmation['status'], string>> = {
+  submitting: '正在提交…',
+  approved: '已确认',
+  declined: '已取消',
+  expired: '确认已超时',
+};
+
 interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
@@ -66,6 +86,8 @@ interface ChatMessage {
   layer?: ChatLayerConfirmation;
   /** 这一轮里的写类工具调用，渲染为气泡内的动作行。 */
   tools?: ChatToolLine[];
+  /** 这一轮里挂起的确认条，按到达顺序排列。 */
+  confirmations?: ChatConfirmation[];
   /** 这一轮失败了：气泡必须留下「未完成」，不能是空白。 */
   incomplete?: boolean;
 }
@@ -228,8 +250,26 @@ function composerBlockedReason(
   return '先新建一张画布，再让 AI 作画。';
 }
 
-function parseFrame(frame: string): StreamPayload | null {
-  const data = frame
+/** daemon 的最终答复状态：超时/断开/中断都收束为「已超时」。 */
+function answeredConfirmationStatus(
+  value: unknown,
+  approved: boolean,
+): ChatConfirmation['status'] {
+  switch (value) {
+    case 'approved':
+      return 'approved';
+    case 'declined':
+      return 'declined';
+    case 'timeout':
+    case 'disconnected':
+    case 'interrupted':
+      return 'expired';
+    default:
+      return approved ? 'approved' : 'declined';
+  }
+}
+
+function parseFrame(frame: string): StreamPayload | null {  const data = frame
     .split('\n')
     .filter((line) => line.startsWith('data:'))
     .map((line) => line.slice(5).trimStart())
@@ -273,10 +313,22 @@ export function AiChatPanel() {
   const runStartRevision = useRef<number | null>(null);
   /** 请求针对的画布；确认行绝不能撤销另一张画布。 */
   const runCanvasId = useRef<string | null>(null);
+  /** 每条确认条的超时计时器，按 requestId 索引。 */
+  const confirmTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** 已发出答复的 requestId：连点不能发两次。 */
+  const answering = useRef(new Set<string>());
 
   useEffect(() => {
+    const timers = confirmTimers.current;
+
     return () => {
       abortRef.current?.abort();
+
+      for (const timer of timers.values()) {
+        clearTimeout(timer);
+      }
+
+      timers.clear();
     };
   }, []);
 
@@ -323,11 +375,111 @@ export function AiChatPanel() {
     }));
   };
 
+  const updateConfirmation = (
+    id: string,
+    update: (confirmation: ChatConfirmation) => ChatConfirmation,
+  ) => {
+    setMessages((previous) =>
+      previous.map((message) => {
+        if (!message.confirmations?.some((item) => item.id === id)) {
+          return message;
+        }
+
+        return {
+          ...message,
+          confirmations: message.confirmations.map((item) =>
+            item.id === id ? update(item) : item,
+          ),
+        };
+      }),
+    );
+  };
+
+  /** 60 秒没答复：确认条过期，按钮不可再点；daemon 同时也会拒绝这次调用。 */
+  const expireConfirmation = (id: string) => {
+    confirmTimers.current.delete(id);
+    updateConfirmation(id, (confirmation) =>
+      confirmation.status === 'pending'
+        ? { ...confirmation, status: 'expired' }
+        : confirmation,
+    );
+  };
+
+  /** 把「删除 / 取消」送回 daemon；答复期间按钮禁用，避免重复提交。 */
+  const answerConfirmation = async (
+    confirmation: ChatConfirmation,
+    approved: boolean,
+  ) => {
+    if (confirmation.status !== 'pending' || answering.current.has(confirmation.id)) {
+      return;
+    }
+
+    answering.current.add(confirmation.id);
+    updateConfirmation(confirmation.id, (item) => ({
+      ...item,
+      status: 'submitting',
+      error: undefined,
+    }));
+
+    try {
+      const response = await fetch('/paint/ai/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: confirmation.id,
+          approved,
+          // daemon 只接受与挂起请求同一张画布的答复。
+          canvasId: runCanvasId.current ?? undefined,
+        }),
+      });
+
+      if (response.status === 404) {
+        // 已超时并被清理：显示为过期，比「提交失败」更准确。
+        updateConfirmation(confirmation.id, (item) => ({
+          ...item,
+          status: 'expired',
+        }));
+        return;
+      }
+
+      if (!response.ok) {
+        throw new ChatRequestError('');
+      }
+
+      const body = (await response.json()) as { status?: unknown };
+
+      updateConfirmation(confirmation.id, (item) => ({
+        ...item,
+        status: answeredConfirmationStatus(body.status, approved),
+        error: undefined,
+      }));
+    } catch {
+      // 网络失败时把确认条恢复为可重试，而不是静默丢掉用户的答复。
+      updateConfirmation(confirmation.id, (item) => ({
+        ...item,
+        status: 'pending',
+        error: '确认发送失败，请重试',
+      }));
+    } finally {
+      answering.current.delete(confirmation.id);
+    }
+  };
+
   const markAssistantCancelled = (assistantId: number) => {
     setMessages((previous) =>
       previous.map((message) =>
         message.id === assistantId
-          ? { ...message, cancelled: true, incomplete: false }
+          ? {
+              ...message,
+              cancelled: true,
+              incomplete: false,
+              // 这一轮已经中断：挂起的确认不可能再被 daemon 接受。
+              confirmations: message.confirmations?.map((confirmation) =>
+                confirmation.status === 'pending'
+                  ? { ...confirmation, status: 'expired' }
+                  : confirmation,
+              ),
+            }
           : message,
       ),
     );
@@ -398,6 +550,44 @@ export function AiChatPanel() {
           }
 
           return { ...last, tools };
+        });
+        return;
+      }
+    }
+
+    if (payload.confirm) {
+      const { id, title, detail } = payload.confirm;
+
+      if (
+        typeof id === 'string' &&
+        typeof title === 'string' &&
+        typeof detail === 'string'
+      ) {
+        // 同一 requestId 只出现一次（重连/重复帧都不能多出一条确认条）。
+        const existingTimer = confirmTimers.current.get(id);
+
+        if (existingTimer !== undefined) {
+          clearTimeout(existingTimer);
+        }
+
+        const timer = setTimeout(() => expireConfirmation(id), CONFIRM_TIMEOUT_MS);
+
+        confirmTimers.current.set(id, timer);
+
+        updateLastAssistant((last) => {
+          const confirmations = last.confirmations ?? [];
+
+          if (confirmations.some((item) => item.id === id)) {
+            return last;
+          }
+
+          return {
+            ...last,
+            confirmations: [
+              ...confirmations,
+              { id, title, detail, status: 'pending' },
+            ],
+          };
         });
         return;
       }
@@ -694,6 +884,63 @@ export function AiChatPanel() {
                         <span className="ai-chat__cancelled">已取消</span>
                       ) : null}
                     </p>
+                    {/* 不可逆动作先停在这里：用户点「删除」才继续执行。 */}
+                    {message.confirmations && message.confirmations.length > 0 ? (
+                      <div className="ai-chat__confirmations">
+                        {message.confirmations.map((confirmation) => {
+                          const statusText = CONFIRM_STATUS_TEXT[confirmation.status];
+                          const settled = confirmation.status !== 'pending';
+
+                          return (
+                            <div
+                              key={confirmation.id}
+                              className="ai-chat__confirm"
+                              role="group"
+                              aria-label="操作确认"
+                            >
+                              <p className="ai-chat__confirm-title">
+                                {confirmation.title}
+                              </p>
+                              <p className="ai-chat__confirm-detail">
+                                {confirmation.detail}
+                              </p>
+                              {confirmation.error ? (
+                                <p className="ai-chat__confirm-error" role="alert">
+                                  {confirmation.error}
+                                </p>
+                              ) : null}
+                              <div className="ai-chat__confirm-actions">
+                                <button
+                                  type="button"
+                                  className="ai-chat__confirm-approve"
+                                  onClick={() =>
+                                    void answerConfirmation(confirmation, true)
+                                  }
+                                  disabled={settled}
+                                >
+                                  删除
+                                </button>
+                                <button
+                                  type="button"
+                                  className="ai-chat__confirm-decline"
+                                  onClick={() =>
+                                    void answerConfirmation(confirmation, false)
+                                  }
+                                  disabled={settled}
+                                >
+                                  取消
+                                </button>
+                                {statusText ? (
+                                  <span className="ai-chat__confirm-status">
+                                    {statusText}
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                     {/* 写操作成行：只保留画布动作，读工具已折叠掉。 */}
                     {lines.length > 0 ? (
                       <ul className="ai-chat__writes" aria-label="画布写操作">

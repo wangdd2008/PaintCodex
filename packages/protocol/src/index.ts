@@ -116,6 +116,17 @@ export interface AiChatRequest {
 }
 
 /**
+ * Answer to one `confirm` frame. `canvasId` is optional so a bare client can
+ * still answer, but the web sends it: the daemon refuses an answer whose canvas
+ * does not match the suspended request.
+ */
+export interface AiConfirmRequest {
+  requestId: string;
+  approved: boolean;
+  canvasId?: string;
+}
+
+/**
  * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
  * frame carries exactly one of the optional members.
  */
@@ -133,6 +144,16 @@ export interface StreamPayload {
     name: string;
     status: 'running' | 'ok' | 'failed';
     code?: string;
+  };
+  /**
+   * A tool waits for the user before it may proceed (delete, export). The turn
+   * is suspended until `POST /paint/ai/confirm` answers `id`, or the deadline
+   * passes.
+   */
+  confirm?: {
+    id: string;
+    title: string;
+    detail: string;
   };
   layerCreated?: { id: string; name: string };
 }
