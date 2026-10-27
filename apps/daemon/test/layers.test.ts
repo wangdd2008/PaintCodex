@@ -160,7 +160,7 @@ describe('layer API', () => {
     await app.close();
   });
 
-  it('applies an agent action through the same dispatcher', async () => {
+  it('refuses to let a REST caller claim the agent actor', async () => {
     const app = buildServer({ dbPath: ':memory:' });
     const canvasId = await createCanvas(app);
 
@@ -181,17 +181,15 @@ describe('layer API', () => {
       },
     });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      revision: 1,
-      layers: [
-        {
-          name: 'AI circle',
-          type: 'ai-generated',
-          metadata: { createdBy: 'agent' },
-        },
-      ],
+    // Agent attribution belongs to the in-process tool executor only.
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ error: { code: 'invalid_action' } });
+
+    const fetched = await app.inject({
+      method: 'GET',
+      url: `/paint/canvas/${canvasId}`,
     });
+    expect(fetched.json()).toMatchObject({ revision: 0, layers: [] });
 
     await app.close();
   });

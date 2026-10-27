@@ -7,6 +7,7 @@ import { buildServer } from '../src/api/server.js';
 import { createObservability } from '../src/observability/index.js';
 import type { AgentLogRepository } from '../src/observability/repository.js';
 import { CommandDispatcher } from '../src/paint/command-dispatcher.js';
+import { createCanvasToolSet } from '../src/paint/agent/runtime/tools.js';
 import { PaintEvents } from '../src/paint/events.js';
 import {
   CanvasRepository,
@@ -39,18 +40,18 @@ function buildServiceSeam() {
   const db = openDatabase(':memory:');
   const observability = createObservability(db);
   const snapshots = new SnapshotRepository(db);
-  const dispatcher = new CommandDispatcher(
-    new PaintService(
-      new CanvasRepository(db),
-      new LayerRepository(db),
-      snapshots,
-      new PaintEvents(),
-      observability.logger,
-    ),
+  const service = new PaintService(
+    new CanvasRepository(db),
+    new LayerRepository(db),
+    snapshots,
+    new PaintEvents(),
+    observability.logger,
   );
+  const dispatcher = new CommandDispatcher(service);
 
   return {
     dispatcher,
+    service,
     snapshots,
     logs: observability.repository,
     close: () => db.close(),
@@ -225,6 +226,157 @@ describe('actor attribution for REST callers', () => {
       }
     } finally {
       rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a REST body that claims the agent actor', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'paintcodex-actor-'));
+    const dbPath = join(directory, 'daemon.db');
+    const app = buildServer({ dbPath });
+
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/paint/canvas',
+        payload: { name: 'REST actor boundary' },
+      });
+      const canvasId = created.json().id as string;
+
+      const rejectedCreate = await app.inject({
+        method: 'POST',
+        url: `/paint/canvas/${canvasId}/layers`,
+        payload: { ...LAYER, expectedRevision: 0, actor: 'agent' },
+      });
+      expect(rejectedCreate.statusCode).toBe(400);
+      expect(rejectedCreate.json()).toMatchObject({
+        error: { code: 'invalid_actor' },
+      });
+
+      const layer = await app.inject({
+        method: 'POST',
+        url: `/paint/canvas/${canvasId}/layers`,
+        payload: { ...LAYER, expectedRevision: 0 },
+      });
+      const layerId = layer.json().layers[0].id as string;
+
+      const rejectedUpdate = await app.inject({
+        method: 'PATCH',
+        url: `/paint/canvas/${canvasId}/layers/${layerId}`,
+        payload: { name: 'claimed by agent', expectedRevision: 1, actor: 'agent' },
+      });
+      expect(rejectedUpdate.statusCode).toBe(400);
+      expect(rejectedUpdate.json()).toMatchObject({
+        error: { code: 'invalid_actor' },
+      });
+
+      const rejectedAction = await app.inject({
+        method: 'POST',
+        url: `/paint/canvas/${canvasId}/apply-action`,
+        payload: {
+          actor: 'agent',
+          expectedRevision: 1,
+          action: {
+            type: 'canvas_update_layer',
+            layerId,
+            patch: { name: 'claimed by agent' },
+          },
+        },
+      });
+      expect(rejectedAction.statusCode).toBe(400);
+      expect(rejectedAction.json()).toMatchObject({
+        error: { code: 'invalid_action' },
+      });
+
+      // Nothing was written by the rejected calls, and the legacy explicit
+      // `actor:'user'` body is still accepted.
+      const accepted = await app.inject({
+        method: 'POST',
+        url: `/paint/canvas/${canvasId}/apply-action`,
+        payload: {
+          actor: 'user',
+          expectedRevision: 1,
+          action: {
+            type: 'canvas_update_layer',
+            layerId,
+            patch: { name: 'accepted' },
+          },
+        },
+      });
+      expect(accepted.statusCode).toBe(200);
+
+      const fetched = await app.inject({
+        method: 'GET',
+        url: `/paint/canvas/${canvasId}`,
+      });
+      expect(fetched.json()).toMatchObject({
+        revision: 2,
+        layers: [{ name: 'accepted' }],
+      });
+      expect(
+        app.observability.repository
+          .query({ category: 'canvas-action', limit: 200 })
+          .items.every((log) => log.actor === 'user'),
+      ).toBe(true);
+    } finally {
+      await app.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('actor attribution through the tool executor', () => {
+  it('records agent for create, update and delete snapshots', async () => {
+    const seam = buildServiceSeam();
+    const safeSvg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080"><circle cx="10" cy="10" r="5"/></svg>';
+
+    try {
+      const canvas = seam.dispatcher.createCanvas({ name: 'Tool canvas' });
+      const tools = createCanvasToolSet({
+        dispatcher: seam.dispatcher,
+        service: seam.service,
+      });
+      const toolContext = { canvasId: canvas.id, prompt: '画一个圆' };
+
+      const created = await tools.execute(
+        'canvas_create_layer',
+        { canvasId: canvas.id, name: 'AI circle', svg: safeSvg },
+        toolContext,
+      );
+      expect(created).toMatchObject({ ok: true });
+      expect(seam.snapshots.latest(canvas.id)).toMatchObject({
+        actor: 'agent',
+        action: 'canvas_create_layer',
+      });
+
+      const layerId = (created.layer as { id: string }).id;
+
+      const updated = await tools.execute(
+        'canvas_update_layer',
+        { canvasId: canvas.id, layerId, patch: { name: 'AI circle 2' } },
+        toolContext,
+      );
+      expect(updated).toMatchObject({ ok: true });
+      expect(seam.snapshots.latest(canvas.id)).toMatchObject({
+        actor: 'agent',
+        action: 'canvas_update_layer',
+      });
+
+      const deleted = await tools.execute(
+        'canvas_delete_layer',
+        { canvasId: canvas.id, layerId },
+        {
+          ...toolContext,
+          requestConfirmation: async () => 'approved',
+        },
+      );
+      expect(deleted).toMatchObject({ ok: true });
+      expect(seam.snapshots.latest(canvas.id)).toMatchObject({
+        actor: 'agent',
+        action: 'canvas_delete_layer',
+      });
+    } finally {
+      seam.close();
     }
   });
 });

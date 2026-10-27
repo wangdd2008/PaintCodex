@@ -1,4 +1,4 @@
-﻿# PaintCodex
+# PaintCodex
 
 AI-assisted painting in the browser: a React + Fabric.js canvas, a local Fastify daemon, and a Codex CLI agent that acts on the canvas through native tools.
 
@@ -62,7 +62,7 @@ docs/                 Architecture background, ADRs, agent workflow docs
 | `POST /paint/canvas/:id/layers` | Create a layer |
 | `PATCH /paint/canvas/:id/layers/:layerId` | Update name, visibility, opacity, or content |
 | `DELETE /paint/canvas/:id/layers/:layerId` | Delete a layer |
-| `POST /paint/canvas/:id/apply-action` | Apply a dispatcher action (`user` or `agent`) |
+| `POST /paint/canvas/:id/apply-action` | Apply a dispatcher action (REST writes are always `user`) |
 | `POST /paint/canvas/:id/undo` · `/redo` | Move through snapshot history |
 | `GET /paint/canvas/:id/events` | SSE stream of `snapshot_changed` |
 | `POST /paint/ai/chat` | One agent turn as SSE: `delta`, `tool`, `confirm`, `renderRequest`, `exportRequest`, `notice`, `done` |
@@ -73,6 +73,8 @@ docs/                 Architecture background, ADRs, agent workflow docs
 The full request/response contract is in [`.scratch/phase-1-mvp/spec.md`](.scratch/phase-1-mvp/spec.md) and `packages/protocol/src/index.ts`; route implementations are in `apps/daemon/src/api/`.
 
 Writes accept an optional `expectedRevision`. A stale value returns `409 revision_conflict`; brush layer creation refreshes and retries once, while other writes surface the error.
+
+Every REST write is attributed to `actor: 'user'`. A body-supplied `actor` other than `user` is rejected with `400 invalid_actor`; `actor: 'agent'` exists only on writes executed in-process by the AI tool executor, never as a client claim.
 
 ## Configuration
 
