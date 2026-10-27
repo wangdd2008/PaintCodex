@@ -44,7 +44,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       });
     }
 
-    return reply.code(201).send(dispatcher.createCanvas(body));
+    return reply.code(201).send(dispatcher.createCanvas(body, 'user'));
   });
 
   app.get<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
@@ -71,7 +71,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.renameCanvas(request.params.id, request.body.name.trim());
+        return dispatcher.renameCanvas(request.params.id, request.body.name.trim(), 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -195,7 +195,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.undo(request.params.id, expectedRevision);
+        return dispatcher.undo(request.params.id, expectedRevision, 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -212,7 +212,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.redo(request.params.id, expectedRevision);
+        return dispatcher.redo(request.params.id, expectedRevision, 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
