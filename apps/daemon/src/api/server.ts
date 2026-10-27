@@ -1,16 +1,21 @@
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { LogLevel } from '@paintcodex/protocol';
-import { registerAiChatRoute } from './routes.ai.js';
+import { registerAiChatRoute, registerRenderResultRoute } from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
 import { registerMonitorRoutes } from './routes.monitor.js';
 import { registerPaintRoutes } from './routes.paint.js';
 import {
   createCodexRuntime,
   type CodexRuntime,
+  type CodexThreadStore,
   type CodexVersionProbe,
 } from '../paint/agent/runtime/codex-runtime.js';
 import { createCanvasToolSet } from '../paint/agent/runtime/tools.js';
+import {
+  createRenderPreviewChannel,
+  type RenderPreviewChannel,
+} from '../paint/agent/runtime/render-preview.js';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import { PaintEvents } from '../paint/events.js';
 import {
@@ -41,6 +46,8 @@ export interface ServerOptions {
   runtime?: CodexRuntime;
   /** Injectable version gate; tests pin it without a Codex install. */
   codexVersion?: CodexVersionProbe;
+  /** Injectable preview broker; tests pin request ids and the image cap. */
+  renderChannel?: RenderPreviewChannel;
 }
 
 export function defaultDbPath(): string {
@@ -52,8 +59,9 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const db = openDatabase(dbPath);
   const events = new PaintEvents();
   const observability = createObservability(db);
+  const canvases = new CanvasRepository(db);
   const service = new PaintService(
-    new CanvasRepository(db),
+    canvases,
     new LayerRepository(db),
     new SnapshotRepository(db),
     events,
@@ -78,11 +86,20 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             : 'injected',
       }
     : (options.codexVersion ?? { available: true, version: 'unknown' });
+  const canvasThreads: CodexThreadStore = {
+    load: (canvasId) => canvases.findById(canvasId)?.codexThreadId ?? null,
+    save: (canvasId, threadId) => canvases.setCodexThreadId(canvasId, threadId),
+    clear: (canvasId) => canvases.setCodexThreadId(canvasId, null),
+  };
   const runtime =
     options.runtime ??
     (codexVersion.available
-      ? createCodexRuntime({ logger: observability.logger })
+      ? createCodexRuntime({
+          logger: observability.logger,
+          threadStore: canvasThreads,
+        })
       : null);
+  const renderChannel = options.renderChannel ?? createRenderPreviewChannel();
 
   app.decorate('observability', observability.logger);
 
@@ -133,7 +150,8 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerEventRoutes(app, service, events);
 
   if (runtime) {
-    registerAiChatRoute(app, runtime, tools, service);
+    registerAiChatRoute(app, runtime, tools, service, renderChannel);
+    registerRenderResultRoute(app, renderChannel);
   }
 
   registerMonitorRoutes(app, observability);

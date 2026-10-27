@@ -1,5 +1,7 @@
 import type { StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import { postRenderResult } from '../../services/api';
+import { exportActiveCanvasPng } from '../../services/canvas-engine';
 import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
 import { describeChatFailure, type ChatFailure } from './chat-error';
 import './ai-chat.css';
@@ -68,6 +70,8 @@ interface ChatMessage {
   tools?: ChatToolLine[];
   /** 这一轮失败了：气泡必须留下「未完成」，不能是空白。 */
   incomplete?: boolean;
+  /** 非致命提示（例如会话已重置）：气泡内一行说明，回复继续。 */
+  notice?: string;
 }
 
 /**
@@ -359,6 +363,20 @@ export function AiChatPanel() {
     abortRef.current?.abort();
   };
 
+  /**
+   * 回答预览请求：走已有的画布导出路径，把 PNG 回传给 daemon。
+   * 失败不打断对话——daemon 会在超时后把工具结果降级为 render_unavailable。
+   */
+  const answerRenderRequest = (requestId: string) => {
+    const imageUrl = exportActiveCanvasPng();
+
+    if (!imageUrl) {
+      return;
+    }
+
+    void postRenderResult(requestId, imageUrl).catch(() => undefined);
+  };
+
   const handleFrame = (frame: string) => {
     const payload = parseFrame(frame);
     if (!payload) {
@@ -423,6 +441,21 @@ export function AiChatPanel() {
         }));
         return;
       }
+    }
+
+    if (payload.renderRequest) {
+      const requestId = payload.renderRequest.id;
+
+      if (typeof requestId === 'string' && requestId.length > 0) {
+        answerRenderRequest(requestId);
+      }
+      return;
+    }
+
+    if (typeof payload.notice === 'string' && payload.notice.length > 0) {
+      const notice = payload.notice;
+      updateLastAssistant((last) => ({ ...last, notice }));
+      return;
     }
 
     if (payload.done === true) {
@@ -694,6 +727,11 @@ export function AiChatPanel() {
                         <span className="ai-chat__cancelled">已取消</span>
                       ) : null}
                     </p>
+                    {message.notice ? (
+                      <span className="ai-chat__notice" role="status">
+                        {message.notice}
+                      </span>
+                    ) : null}
                     {/* 写操作成行：只保留画布动作，读工具已折叠掉。 */}
                     {lines.length > 0 ? (
                       <ul className="ai-chat__writes" aria-label="画布写操作">

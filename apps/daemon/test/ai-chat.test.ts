@@ -43,6 +43,30 @@ describe('POST /paint/ai/chat', () => {
     await app.close();
   });
 
+  it('forwards a thread-reset notice without ending the turn', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onNotice?.('会话已重置，已开启新对话。');
+      input.onDelta('重新开始画');
+
+      return { text: '重新开始画', toolCallCount: 0 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: '继续', canvasId: 'canvas-1' },
+    });
+
+    expect(frames(response.payload)).toEqual([
+      { notice: '会话已重置，已开启新对话。' },
+      { delta: '重新开始画' },
+      { done: true },
+    ]);
+
+    await app.close();
+  });
+
   it('sends no step frames and no layerCreated frame for plain conversation', async () => {
     const runtime = fakeRuntime(async (input) => {
       input.onDelta('Paris');

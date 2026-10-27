@@ -27,6 +27,7 @@ function migrate(db: DatabaseConnection): void {
       backgroundColor TEXT NOT NULL,
       revision INTEGER NOT NULL,
       undoCursorRevision INTEGER,
+      codexThreadId TEXT,
       createdAt INTEGER NOT NULL,
       updatedAt INTEGER NOT NULL
     );
@@ -89,5 +90,9 @@ function migrate(db: DatabaseConnection): void {
 
   if (!canvasColumns.some((column) => column.name === 'undoCursorRevision')) {
     db.exec('ALTER TABLE canvases ADD COLUMN undoCursorRevision INTEGER');
+  }
+
+  if (!canvasColumns.some((column) => column.name === 'codexThreadId')) {
+    db.exec('ALTER TABLE canvases ADD COLUMN codexThreadId TEXT');
   }
 }

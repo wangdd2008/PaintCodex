@@ -61,6 +61,26 @@ export interface ThreadStartResult {
   thread: Thread;
 }
 
+/**
+ * `thread/resume` restores a thread from disk. It takes the thread id and the
+ * sandbox/approval settings to apply to it; tools are declared when the thread
+ * is first started and are carried by the persisted thread.
+ */
+export interface ThreadResumeParams {
+  threadId: string;
+  cwd?: string;
+  sandbox?: SandboxMode;
+  approvalPolicy?: AskForApproval;
+}
+
+export interface ThreadResumeResult {
+  thread: Thread;
+}
+
+export interface ThreadDeleteParams {
+  threadId: string;
+}
+
 export type UserInput = { type: 'text'; text: string };
 
 export interface TurnStartParams {

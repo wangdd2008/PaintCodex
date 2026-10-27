@@ -18,6 +18,7 @@ export function fakeRuntime(
     async interrupt() {},
     getThreadId: () => null,
     getActiveTurn: () => null,
+    async deleteThread() {},
     async close() {},
   };
 }

@@ -1,11 +1,15 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiChatRequest } from '@paintcodex/protocol';
+import type { AiChatRequest, AiRenderResultRequest } from '@paintcodex/protocol';
 import type { PaintService } from '../paint/service.js';
 import {
   EMPTY_CANVAS_TOOLS,
   type CanvasToolSet,
 } from '../paint/agent/runtime/tools.js';
 import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
+import {
+  MAX_RENDER_IMAGE_BYTES,
+  type RenderPreviewChannel,
+} from '../paint/agent/runtime/render-preview.js';
 import { buildAiChatPrompt } from '../paint/agent/prompt.js';
 import type {
   ObservabilitySpan,
@@ -18,6 +22,7 @@ export function registerAiChatRoute(
   runtime: CodexRuntime,
   tools: CanvasToolSet,
   service: PaintService,
+  renderChannel?: RenderPreviewChannel,
 ): void {
   app.post('/paint/ai/chat', async (request, reply) => {
     const body: unknown = request.body;
@@ -74,6 +79,12 @@ export function registerAiChatRoute(
       send({ error: { code, message } });
     };
 
+    // Render requests belong to this stream: the browser listens on it and
+    // answers on a separate HTTP request, correlated by the id it just saw.
+    const renderTurn = renderChannel?.beginTurn((request) => {
+      send({ renderRequest: request });
+    });
+
     let assistantText = '';
 
     try {
@@ -120,6 +131,10 @@ export function registerAiChatRoute(
           tools: canvas ? tools : EMPTY_CANVAS_TOOLS,
           signal: controller.signal,
           trace: turnSpan,
+          ...(renderTurn === undefined ? {} : { requestRender: renderTurn.request }),
+          onNotice: (notice) => {
+            send({ notice });
+          },
           onDelta: (delta) => {
             deltaCount += 1;
             assistantText += delta;
@@ -153,6 +168,9 @@ export function registerAiChatRoute(
         sendError('ai_chat_failed', errorMessage(error));
       }
     } finally {
+      // A disconnected stream must not leave a render request pending: the tool
+      // would otherwise sit on a browser that is no longer listening.
+      renderTurn?.close();
       response.off('close', onClose);
 
       const aborted = controller.signal.aborted;
@@ -186,6 +204,79 @@ export function registerAiChatRoute(
       chatSpan.finish(finishInput);
     }
   });
+}
+
+/**
+ * The browser's half of `canvas_render_preview`: one PNG data URL per pending
+ * request id. The route accepts a single image and rejects anything above the
+ * cap, a stale id, or a body that is not a PNG data URL.
+ */
+export function registerRenderResultRoute(
+  app: FastifyInstance,
+  channel: RenderPreviewChannel,
+): void {
+  app.post<{ Body: unknown }>(
+    '/paint/ai/render-result',
+    // Room for the JSON envelope plus one capped data URL; the image cap
+    // itself is enforced on the string so the reply is a structured error.
+    { bodyLimit: MAX_RENDER_IMAGE_BYTES + 1024 * 1024 },
+    async (request, reply) => {
+      if (!isRenderResultRequest(request.body)) {
+        return reply.code(400).send({
+          error: {
+            code: 'invalid_render_result',
+            message: 'requestId 与 imageUrl 不能为空',
+          },
+        });
+      }
+
+      const delivery = channel.deliver(
+        request.body.requestId,
+        request.body.imageUrl,
+      );
+
+      switch (delivery.status) {
+        case 'accepted':
+          return reply.code(204).send();
+        case 'unknown':
+          return reply.code(409).send({
+            error: {
+              code: 'render_request_unknown',
+              message: '渲染请求不存在或这一轮已经结束',
+            },
+          });
+        case 'invalid':
+          return reply.code(400).send({
+            error: {
+              code: 'invalid_render_result',
+              message: '预览必须是 PNG data URL',
+            },
+          });
+        case 'too_large':
+          return reply.code(413).send({
+            error: {
+              code: 'render_image_too_large',
+              message: `预览图片不能超过 ${delivery.maxBytes} 字节`,
+            },
+          });
+      }
+    },
+  );
+}
+
+function isRenderResultRequest(value: unknown): value is AiRenderResultRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as { requestId?: unknown; imageUrl?: unknown };
+
+  return (
+    typeof candidate.requestId === 'string' &&
+    candidate.requestId.length > 0 &&
+    typeof candidate.imageUrl === 'string' &&
+    candidate.imageUrl.length > 0
+  );
 }
 
 function startChatSpan(

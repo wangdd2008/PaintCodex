@@ -203,7 +203,7 @@ describe('Codex runtime handshake and turns', () => {
     const runtime = createCodexRuntime({
       command: process.execPath,
       args: ['-e', 'process.exit(7)'],
-      requestTimeoutMs: 2_000,
+      requestTimeoutMs: 10_000,
     });
     runtimes.push(runtime);
 
@@ -446,6 +446,103 @@ describe('Codex runtime tool frames', () => {
       'start:second',
       'end:second',
     ]);
+  });
+});
+
+describe('Codex runtime render preview results', () => {
+  const PNG = 'data:image/png;base64,AAAA';
+
+  it('returns the rendered image as an inputImage content item', async () => {
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_render_preview', { canvasId: 'canvas-1' }));`,
+        onToolResponse: `
+    const items = message.result?.contentItems ?? [];
+    const image = items.find((item) => item.type === 'inputImage');
+    const text = items.find((item) => item.type === 'inputText')?.text ?? '';
+    if (message.result?.success !== true || !image || image.imageUrl !== '${PNG}') {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'missing inputImage: ' + JSON.stringify(items) } } });
+      return;
+    }
+    if (text.includes('${PNG}')) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'image duplicated into text' } } });
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const result = await start(harnessed, {
+      requestRender: async () => ({ ok: true, imageUrl: PNG }),
+      tools: stubTools(async (_tool, _args, context) => {
+        const rendered = await context.requestRender!('canvas-1');
+        return rendered;
+      }),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+  });
+
+  it('reports render_unavailable to the model when the browser never answers', async () => {
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_render_preview', { canvasId: 'canvas-1' }));`,
+        onToolResponse: `
+    const text = message.result?.contentItems?.[0]?.text ?? '';
+    if (message.result?.success !== false || !text.includes('render_unavailable')) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'expected render_unavailable: ' + text } } });
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const result = await start(harnessed, {
+      requestRender: async () => ({
+        ok: false,
+        code: 'render_unavailable' as const,
+        message: '浏览器未在 10000ms 内返回画布预览',
+      }),
+      tools: stubTools(async (_tool, _args, context) => context.requestRender!('canvas-1')),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+  });
+
+  it('cancels a pending render when the turn is interrupted', async () => {
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_render_preview', { canvasId: 'canvas-1' }));`,
+      },
+    });
+    const controller = new AbortController();
+    let renderSignal: AbortSignal | undefined;
+
+    const pending = start(harnessed, {
+      signal: controller.signal,
+      requestRender: (_canvasId, signal) =>
+        new Promise((resolve) => {
+          renderSignal = signal;
+          signal?.addEventListener('abort', () =>
+            resolve({
+              ok: false,
+              code: 'render_unavailable',
+              message: 'dirty',
+            }),
+          );
+        }),
+      tools: stubTools(async (_tool, _args, context) =>
+        context.requestRender!('canvas-1'),
+      ),
+    });
+
+    await waitFor(() => renderSignal ?? null);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(renderSignal?.aborted).toBe(true);
   });
 });
 

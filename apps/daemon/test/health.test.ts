@@ -54,6 +54,7 @@ describe('daemon health endpoint', () => {
         async interrupt() {},
         getThreadId: () => null,
         getActiveTurn: () => null,
+        async deleteThread() {},
         async close() {},
       },
     });

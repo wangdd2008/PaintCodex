@@ -9,6 +9,7 @@ import {
 import type { PaintService } from '../../service.js';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
 import type { DynamicToolSpec } from './protocol.js';
+import type { RenderPreviewRequester } from './render-preview.js';
 import { unsafeSvgReason } from './validate-svg.js';
 
 /**
@@ -25,6 +26,8 @@ export interface CanvasToolContext {
   canvasId: string | null;
   /** The user message that opened this turn, stored on created layers. */
   prompt: string;
+  /** Asks the browser that owns the canvas for a PNG of the current state. */
+  requestRender?: RenderPreviewRequester;
   trace?: TraceContext;
 }
 
@@ -150,6 +153,20 @@ const UNDO_DECLARATION: DynamicToolSpec = {
   },
 };
 
+const RENDER_PREVIEW_DECLARATION: DynamicToolSpec = {
+  type: 'function',
+  name: 'canvas_render_preview',
+  description: 'Render the current canvas to a PNG and return it as an image.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      canvasId: { type: 'string', description: 'Canvas id to render.' },
+    },
+    required: ['canvasId'],
+    additionalProperties: false,
+  },
+};
+
 export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSet {
   const now = options.now ?? Date.now;
 
@@ -169,6 +186,8 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
         return deleteLayer(options.dispatcher, options.service, args, context);
       case 'canvas_undo':
         return undo(options.dispatcher, options.service, args, context);
+      case 'canvas_render_preview':
+        return renderPreview(options.service, args, context);
       default:
         return {
           ok: false,
@@ -185,6 +204,7 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
       UPDATE_LAYER_DECLARATION,
       DELETE_LAYER_DECLARATION,
       UNDO_DECLARATION,
+      RENDER_PREVIEW_DECLARATION,
     ],
     async execute(tool, args, context) {
       const startedAt = now();
@@ -600,6 +620,57 @@ function undo(
   } catch (error) {
     return failureFromError(error);
   }
+}
+
+/**
+ * The preview is a round trip through the browser: the daemon has no renderer.
+ * No channel or a timed-out render is a normal failure the model can read, not
+ * a reason to fail the whole turn.
+ */
+async function renderPreview(
+  service: Pick<PaintService, 'getCanvas'>,
+  args: unknown,
+  context: CanvasToolContext,
+): Promise<CanvasToolResult> {
+  const object = asObject(args);
+
+  if (!object) {
+    return invalidArguments('参数必须是对象');
+  }
+
+  const canvasId = readCanvasId(object, context);
+
+  if (!canvasId) {
+    return {
+      ok: false,
+      code: 'canvas_required',
+      message: '请先打开画布再让 AI 绘制。',
+    };
+  }
+
+  if (!service.getCanvas(canvasId)) {
+    return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
+  }
+
+  if (!context.requestRender) {
+    return {
+      ok: false,
+      code: 'render_unavailable',
+      message: '当前对话没有连接中的浏览器，无法渲染画布',
+    };
+  }
+
+  const rendered = await context.requestRender(canvasId, undefined);
+
+  if (!rendered.ok) {
+    return {
+      ok: false,
+      code: rendered.code,
+      message: rendered.message,
+    };
+  }
+
+  return { ok: true, imageUrl: rendered.imageUrl };
 }
 
 function failureFromError(error: unknown): CanvasToolResult {
