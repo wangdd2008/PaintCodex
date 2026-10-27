@@ -5,6 +5,12 @@ import {
   probeCodexVersion,
   type CodexRuntime,
 } from '../src/paint/agent/runtime/codex-runtime.js';
+import {
+  createConfirmationChannel,
+  type ConfirmFrameEvent,
+  type ConfirmationChannel,
+  type ConfirmationOutcome,
+} from '../src/paint/agent/runtime/confirmation.js';
 import type { CanvasToolSet } from '../src/paint/agent/runtime/tools.js';
 import { createObservability } from '../src/observability/index.js';
 import { openDatabase } from '../src/storage/database.js';
@@ -96,6 +102,7 @@ function harness(options: {
   hooks?: Parameters<typeof fakeAppServer>[0];
   requestTimeoutMs?: number;
   toolTimeoutMs?: number;
+  confirmations?: ConfirmationChannel;
 } = {}) {
   const observability = createObservability(openDatabase(':memory:'));
   const runtime = createCodexRuntime({
@@ -106,6 +113,7 @@ function harness(options: {
     // suite runs it while other packages are compiling; 5s flaked under load.
     requestTimeoutMs: options.requestTimeoutMs ?? 15_000,
     toolTimeoutMs: options.toolTimeoutMs,
+    confirmations: options.confirmations,
   });
 
   return {
@@ -475,6 +483,213 @@ describe('Codex runtime interruption', () => {
     controller.abort();
 
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+});
+
+describe('Codex runtime confirmations', () => {
+  const channels: ConfirmationChannel[] = [];
+
+  afterEach(() => {
+    for (const channel of channels.splice(0)) {
+      channel.close();
+    }
+  });
+
+  function confirmationChannel(timeoutMs = 5_000): ConfirmationChannel {
+    const channel = createConfirmationChannel({ timeoutMs });
+
+    channels.push(channel);
+
+    return channel;
+  }
+
+  function confirmationTools(onOutcome: (outcome: ConfirmationOutcome) => void): CanvasToolSet {
+    return stubTools(async (_tool, _args, context) => {
+      const outcome = await context.requestConfirmation?.({
+        title: '删除图层「红圆」',
+        detail: '删除后无法恢复',
+      });
+
+      onOutcome(outcome ?? 'disconnected');
+
+      return outcome === 'approved'
+        ? { ok: true, revision: 2 }
+        : { ok: false, code: 'user_declined', message: `未执行：${outcome}` };
+    });
+  }
+
+  /** Validates the tool response the runtime sends back before completing. */
+  function toolResponseHooks(expectedSuccess: boolean) {
+    return {
+      onTurnStart: `
+    send(toolCall('canvas_delete_layer', { canvasId: 'canvas-1', layerId: 'layer-1' }));
+`,
+      onToolResponse: `
+    const text = message.result?.contentItems?.[0]?.text ?? '';
+    if (message.result?.success !== ${expectedSuccess ? 'true' : 'false'}) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'unexpected tool success: ' + text } } });
+      return;
+    }
+    if (${expectedSuccess ? 'false' : '!text.includes("user_declined")'}) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'missing user_declined: ' + text } } });
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+    };
+  }
+
+  it('emits a confirm frame, suspends the tool and resumes after approval', async () => {
+    const channel = confirmationChannel();
+    const frames: ConfirmFrameEvent[] = [];
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(true),
+      confirmations: channel,
+    });
+
+    const pending = start(harnessed, {
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+      onConfirm: (frame) => frames.push(frame),
+    });
+
+    await waitFor(() => (frames[0] ?? null));
+    expect(frames[0]).toMatchObject({
+      id: expect.any(String),
+      title: '删除图层「红圆」',
+      detail: '删除后无法恢复',
+    });
+    expect(channel.pendingCount()).toBe(1);
+    expect(outcome).toBeNull();
+
+    expect(channel.answer(frames[0]?.id as string, true, 'canvas-1')).toMatchObject({
+      status: 'approved',
+    });
+
+    const result = await pending;
+
+    expect(result.toolCallCount).toBe(1);
+    expect(outcome).toBe('approved');
+  });
+
+  it('answers the model with user_declined when the confirmation times out', async () => {
+    const channel = confirmationChannel(20);
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(false),
+      confirmations: channel,
+    });
+
+    const result = await start(harnessed, {
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(outcome).toBe('timeout');
+    expect(channel.pendingCount()).toBe(0);
+  });
+
+  it('does not let the 30s tool deadline preempt the 60s confirmation wait', async () => {
+    const channel = confirmationChannel(120);
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(false),
+      toolTimeoutMs: 40,
+      confirmations: channel,
+    });
+
+    const result = await start(harnessed, {
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    // The tool timer is paused while the user is being asked: a timeout here
+    // would be the confirmation deadline, never `tool_timeout`.
+    expect(outcome).toBe('timeout');
+    expect(channel.pendingCount()).toBe(0);
+  });
+
+  it('refuses the suspended tool when the caller signal aborts (client disconnect)', async () => {
+    const channel = confirmationChannel();
+    const frames: ConfirmFrameEvent[] = [];
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(false),
+      confirmations: channel,
+    });
+    const controller = new AbortController();
+    const pending = start(harnessed, {
+      signal: controller.signal,
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+      onConfirm: (frame) => frames.push(frame),
+    });
+
+    await waitFor(() => (frames[0] ?? null));
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await waitFor(() => outcome);
+    expect(outcome).toBe('disconnected');
+    expect(channel.pendingCount()).toBe(0);
+  });
+
+  it('refuses the suspended tool when the turn is interrupted', async () => {
+    const channel = confirmationChannel();
+    const frames: ConfirmFrameEvent[] = [];
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(false),
+      confirmations: channel,
+    });
+    const pending = start(harnessed, {
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+      onConfirm: (frame) => frames.push(frame),
+    });
+
+    await waitFor(() => (frames[0] ?? null));
+    await harnessed.runtime.interrupt('canvas-1');
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await waitFor(() => outcome);
+    expect(outcome).toBe('interrupted');
+    expect(channel.pendingCount()).toBe(0);
+  });
+
+  it('cancels pending confirmations when the runtime closes', async () => {
+    const channel = confirmationChannel();
+    const frames: ConfirmFrameEvent[] = [];
+    let outcome: ConfirmationOutcome | null = null;
+    const harnessed = harness({
+      hooks: toolResponseHooks(false),
+      confirmations: channel,
+    });
+    const pending = start(harnessed, {
+      tools: confirmationTools((value) => {
+        outcome = value;
+      }),
+      onConfirm: (frame) => frames.push(frame),
+    });
+
+    await waitFor(() => (frames[0] ?? null));
+    // Attach before closing: `close()` rejects the turn while it also waits for
+    // the child process to exit, and Node flags a late handler as unhandled.
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await harnessed.runtime.close();
+    await rejection;
+
+    await waitFor(() => outcome);
+    expect(outcome).toBe('interrupted');
+    expect(channel.pendingCount()).toBe(0);
   });
 });
 

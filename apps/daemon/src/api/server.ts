@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { LogLevel } from '@paintcodex/protocol';
-import { registerAiChatRoute } from './routes.ai.js';
+import { registerAiChatRoute, registerAiConfirmRoute } from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
 import { registerMonitorRoutes } from './routes.monitor.js';
 import { registerPaintRoutes } from './routes.paint.js';
@@ -10,6 +10,10 @@ import {
   type CodexRuntime,
   type CodexVersionProbe,
 } from '../paint/agent/runtime/codex-runtime.js';
+import {
+  createConfirmationChannel,
+  type ConfirmationChannel,
+} from '../paint/agent/runtime/confirmation.js';
 import { createCanvasToolSet } from '../paint/agent/runtime/tools.js';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import { PaintEvents } from '../paint/events.js';
@@ -41,6 +45,8 @@ export interface ServerOptions {
   runtime?: CodexRuntime;
   /** Injectable version gate; tests pin it without a Codex install. */
   codexVersion?: CodexVersionProbe;
+  /** Injectable confirmation seam; tests open and answer requests directly. */
+  confirmations?: ConfirmationChannel;
 }
 
 export function defaultDbPath(): string {
@@ -78,10 +84,13 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
             : 'injected',
       }
     : (options.codexVersion ?? { available: true, version: 'unknown' });
+  const confirmations: ConfirmationChannel =
+    options.confirmations ??
+    createConfirmationChannel({ logger: observability.logger });
   const runtime =
     options.runtime ??
     (codexVersion.available
-      ? createCodexRuntime({ logger: observability.logger })
+      ? createCodexRuntime({ logger: observability.logger, confirmations })
       : null);
 
   app.decorate('observability', observability.logger);
@@ -120,6 +129,12 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   app.addHook('onClose', async () => {
     await runtime?.close();
+
+    // An injected channel belongs to the test; only close the one we created.
+    if (!options.confirmations) {
+      confirmations.close();
+    }
+
     db.close();
   });
 
@@ -134,6 +149,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
 
   if (runtime) {
     registerAiChatRoute(app, runtime, tools, service);
+    registerAiConfirmRoute(app, confirmations);
   }
 
   registerMonitorRoutes(app, observability);

@@ -150,6 +150,93 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 不可逆动作的确认条：挂在助手气泡内，答复前一直是这一轮的一部分。 */
+.ai-chat__confirmations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ai-chat__confirm {
+  border: 1px solid #6b5a34;
+  border-radius: 6px;
+  background: #26231a;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-chat__confirm-title {
+  margin: 0;
+  color: #f0dfb4;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-chat__confirm-detail {
+  margin: 0;
+  color: #d8c48a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ai-chat__confirm-error {
+  margin: 0;
+  color: #f2b8b5;
+  font-size: 11px;
+}
+
+.ai-chat__confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-chat__confirm-approve,
+.ai-chat__confirm-decline {
+  border: 1px solid #5b5340;
+  border-radius: 6px;
+  padding: 4px 12px;
+  min-height: 28px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__confirm-approve {
+  border-color: #7a3234;
+  background: #3a1f21;
+  color: #f2b8b5;
+}
+
+.ai-chat__confirm-approve:hover:not(:disabled) {
+  background: #4a2628;
+}
+
+.ai-chat__confirm-decline {
+  background: #2b2c33;
+  color: #d5d7e0;
+}
+
+.ai-chat__confirm-decline:hover:not(:disabled) {
+  background: #34353d;
+}
+
+.ai-chat__confirm-approve:disabled,
+.ai-chat__confirm-decline:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ai-chat__confirm-status {
+  color: #cbbd93;
+  font-size: 11px;
+}
+
 /* 运行结束后保留：空白气泡会让人看不出已经完成。 */
 .ai-chat__terminal {
   color: #8f93a3;

@@ -3,6 +3,10 @@ import type { AgentLog } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../src/paint/command-dispatcher.js';
 import { RevisionConflictError } from '../src/paint/errors.js';
 import { createCanvasToolSet } from '../src/paint/agent/runtime/tools.js';
+import type {
+  ConfirmationOutcome,
+  ConfirmationRequest,
+} from '../src/paint/agent/runtime/confirmation.js';
 import { createObservability } from '../src/observability/index.js';
 import {
   CanvasRepository,
@@ -36,8 +40,23 @@ function createHarness() {
   };
 }
 
-function context(canvasId: string, prompt = '画一个红圆') {
-  return { canvasId, prompt };
+function context(
+  canvasId: string,
+  prompt = '画一个红圆',
+  requestConfirmation?: (request: ConfirmationRequest) => Promise<ConfirmationOutcome>,
+) {
+  return {
+    canvasId,
+    prompt,
+    ...(requestConfirmation === undefined ? {} : { requestConfirmation }),
+  };
+}
+
+function confirmWith(outcome: ConfirmationOutcome, seen: ConfirmationRequest[] = []) {
+  return async (request: ConfirmationRequest): Promise<ConfirmationOutcome> => {
+    seen.push(request);
+    return outcome;
+  };
 }
 
 const BLUE_RECT_SVG =
@@ -435,7 +454,95 @@ describe('canvas_update_layer', () => {
 });
 
 describe('canvas_delete_layer', () => {
-  it('deletes the layer directly (confirmation lands in ticket 03)', async () => {
+  it('asks for the layer by name and deletes only after approval', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+    const asked: ConfirmationRequest[] = [];
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId },
+      context(canvas.id, '删掉它', confirmWith('approved', asked)),
+    );
+
+    const updated = harness.service.getCanvas(canvas.id)!;
+
+    expect(asked).toEqual([
+      {
+        title: '删除图层「Base」',
+        detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+      },
+    ]);
+    expect(result).toMatchObject({ ok: true, layerId, revision: 2 });
+    expect(updated.layers).toEqual([]);
+  });
+
+  it('refuses without touching the canvas when the user declines', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId },
+      context(canvas.id, '删掉它', confirmWith('declined')),
+    );
+
+    const unchanged = harness.service.getCanvas(canvas.id)!;
+
+    expect(result).toMatchObject({ ok: false, code: 'user_declined' });
+    expect(unchanged.layers).toHaveLength(1);
+    expect(unchanged.revision).toBe(1);
+  });
+
+  it('tells the model the user did not answer when confirmation times out', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId },
+      context(canvas.id, '删掉它', confirmWith('timeout')),
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'user_declined',
+      message: expect.stringContaining('未答复'),
+    });
+    expect(harness.service.getCanvas(canvas.id)!.layers).toHaveLength(1);
+  });
+
+  it('treats a disconnect or interrupt as a refusal', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+
+    await expect(
+      tools.execute(
+        'canvas_delete_layer',
+        { canvasId: canvas.id, layerId },
+        context(canvas.id, '删掉它', confirmWith('disconnected')),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'user_declined' });
+
+    await expect(
+      tools.execute(
+        'canvas_delete_layer',
+        { canvasId: canvas.id, layerId },
+        context(canvas.id, '删掉它', confirmWith('interrupted')),
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'user_declined' });
+    expect(harness.service.getCanvas(canvas.id)!.layers).toHaveLength(1);
+  });
+
+  it('fails closed when no confirmation channel is available', async () => {
     const harness = createHarness();
     const tools = createCanvasToolSet(harness);
     const canvas = harness.service.createCanvas();
@@ -447,26 +554,46 @@ describe('canvas_delete_layer', () => {
       context(canvas.id),
     );
 
-    const updated = harness.service.getCanvas(canvas.id)!;
-
-    expect(result).toMatchObject({ ok: true, layerId, revision: 2 });
-    expect(updated.layers).toEqual([]);
+    expect(result).toMatchObject({ ok: false, code: 'user_declined' });
+    expect(harness.service.getCanvas(canvas.id)!.layers).toHaveLength(1);
   });
 
-  it('reports an unknown layer as layer_not_found and keeps the revision', async () => {
+  it('reports an unknown layer as layer_not_found without asking the user', async () => {
     const harness = createHarness();
     const tools = createCanvasToolSet(harness);
     const canvas = harness.service.createCanvas();
     seedLayer(harness, canvas.id);
+    const asked: ConfirmationRequest[] = [];
 
     const result = await tools.execute(
       'canvas_delete_layer',
       { canvasId: canvas.id, layerId: 'missing' },
-      context(canvas.id),
+      context(canvas.id, '删掉它', confirmWith('approved', asked)),
     );
 
     expect(result).toMatchObject({ ok: false, code: 'layer_not_found' });
+    expect(asked).toEqual([]);
     expect(harness.service.getCanvas(canvas.id)!.revision).toBe(1);
+  });
+
+  it('still reports a revision conflict that happens after approval', async () => {
+    const harness = createHarness();
+    const canvas = harness.service.createCanvas();
+    const layerId = seedLayer(harness, canvas.id);
+    const dispatcher = {
+      dispatch: () => {
+        throw new RevisionConflictError(0, 4);
+      },
+    } as unknown as CommandDispatcher;
+    const tools = createCanvasToolSet({ ...harness, dispatcher });
+
+    const result = await tools.execute(
+      'canvas_delete_layer',
+      { canvasId: canvas.id, layerId },
+      context(canvas.id, '删掉它', confirmWith('approved')),
+    );
+
+    expect(result).toMatchObject({ ok: false, code: 'revision_conflict' });
   });
 });
 
