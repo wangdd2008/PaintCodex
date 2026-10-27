@@ -29,3 +29,4 @@
   - 未改动：`canvas_delete_layer` 语义、确认通道（03）、export、删除门禁、`docs/architecture-design.md` 与 ADR。
   - 合并提示（给 03）：本票在 `routes.ai.ts`、`codex-runtime.ts` 上与确认通道会有冲突——渲染结果路由是独立注册函数 `registerRenderResultRoute`，`CodexRuntime` 接口新增了 `deleteThread`（测试替身需补），`CodexTurnInput` 新增 `requestRender` / `onNotice`；`fake-runtime.ts` 已同步。
 
+- 2026-10-28 — 合并 `feat/codex-native-tools`（merge `2cebfbe`）：冲突在 `apps/daemon/test/codex-runtime.test.ts`（采纳上游用 `FakeAppServerProcess` 的确定性崩溃用例，替换旧的「真实 `process.exit(7)` + 2s 请求超时」用例）与 `apps/daemon/vitest.config.ts`（两侧内容等价，采纳上游注释）。合并后 `pnpm -r typecheck` 通过、daemon 198 通过、web 208 通过。上游 `d453a2f` 的进程死亡处理与本票的 thread store 不冲突：进程死亡立即清空内存 thread 映射并拒绝挂起请求，下一次 turn 从 `canvases.codexThreadId` resume。
