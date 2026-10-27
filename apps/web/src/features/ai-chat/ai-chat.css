@@ -96,14 +96,14 @@
 }
 
 /* Own line inside the bubble so it reads as status, not as reply text. */
-.ai-chat__step {
+.ai-chat__pending-label {
   display: block;
   color: #9ea3b0;
   font-size: 11px;
-  animation: ai-chat-step-in 160ms ease-out;
+  animation: ai-chat-fade-in 160ms ease-out;
 }
 
-/* 步骤文案与「已用 Ns」计时共用一行状态。 */
+/* 等待文案与「已用 Ns」计时共用一行状态。 */
 .ai-chat__progress {
   display: flex;
   align-items: baseline;
@@ -111,8 +111,37 @@
   margin-bottom: 4px;
 }
 
-.ai-chat__progress .ai-chat__step {
+.ai-chat__progress .ai-chat__pending-label {
   margin-bottom: 0;
+}
+
+/* 写操作成行：每次改动画布占据一行，读工具不渲染。 */
+.ai-chat__writes {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-chat__write-line {
+  color: #9ea3b0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-chat__write-line--running {
+  color: #b9c6de;
+}
+
+.ai-chat__write-line--ok {
+  color: #8fbf9f;
+}
+
+.ai-chat__write-line--failed {
+  color: #f2b8b5;
 }
 
 .ai-chat__timer {
@@ -174,7 +203,7 @@
   font-size: 11px;
 }
 
-@keyframes ai-chat-step-in {
+@keyframes ai-chat-fade-in {
   from {
     opacity: 0;
   }

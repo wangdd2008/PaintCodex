@@ -111,6 +111,25 @@ export interface AgentMessageDeltaNotification {
   delta: string;
 }
 
+/** One `dynamicToolCall` item as carried by `item/started` / `item/completed`. */
+export interface DynamicToolCallItem {
+  type: 'dynamicToolCall';
+  /** Equals the `callId` of the matching `item/tool/call` request. */
+  id: string;
+  tool: string;
+  arguments?: unknown;
+  status?: DynamicToolCallStatus;
+  contentItems?: DynamicToolCallOutputContentItem[] | null;
+  success?: boolean | null;
+  durationMs?: number | null;
+}
+
+export interface ItemNotification {
+  threadId: string;
+  turnId?: string;
+  item: unknown;
+}
+
 export type TurnStatus = 'completed' | 'interrupted' | 'failed' | 'inProgress';
 
 export interface TurnError {

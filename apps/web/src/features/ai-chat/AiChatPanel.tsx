@@ -44,6 +44,14 @@ function layerUndoState(
   return 'hidden';
 }
 
+interface ChatToolLine {
+  id: string;
+  name: string;
+  status: 'running' | 'ok' | 'failed';
+  /** Failure code from the daemon; localized before it reaches the screen. */
+  code?: string;
+}
+
 interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
@@ -56,12 +64,90 @@ interface ChatMessage {
   durationSeconds?: number;
   /** 从 `layerCreated` 帧消费到的落地确认。 */
   layer?: ChatLayerConfirmation;
+  /** 这一轮里的写类工具调用，渲染为气泡内的动作行。 */
+  tools?: ChatToolLine[];
   /** 这一轮失败了：气泡必须留下「未完成」，不能是空白。 */
   incomplete?: boolean;
 }
 
-/** The protocol owns the step shape so frontend and daemon cannot drift. */
-type ChatStep = NonNullable<StreamPayload['step']>;
+/**
+ * 读操作折叠：AI 每轮都会先读画布，行行都显示只会淹没真正的写动作。
+ * 只有声明了文案的写工具才成行，未知工具同样不渲染。
+ */
+const READ_ONLY_TOOLS = new Set(['canvas_get_context', 'canvas_select']);
+
+const WRITE_TOOL_LABELS: Record<
+  string,
+  { running: string; ok: string; failed: string }
+> = {
+  canvas_create_layer: {
+    running: '正在添加图层…',
+    ok: '已添加图层',
+    failed: '添加图层失败',
+  },
+  canvas_update_layer: {
+    running: '正在改写图层…',
+    ok: '已改写图层',
+    failed: '改写图层失败',
+  },
+  canvas_delete_layer: {
+    running: '正在删除图层…',
+    ok: '已删除图层',
+    failed: '删除图层失败',
+  },
+  canvas_undo: {
+    running: '正在撤销…',
+    ok: '已撤销上一步',
+    failed: '撤销失败',
+  },
+  canvas_export_png: {
+    running: '正在导出图片…',
+    ok: '已导出图片',
+    failed: '导出图片失败',
+  },
+};
+
+/** 失败码的中文说明；未登记的码只显示通用失败文案，不把原始码上屏。 */
+const TOOL_FAILURE_TEXT: Record<string, string> = {
+  revision_conflict: '画布已被改动，未覆盖最新内容',
+  layer_not_found: '图层不存在',
+  canvas_not_found: '画布不存在',
+  canvas_required: '请先打开画布',
+  top_action_is_user: '栈顶是你自己的操作，需要你自己撤销',
+  invalid_svg: 'SVG 不安全，已拒绝',
+  invalid_arguments: '工具参数不合法',
+  user_declined: '你取消了这次操作',
+  nothing_to_undo: '没有可撤销的操作',
+  no_active_turn: '这一轮已经结束',
+  tool_timeout: '操作超时',
+  tool_failed: '工具执行失败',
+  unknown_tool: '未声明的工具',
+};
+
+function toolLineText(tool: ChatToolLine): string {
+  const labels = WRITE_TOOL_LABELS[tool.name];
+
+  if (!labels) {
+    return '';
+  }
+
+  const base = labels[tool.status];
+
+  if (tool.status !== 'failed') {
+    return base;
+  }
+
+  const reason = tool.code === undefined ? undefined : TOOL_FAILURE_TEXT[tool.code];
+
+  return reason === undefined ? base : `${base}：${reason}`;
+}
+
+/** 写工具才成行；读取与未知工具不进渲染列表。 */
+function writeToolLines(message: ChatMessage): ChatToolLine[] {
+  return (message.tools ?? []).filter(
+    (tool) => !READ_ONLY_TOOLS.has(tool.name) && tool.name in WRITE_TOOL_LABELS,
+  );
+}
 
 /** 错误条的一项：中文原因 + 重试所需的原始消息与气泡。 */
 interface ChatErrorState extends ChatFailure {
@@ -171,7 +257,6 @@ export function AiChatPanel() {
   const [lastInput, setLastInput] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState<ChatErrorState | null>(null);
-  const [currentStep, setCurrentStep] = useState<ChatStep | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const canvas = useCanvasStore((state) => state.canvas);
   const status = useCanvasStore((state) => state.status);
@@ -285,10 +370,35 @@ export function AiChatPanel() {
       return;
     }
 
-    if (payload.step) {
-      const { id, label } = payload.step;
-      if (typeof id === 'string' && typeof label === 'string') {
-        setCurrentStep({ id, label });
+    if (payload.tool) {
+      const { id, name, status } = payload.tool;
+
+      if (
+        typeof id === 'string' &&
+        typeof name === 'string' &&
+        (status === 'running' || status === 'ok' || status === 'failed')
+      ) {
+        const code =
+          typeof payload.tool.code === 'string' ? payload.tool.code : undefined;
+        const line: ChatToolLine = {
+          id,
+          name,
+          status,
+          ...(code === undefined ? {} : { code }),
+        };
+
+        updateLastAssistant((last) => {
+          const tools = last.tools ? [...last.tools] : [];
+          const index = tools.findIndex((existing) => existing.id === id);
+
+          if (index >= 0) {
+            tools[index] = line;
+          } else {
+            tools.push(line);
+          }
+
+          return { ...last, tools };
+        });
         return;
       }
     }
@@ -341,7 +451,6 @@ export function AiChatPanel() {
   /** 跑一轮请求：发送与重试共用，区别只在重试复用已有气泡。 */
   const run = async (text: string, assistantId: number) => {
     setError(null);
-    setCurrentStep(null);
     setElapsedSeconds(0);
     runStartedAt.current = Date.now();
     runStartRevision.current = useCanvasStore.getState().canvas?.revision ?? null;
@@ -411,7 +520,6 @@ export function AiChatPanel() {
       runStartedAt.current = null;
       runStartRevision.current = null;
       runCanvasId.current = null;
-      setCurrentStep(null);
       setInFlight(false);
     }
   };
@@ -557,19 +665,7 @@ export function AiChatPanel() {
                   inFlight &&
                   message.role === 'assistant' &&
                   message.id === lastMessageId;
-                const step = isPending ? currentStep : null;
-                // 最后两步描述结果落地，首个 token 之后仍继续显示，
-                // 不能一直停在「正在生成…」。
-                const applyStep =
-                  step?.id === 'action_parse' || step?.id === 'action_apply'
-                    ? step
-                    : null;
-                const progressLabel =
-                  applyStep?.label ??
-                  (message.generating ? '正在生成…' : step?.label ?? '思考中…');
-                const progressKey =
-                  applyStep?.id ??
-                  (message.generating ? 'generating' : step?.id ?? 'waiting');
+                const lines = writeToolLines(message);
 
                 return (
                   <article
@@ -582,9 +678,8 @@ export function AiChatPanel() {
                     <p className="ai-chat__text">
                       {isPending ? (
                         <span className="ai-chat__progress">
-                          {/* Keyed by phase so every step replays the fade-in. */}
-                          <span className="ai-chat__step" key={progressKey}>
-                            {progressLabel}
+                          <span className="ai-chat__pending-label">
+                            {message.generating ? '正在生成…' : '思考中…'}
                           </span>
                           <span className="ai-chat__timer">
                             已用 {elapsedSeconds}s
@@ -599,6 +694,19 @@ export function AiChatPanel() {
                         <span className="ai-chat__cancelled">已取消</span>
                       ) : null}
                     </p>
+                    {/* 写操作成行：只保留画布动作，读工具已折叠掉。 */}
+                    {lines.length > 0 ? (
+                      <ul className="ai-chat__writes" aria-label="画布写操作">
+                        {lines.map((tool) => (
+                          <li
+                            key={tool.id}
+                            className={`ai-chat__write-line ai-chat__write-line--${tool.status}`}
+                          >
+                            {toolLineText(tool)}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                     {/* 终态在运行结束后保留，不能清空为空白。 */}
                     {!isPending && message.durationSeconds !== undefined ? (
                       <span className="ai-chat__terminal">

@@ -70,7 +70,7 @@ describe('AgentLogRepository', () => {
     repository.insert({
       timestamp: 400,
       level: 'debug',
-      category: 'codex-runner',
+      category: 'codex-runtime',
       message: 'codex_delta',
     });
 
@@ -79,7 +79,7 @@ describe('AgentLogRepository', () => {
     ).toEqual(['failed_request', 'request']);
 
     expect(
-      repository.query({ category: ['http', 'codex-runner'], level: 'debug' }).items,
+      repository.query({ category: ['http', 'codex-runtime'], level: 'debug' }).items,
     ).toHaveLength(1);
 
     expect(
@@ -389,7 +389,7 @@ describe('AgentLogRepository', () => {
     repository.insert({
       timestamp: 50_000,
       level: 'info',
-      category: 'codex-runner',
+      category: 'codex-runtime',
       message: 'codex_spawn',
     });
     repository.insert({
@@ -414,8 +414,7 @@ describe('AgentLogRepository', () => {
       aiChatSuccessRate: null,
     });
     expect(stats.categoryCounts).toEqual([
-      { category: 'codex-runner', count: 1, errorCount: 0 },
-      { category: 'codex-runtime', count: 0, errorCount: 0 },
+      { category: 'codex-runtime', count: 1, errorCount: 0 },
       { category: 'canvas-tool', count: 0, errorCount: 0 },
       { category: 'ai-chat', count: 3, errorCount: 1 },
       { category: 'canvas-action', count: 0, errorCount: 0 },

@@ -1,5 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import type { LogLevel } from '@paintcodex/protocol';
+import type { LogLevel, StreamPayload } from '@paintcodex/protocol';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
 import type {
   AgentMessageDeltaNotification,
@@ -7,6 +7,7 @@ import type {
   DynamicToolCallResponse,
   InitializeParams,
   InitializeResponse,
+  ItemNotification,
   JsonRpcError,
   JsonRpcId,
   JsonRpcRequest,
@@ -22,6 +23,9 @@ import type {
   CanvasToolSet,
 } from './tools.js';
 
+/** One `tool` SSE frame: the protocol owns the shape so daemon and web agree. */
+export type ToolFrameEvent = NonNullable<StreamPayload['tool']>;
+
 /** One user message's worth of work inside a thread. */
 export interface CodexTurnInput {
   /** Canvas of the conversation; null means a per-turn, tool-less thread. */
@@ -33,6 +37,8 @@ export interface CodexTurnInput {
   tools: CanvasToolSet;
   onDelta(text: string): void;
   onLayerCreated?(layer: { id: string; name: string }): void;
+  /** Fires on `item/started` / `item/completed` for dynamic tool calls. */
+  onToolEvent?(event: ToolFrameEvent): void;
   signal?: AbortSignal;
   trace?: TraceContext;
 }
@@ -189,8 +195,11 @@ interface MutableActiveTurn extends ActiveTurnInfo {
   tools: CanvasToolSet;
   text: string;
   toolCallCount: number;
+  /** Failure codes by callId, attached to the matching `item/completed` frame. */
+  toolCodes: Map<string, string>;
   onDelta(text: string): void;
   onLayerCreated?: (layer: { id: string; name: string }) => void;
+  onToolEvent?: (event: ToolFrameEvent) => void;
   trace?: TraceContext;
   signal?: AbortSignal;
   settled: boolean;
@@ -224,6 +233,12 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   const pending = new Map<number, PendingRequest>();
   const threads = new Map<string, string>();
   const activeTurns = new Map<string, MutableActiveTurn>();
+  /**
+   * Per-thread tool queue. One turn may ask for several tools back to back, and
+   * two writes racing would overwrite each other's `expectedRevision`; the
+   * canvas has a single writer, so calls execute strictly one at a time.
+   */
+  const toolQueues = new Map<string, Promise<void>>();
 
   const log = (
     level: LogLevel,
@@ -407,6 +422,56 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       return;
     }
 
+    if (method === 'item/started' || method === 'item/completed') {
+      const notification = (params ?? {}) as Partial<ItemNotification>;
+      const item = notification.item;
+
+      if (typeof item !== 'object' || item === null) {
+        return;
+      }
+
+      const record = item as Record<string, unknown>;
+
+      if (record.type !== 'dynamicToolCall') {
+        return;
+      }
+
+      if (typeof notification.threadId !== 'string') {
+        return;
+      }
+
+      const active = activeTurns.get(notification.threadId);
+
+      if (!active || active.settled) {
+        return;
+      }
+
+      if (typeof record.id !== 'string' || typeof record.tool !== 'string') {
+        return;
+      }
+
+      const running = method === 'item/started';
+      const code = running ? undefined : active.toolCodes.get(record.id);
+      const event: ToolFrameEvent = {
+        id: record.id,
+        name: record.tool,
+        status: running ? 'running' : record.success === false ? 'failed' : 'ok',
+        ...(code === undefined ? {} : { code }),
+      };
+
+      try {
+        active.onToolEvent?.(event);
+      } catch (error) {
+        log('error', 'tool_event_handler_failed', {
+          error,
+          canvasId: active.canvasId,
+          trace: active.trace,
+        });
+      }
+
+      return;
+    }
+
     if (method === 'turn/completed') {
       const completed = params as Partial<TurnCompletedNotification>;
       const threadId = completed.threadId;
@@ -514,20 +579,32 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     }
   };
 
-  const handleServerRequest = async (
-    id: JsonRpcId,
-    method: string,
-    params: unknown,
-  ) => {
-    if (method !== 'item/tool/call') {
-      write({
-        id,
-        error: { code: -32601, message: `不支持的服务端请求：${method}` },
-      });
-      return;
-    }
+  /** Runs `task` after every earlier tool call of the same thread finished. */
+  const enqueueToolCall = (
+    threadId: string,
+    task: () => Promise<void>,
+  ): Promise<void> => {
+    const previous = toolQueues.get(threadId) ?? Promise.resolve();
+    const next = previous.then(task, task);
+    const tail = next.then(
+      () => undefined,
+      () => undefined,
+    );
 
-    const call = (params ?? {}) as Partial<DynamicToolCallParams>;
+    toolQueues.set(threadId, tail);
+    void tail.then(() => {
+      if (toolQueues.get(threadId) === tail) {
+        toolQueues.delete(threadId);
+      }
+    });
+
+    return next;
+  };
+
+  const runToolCall = async (
+    id: JsonRpcId,
+    call: Partial<DynamicToolCallParams>,
+  ) => {
     const active =
       typeof call.threadId === 'string' ? activeTurns.get(call.threadId) : undefined;
     let result: CanvasToolResult;
@@ -557,7 +634,16 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       });
       active.toolCallCount += 1;
 
-      const layer = result.ok ? result.layer : undefined;
+      // The matching `item/completed` notification carries success but not the
+      // failure code; remember it by callId so the frame can say why.
+      if (!result.ok && typeof call.callId === 'string') {
+        active.toolCodes.set(call.callId, result.code);
+      }
+
+      // Only creation feeds the "layer added" confirmation; an update also
+      // returns a layer so the model can see it, but nothing was added.
+      const layer =
+        result.ok && call.tool === 'canvas_create_layer' ? result.layer : undefined;
 
       if (
         typeof layer === 'object' &&
@@ -583,6 +669,29 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     };
 
     write({ id, result: response });
+  };
+
+  const handleServerRequest = async (
+    id: JsonRpcId,
+    method: string,
+    params: unknown,
+  ) => {
+    if (method !== 'item/tool/call') {
+      write({
+        id,
+        error: { code: -32601, message: `不支持的服务端请求：${method}` },
+      });
+      return;
+    }
+
+    const call = (params ?? {}) as Partial<DynamicToolCallParams>;
+
+    if (typeof call.threadId !== 'string') {
+      await runToolCall(id, call);
+      return;
+    }
+
+    await enqueueToolCall(call.threadId, () => runToolCall(id, call));
   };
 
   const handleLine = (line: string) => {
@@ -942,8 +1051,10 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         tools: input.tools,
         text: '',
         toolCallCount: 0,
+        toolCodes: new Map(),
         onDelta: input.onDelta,
         onLayerCreated: input.onLayerCreated,
+        onToolEvent: input.onToolEvent,
         trace: input.trace,
         settled: false,
         abortRequested: false,

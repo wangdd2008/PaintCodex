@@ -170,7 +170,7 @@ describe('AI chat instrumentation', () => {
     });
 
     const toolResult = logsIn(app, 'canvas-tool').find(
-      (log) => log.message === 'tool_result',
+      (log) => log.message === 'tool_call',
     );
     const completed = single(app, 'chat_completed');
 

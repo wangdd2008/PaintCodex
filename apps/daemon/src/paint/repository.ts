@@ -263,6 +263,20 @@ export class SnapshotRepository {
     return row ?? null;
   }
 
+  /** The snapshot recorded exactly at `revision` (the undo cursor points at one). */
+  at(canvasId: string, revision: number): SnapshotRecord | null {
+    const row = this.db
+      .prepare<[string, number], SnapshotRecord>(
+        `SELECT ${SNAPSHOT_COLUMNS}
+         FROM snapshots
+         WHERE canvasId = ? AND revision = ?
+         LIMIT 1`,
+      )
+      .get(canvasId, revision);
+
+    return row ?? null;
+  }
+
   before(canvasId: string, revision: number): SnapshotRecord | null {
     const row = this.db
       .prepare<[string, number], SnapshotRecord>(
