@@ -144,7 +144,15 @@ daemon 不再替 AI 重试 revision 冲突（删除 `MAX_ACTION_RETRIES` 路径�
 
 ## Acceptance
 
-- `pnpm -r typecheck` / `pnpm -r test` / `pnpm -r build` 全绿；
+- `pnpm -r typecheck` / `pnpm -r test` / `pnpm -r build` 全绿（build 的 web 段在 Windows 需按 README「Checks」里的 TEMP 规避法执行）；
 - 全链路手工验收用真实 `codex` 跑通 User Story 1、2、4、6；
 - daemon 在 `codex` 版本过低时拒绝启动 AI 路由，错误信息可操作；
 - 全仓 grep 不到 `CANVAS_ACTION_MARKER`（切片 1 之后）。
+
+### 验收记录
+
+- 2026-10-28，真实 `codex-cli 0.164.0` + 构建后的 daemon（临时库，`PORT=3299`），SSE 逐帧核对：
+  - US1「把刚才那个圆改颜色」：`canvas_get_context` → `canvas_update_layer`，图层数 1→1（就地改写，未叠新层），revision 1→2，颜色由红改蓝；两次工具调用都成对出现 `running`/`ok` 帧。
+  - US2「把这个圆删掉」：先收到 `confirm`「删除图层「红色圆形」」，经 `POST /paint/ai/confirm` 批准后才执行 `canvas_delete_layer`，图层数 1→0，revision 3。
+  - US5（跨重启指代）与「resume 后工具仍可用」由票 04 的独立探针验证（见该票 Comments）。
+  - US6（并发编辑下的修订冲突）只有单元测试覆盖，未做双人实时手工复现——记录在此，避免被读成「已人工验证」。
