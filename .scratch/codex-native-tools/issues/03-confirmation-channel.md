@@ -29,3 +29,5 @@
   - 偏差：确认条按钮固定为「删除 / 取消」，因为本票只有删除需要确认；06 的导出确认需要通用按钮文案时再扩展。
   - 任务重划：`canvas_export_png` 在本分支尚不存在，且它需要的「前端生成 PNG 并回传结果」通道与 04 的预览请求共用；导出工具及其确认移到新票 `06-export-tool.md`（`feat/codex-native-tools` 上的 `d63593a docs(spec): split export tool into ticket 06` 已建票），本票不实现导出。
   - 手工验收：未跑真实 codex CLI 冒烟；User Story 2 的「删除前被询问」由 daemon 集成测试（fake app-server + 挂起工具 → 确认帧 → 确认端点 → 工具恢复）与 Web 交互测试覆盖。
+  - 合并 `feat/codex-native-tools`（`a9ba6f6`，带入票 06 与 spec 切片第 5 行）后复跑：`pnpm -r typecheck` 通过，daemon 194 通过，web 210 通过。
+  - 后续 `ff7ab80 test(daemon): widen runtime test budget under parallel load`：`codex-runtime.test.ts` 每个用例都会 spawn 一个真实 Node 子进程；全仓并行跑时出现过 5s 默认单测预算被进程启动耗时打满的抖动，故该文件单测预算放宽到 30s（与 runtime 的 15s 请求超时对齐），断言未变。
