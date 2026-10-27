@@ -84,3 +84,30 @@ daemon 在 `startThread` 时声明固定的工具集（当前 7 个：`canvas_ge
 4. 切片 3 接确认通道；同时修正 `undo/redo/createCanvas/renameCanvas` 与 REST 删除里硬编码的 `actor:'user'`。
 5. 切片 4 接 `canvas_render_preview` 与 thread 记忆的前端接线。
 6. 按 `.scratch/codex-native-tools/` 的票据推进，ADR-0006 的 `codex-runner` 分类在切片 2 结束后由 `codex-runtime` / `canvas-tool` 取代。
+
+## Amendments
+
+历史正文保留不改；以下按决定追加落地后的修订（2026-10-28）。
+
+### 2026-10-28 — §1 `canvas_render_preview` 已端到端落地
+
+`canvas_render_preview` 不再是「预留」：它已声明、已接通浏览器渲染（SSE `renderRequest` + `POST /paint/ai/render-result`），工具结果以 `inputImage` 携图返回。当初说「预留」指的是**不把预览写进开发者提示词**，让模型自行决定何时调用；工具本身从一开始就在工具集里。
+
+### 2026-10-28 — §2 协议类型是生成 schema 的精选子集
+
+`protocol.ts` 不是完整生成物，而是从 `codex app-server generate-json-schema --experimental` 的输出中**按需转写**的子集（只保留 daemon 实际收发的方法与字段），因此不能声称「由生成器保证同步」。本仓库没有 CI，替代做法是：
+
+- `pnpm --filter @paintcodex/daemon codex:protocol-schema` 把 schema 生成到 gitignore 的目录；
+- 升级 `codex` 时先跑一次生成、与 `protocol.ts` 手工比对差异，再跑全链路测试。类型漂移靠这条纪律兜底，而不是流水线。
+
+### 2026-10-28 — §6 确认通道由 daemon 自有，不走 `ToolRequestUserInput`
+
+实际落地的是 daemon 自有的确认通道：SSE `confirm` 帧 + `POST /paint/ai/confirm`，浏览器渲染确认条，答复按 `requestId` 回到挂起的工具调用；60 秒无答复视为拒绝，SSE 断开 / turn 中断立即结算。没有使用 Codex 协议的 `ToolRequestUserInput`，原因有两条：
+
+- 我们的工具在 **daemon 进程内**执行，问题天然属于浏览器那一侧；绕回 Codex 再让它向客户端发问，多一层协议却没有多一分正确性；
+- Codex 的 approval policy 管的是「让不让 Codex 动它自己的文件系统」，管不到「让不让 AI 删这张画布图层」。两类授权不是同一件事。
+
+### 2026-10-28 — 运维事实：崩溃恢复与 `deleteThread`
+
+- **崩溃恢复（有意为之）**：app-server 崩溃会让当前 turn 失败并清空内存中的 thread 映射（下次 `startTurn` 重新 `initialize` 并按需 `thread/resume` 或重建 thread）；进程**懒重启**，不在崩溃回调里立刻拉起。这样一次坏 turn 不会变成自动重启风暴，代价是崩溃后的下一句话才恢复。
+- **`CodexRuntime.deleteThread` 暂无生产调用方**：产品目前没有「删除画布」通路，所以没有地方调用它。它是为那条通路预置的接缝（`thread/delete` + 清理内存映射与库中 id），不是死代码，也不应在收尾时删除；等画布删除落地时在删除处接上。

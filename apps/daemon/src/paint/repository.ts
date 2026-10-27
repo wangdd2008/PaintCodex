@@ -17,12 +17,15 @@ export interface NewCanvasRecord {
   backgroundColor: string;
   revision: number;
   undoCursorRevision: number | null;
+  /** Codex app-server thread that remembers this canvas' conversation. */
+  codexThreadId: string | null;
   createdAt: number;
   updatedAt: number;
 }
 
 export interface CanvasRecord extends Canvas {
   undoCursorRevision: number | null;
+  codexThreadId: string | null;
 }
 
 export interface NewLayerRecord {
@@ -64,7 +67,7 @@ interface LayerRow {
 }
 
 const CANVAS_COLUMNS =
-  'id, name, width, height, backgroundColor, revision, undoCursorRevision, createdAt, updatedAt';
+  'id, name, width, height, backgroundColor, revision, undoCursorRevision, codexThreadId, createdAt, updatedAt';
 
 const SNAPSHOT_COLUMNS =
   'id, canvasId, revision, state, actor, action, timestamp';
@@ -75,8 +78,8 @@ export class CanvasRepository {
   create(record: NewCanvasRecord): CanvasRecord {
     this.db
       .prepare(
-        `INSERT INTO canvases (id, name, width, height, backgroundColor, revision, undoCursorRevision, createdAt, updatedAt)
-         VALUES (@id, @name, @width, @height, @backgroundColor, @revision, @undoCursorRevision, @createdAt, @updatedAt)`,
+        `INSERT INTO canvases (id, name, width, height, backgroundColor, revision, undoCursorRevision, codexThreadId, createdAt, updatedAt)
+         VALUES (@id, @name, @width, @height, @backgroundColor, @revision, @undoCursorRevision, @codexThreadId, @createdAt, @updatedAt)`,
       )
       .run(record);
 
@@ -117,6 +120,17 @@ export class CanvasRepository {
     this.db
       .prepare(`UPDATE canvases SET undoCursorRevision = ? WHERE id = ?`)
       .run(revision, id);
+  }
+
+  /**
+   * Remembers (or forgets, with `null`) the Codex thread of a canvas. Thread
+   * identity is not document content: like a rename, it must not bump the
+   * revision or disturb an in-flight save.
+   */
+  setCodexThreadId(id: string, threadId: string | null): void {
+    this.db
+      .prepare(`UPDATE canvases SET codexThreadId = ? WHERE id = ?`)
+      .run(threadId, id);
   }
 }
 
@@ -259,6 +273,20 @@ export class SnapshotRepository {
          LIMIT 1`,
       )
       .get(canvasId);
+
+    return row ?? null;
+  }
+
+  /** The snapshot recorded exactly at `revision` (the undo cursor points at one). */
+  at(canvasId: string, revision: number): SnapshotRecord | null {
+    const row = this.db
+      .prepare<[string, number], SnapshotRecord>(
+        `SELECT ${SNAPSHOT_COLUMNS}
+         FROM snapshots
+         WHERE canvasId = ? AND revision = ?
+         LIMIT 1`,
+      )
+      .get(canvasId, revision);
 
     return row ?? null;
   }

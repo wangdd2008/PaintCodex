@@ -1,27 +1,48 @@
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import type {
+  CodexRuntime,
+  CodexTurnInput,
+} from '../src/paint/agent/runtime/codex-runtime.js';
 import { buildServer } from '../src/api/server.js';
-import type { CodexRunner } from '../src/paint/agent/codex-runner.js';
-import { CANVAS_ACTION_MARKER } from '../src/paint/agent/canvas-action.js';
+import { fakeRuntime } from './helpers/fake-runtime.js';
 
 const RED_CIRCLE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080"><circle cx="960" cy="540" r="120" fill="red"/></svg>';
 
-function actionText(name: string, svg: string): string {
-  return `Drawing that now.\n${CANVAS_ACTION_MARKER}\n${JSON.stringify({ name, svg })}`;
+/** Runs a tool through the tool set the route actually handed to the runtime. */
+async function createLayer(
+  input: CodexTurnInput,
+  args: Record<string, unknown>,
+): Promise<{ ok: boolean; layer?: { id: string; name: string }; code?: string }> {
+  const result = await input.tools.execute('canvas_create_layer', args, {
+    canvasId: input.canvasId,
+    prompt: input.userMessage ?? input.prompt,
+    trace: input.trace,
+  });
+
+  if (result.ok) {
+    input.onLayerCreated?.(result.layer as { id: string; name: string });
+  }
+
+  return result as { ok: boolean; layer?: { id: string; name: string }; code?: string };
 }
 
-function runnerReturning(
-  text: string,
-  capture?: (prompt: string) => void,
-): CodexRunner {
-  return {
-    run: async (prompt, onDelta) => {
-      capture?.(prompt);
-      onDelta(text);
-      return text;
-    },
-  };
+function runtimeThatCreatesLayer(
+  name: string,
+  svg: string,
+  captured?: { input?: CodexTurnInput },
+): CodexRuntime {
+  return fakeRuntime(async (input) => {
+    await createLayer(input, {
+      canvasId: input.canvasId,
+      name,
+      svg,
+    });
+    input.onDelta('Drawing that now.');
+
+    return { text: 'Drawing that now.', toolCallCount: 1 };
+  }, captured ?? {});
 }
 
 async function createCanvas(
@@ -49,11 +70,11 @@ async function chat(
   });
 }
 
-describe('AI canvas actions', () => {
+describe('AI canvas tools', () => {
   it('creates an ai-generated SVG layer through the dispatcher', async () => {
     const app = buildServer({
       dbPath: ':memory:',
-      runner: runnerReturning(actionText('AI — Red circle', RED_CIRCLE_SVG)),
+      runtime: runtimeThatCreatesLayer('AI — Red circle', RED_CIRCLE_SVG),
     });
     const canvasId = await createCanvas(app);
 
@@ -76,13 +97,11 @@ describe('AI canvas actions', () => {
     await app.close();
   });
 
-  it('passes canvas dimensions and existing layers to Codex', async () => {
-    let prompt = '';
+  it('passes a minimal canvas summary to Codex', async () => {
+    const captured: { input?: CodexTurnInput } = {};
     const app = buildServer({
       dbPath: ':memory:',
-      runner: runnerReturning('Just chatting.', (value) => {
-        prompt = value;
-      }),
+      runtime: fakeRuntime(async () => ({ text: 'Just chatting.', toolCallCount: 0 }), captured),
     });
     const canvasId = await createCanvas(app, { width: 800, height: 600 });
     await app.inject({
@@ -91,32 +110,69 @@ describe('AI canvas actions', () => {
       payload: {
         name: 'Base',
         type: 'vector',
-        content: { kind: 'fabric', json: '{"type":"path","path":[]}' },
+        content: { kind: 'fabric', json: '{"type":"path"}' },
       },
     });
 
     await chat(app, 'What next?', canvasId);
 
-    expect(prompt).toContain('800x600');
-    expect(prompt).toContain('Base [vector]');
+    const prompt = captured.input?.prompt ?? '';
+
     expect(prompt).toContain(canvasId);
+    expect(prompt).toContain('800x600');
+    expect(prompt).toContain('Canvas revision: 1');
+    expect(prompt).toContain('Layer count: 1');
+    expect(prompt).toContain('Layer names: Base');
+    // Writes must carry the revision the model observed, not a fresh guess.
+    expect(prompt).toContain('canvas_get_context');
+    expect(prompt).toContain('expectedRevision');
+    expect(prompt).toContain('revision_conflict');
+    // The agent pulls ids and geometry through canvas_get_context instead.
+    expect(prompt).not.toContain('CANVAS_ACTION');
 
     await app.close();
   });
 
-  it('rejects an unsafe SVG without creating a layer', async () => {
+  it('hands the runtime the declared canvas tools when a canvas exists', async () => {
+    const captured: { input?: CodexTurnInput } = {};
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(async () => ({ text: '', toolCallCount: 0 }), captured),
+    });
+    const canvasId = await createCanvas(app);
+
+    await chat(app, 'What can you do?', canvasId);
+
+    expect(captured.input?.canvasId).toBe(canvasId);
+    expect(captured.input?.tools.declarations.map((tool) => tool.name)).toEqual([
+      'canvas_get_context',
+      'canvas_create_layer',
+      'canvas_update_layer',
+      'canvas_delete_layer',
+      'canvas_select',
+      'canvas_export_png',
+      'canvas_undo',
+      'canvas_render_preview',
+    ]);
+
+    await app.close();
+  });
+
+  it('keeps a rejected SVG as a tool failure the model can read, not an SSE error', async () => {
     const unsafeSvg =
       '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
     const app = buildServer({
       dbPath: ':memory:',
-      runner: runnerReturning(actionText('AI — Unsafe', unsafeSvg)),
+      runtime: runtimeThatCreatesLayer('AI — Unsafe', unsafeSvg),
     });
     const canvasId = await createCanvas(app);
 
     const response = await chat(app, 'Draw something', canvasId);
     const fetched = await app.inject({ method: 'GET', url: `/paint/canvas/${canvasId}` });
 
-    expect(response.payload).toContain('"code":"ai_canvas_action_invalid"');
+    expect(response.payload).toContain('"done":true');
+    expect(response.payload).not.toContain('layerCreated');
+    expect(response.payload).not.toContain('"error"');
     expect(fetched.json().layers).toEqual([]);
 
     await app.close();
@@ -125,7 +181,11 @@ describe('AI canvas actions', () => {
   it('leaves ordinary conversation untouched', async () => {
     const app = buildServer({
       dbPath: ':memory:',
-      runner: runnerReturning('Paris'),
+      runtime: fakeRuntime(async (input) => {
+        input.onDelta('Paris');
+
+        return { text: 'Paris', toolCallCount: 0 };
+      }),
     });
     const canvasId = await createCanvas(app);
 
@@ -136,20 +196,6 @@ describe('AI canvas actions', () => {
     expect(response.payload).toContain('"done":true');
     expect(response.payload).not.toContain('layerCreated');
     expect(fetched.json().layers).toEqual([]);
-
-    await app.close();
-  });
-
-  it('reports canvas_required when Codex draws without a canvas', async () => {
-    const app = buildServer({
-      dbPath: ':memory:',
-      runner: runnerReturning(actionText('AI — Red circle', RED_CIRCLE_SVG)),
-    });
-
-    const response = await chat(app, 'Draw a red circle');
-
-    expect(response.payload).toContain('"code":"canvas_required"');
-    expect(response.payload).toContain('"done":true');
 
     await app.close();
   });

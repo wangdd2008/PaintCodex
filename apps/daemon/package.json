@@ -9,6 +9,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "codex:protocol-schema": "codex app-server generate-json-schema --experimental -o .codex-schema",
     "test": "vitest run"
   },
   "dependencies": {

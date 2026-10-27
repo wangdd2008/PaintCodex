@@ -96,14 +96,14 @@
 }
 
 /* Own line inside the bubble so it reads as status, not as reply text. */
-.ai-chat__step {
+.ai-chat__pending-label {
   display: block;
   color: #9ea3b0;
   font-size: 11px;
-  animation: ai-chat-step-in 160ms ease-out;
+  animation: ai-chat-fade-in 160ms ease-out;
 }
 
-/* 步骤文案与「已用 Ns」计时共用一行状态。 */
+/* 等待文案与「已用 Ns」计时共用一行状态。 */
 .ai-chat__progress {
   display: flex;
   align-items: baseline;
@@ -111,14 +111,130 @@
   margin-bottom: 4px;
 }
 
-.ai-chat__progress .ai-chat__step {
+.ai-chat__progress .ai-chat__pending-label {
   margin-bottom: 0;
+}
+
+/* 写操作成行：每次改动画布占据一行，读工具不渲染。 */
+.ai-chat__writes {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ai-chat__write-line {
+  color: #9ea3b0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.ai-chat__write-line--running {
+  color: #b9c6de;
+}
+
+.ai-chat__write-line--ok {
+  color: #8fbf9f;
+}
+
+.ai-chat__write-line--failed {
+  color: #f2b8b5;
 }
 
 .ai-chat__timer {
   color: #747785;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+/* 不可逆动作的确认条：挂在助手气泡内，答复前一直是这一轮的一部分。 */
+.ai-chat__confirmations {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ai-chat__confirm {
+  border: 1px solid #6b5a34;
+  border-radius: 6px;
+  background: #26231a;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ai-chat__confirm-title {
+  margin: 0;
+  color: #f0dfb4;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.ai-chat__confirm-detail {
+  margin: 0;
+  color: #d8c48a;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ai-chat__confirm-error {
+  margin: 0;
+  color: #f2b8b5;
+  font-size: 11px;
+}
+
+.ai-chat__confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-chat__confirm-approve,
+.ai-chat__confirm-decline {
+  border: 1px solid #5b5340;
+  border-radius: 6px;
+  padding: 4px 12px;
+  min-height: 28px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ai-chat__confirm-approve {
+  border-color: #7a3234;
+  background: #3a1f21;
+  color: #f2b8b5;
+}
+
+.ai-chat__confirm-approve:hover:not(:disabled) {
+  background: #4a2628;
+}
+
+.ai-chat__confirm-decline {
+  background: #2b2c33;
+  color: #d5d7e0;
+}
+
+.ai-chat__confirm-decline:hover:not(:disabled) {
+  background: #34353d;
+}
+
+.ai-chat__confirm-approve:disabled,
+.ai-chat__confirm-decline:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ai-chat__confirm-status {
+  color: #cbbd93;
+  font-size: 11px;
 }
 
 /* 运行结束后保留：空白气泡会让人看不出已经完成。 */
@@ -174,7 +290,14 @@
   font-size: 11px;
 }
 
-@keyframes ai-chat-step-in {
+.ai-chat__notice {
+  display: block;
+  margin-top: 2px;
+  color: #cfb26c;
+  font-size: 11px;
+}
+
+@keyframes ai-chat-fade-in {
   from {
     opacity: 0;
   }

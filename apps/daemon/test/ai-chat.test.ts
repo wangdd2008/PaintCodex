@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CANVAS_ACTION_MARKER } from '@paintcodex/protocol';
+import type { CodexTurnInput } from '../src/paint/agent/runtime/codex-runtime.js';
 import { buildServer } from '../src/api/server.js';
-import type { CodexRunner } from '../src/paint/agent/codex-runner.js';
-
-const STEP_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
+import { fakeRuntime } from './helpers/fake-runtime.js';
 
 /** Every SSE frame body, decoded in stream order. */
 function frames(payload: string): Record<string, unknown>[] {
@@ -14,24 +11,16 @@ function frames(payload: string): Record<string, unknown>[] {
     .map((frame) => JSON.parse(frame.replace(/^data: /, '')) as Record<string, unknown>);
 }
 
-function stepEvents(payload: string): unknown[] {
-  return frames(payload)
-    .filter((frame) => frame.step !== undefined)
-    .map((frame) => frame.step);
-}
-
 describe('POST /paint/ai/chat', () => {
   it('streams assistant deltas and a final done event', async () => {
-    let receivedPrompt = '';
-    const runner: CodexRunner = {
-      run: async (prompt, onDelta) => {
-        receivedPrompt = prompt;
-        onDelta('Hello');
-        onDelta(' from Codex');
-        return 'Hello from Codex';
-      },
-    };
-    const app = buildServer({ runner, dbPath: ':memory:' });
+    const captured: { input?: CodexTurnInput } = {};
+    const runtime = fakeRuntime(async (input) => {
+      input.onDelta('Hello');
+      input.onDelta(' from Codex');
+
+      return { text: 'Hello from Codex', toolCallCount: 0 };
+    }, captured);
+    const app = buildServer({ runtime, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
@@ -42,65 +31,49 @@ describe('POST /paint/ai/chat', () => {
     expect(response.statusCode).toBe(200);
     expect(response.headers['content-type']).toContain('text/event-stream');
     expect(response.payload).toBe(
-      'data: {"step":{"id":"prompt_built","label":"正在构建请求…"}}\n\n' +
-        'data: {"step":{"id":"codex_exec","label":"AI 正在思考…"}}\n\n' +
-        'data: {"delta":"Hello"}\n\n' +
+      'data: {"delta":"Hello"}\n\n' +
         'data: {"delta":" from Codex"}\n\n' +
-        'data: {"step":{"id":"action_parse","label":"正在解析结果…"}}\n\n' +
         'data: {"done":true}\n\n',
     );
-    expect(receivedPrompt).toContain('painting assistant');
-    expect(receivedPrompt).toContain('Hello');
-    expect(receivedPrompt).toContain('canvas-1');
+    expect(captured.input?.prompt).toContain('painting assistant');
+    expect(captured.input?.prompt).toContain('Hello');
+    expect(captured.input?.prompt).toContain('canvas-1');
+    expect(captured.input?.userMessage).toBe('Hello');
 
     await app.close();
   });
 
-  it('streams step events for prompt, codex, parse and apply in order', async () => {
-    const actionText = `Drawing that now.\n${CANVAS_ACTION_MARKER}\n${JSON.stringify({
-      name: 'Steps',
-      svg: STEP_SVG,
-    })}`;
-    const runner: CodexRunner = {
-      run: async (_prompt, onDelta) => {
-        onDelta(actionText);
-        return actionText;
-      },
-    };
-    const app = buildServer({ runner, dbPath: ':memory:' });
-    const canvas = await app.inject({
-      method: 'POST',
-      url: '/paint/canvas',
-      payload: {},
+  it('forwards a thread-reset notice without ending the turn', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onNotice?.('会话已重置，已开启新对话。');
+      input.onDelta('重新开始画');
+
+      return { text: '重新开始画', toolCallCount: 0 };
     });
-    const canvasId = canvas.json().id as string;
+    const app = buildServer({ runtime, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
       url: '/paint/ai/chat',
-      payload: { message: 'Draw a square', canvasId },
+      payload: { message: '继续', canvasId: 'canvas-1' },
     });
 
-    expect(stepEvents(response.payload)).toEqual([
-      { id: 'prompt_built', label: '正在构建请求…' },
-      { id: 'codex_exec', label: 'AI 正在思考…' },
-      { id: 'action_parse', label: '正在解析结果…' },
-      { id: 'action_apply', label: '正在应用到画布…' },
+    expect(frames(response.payload)).toEqual([
+      { notice: '会话已重置，已开启新对话。' },
+      { delta: '重新开始画' },
+      { done: true },
     ]);
-    // No step follows the terminal frame.
-    expect(frames(response.payload).at(-1)).toEqual({ done: true });
 
     await app.close();
   });
 
-  it('does not emit an apply step when the reply changes nothing', async () => {
-    const runner: CodexRunner = {
-      run: async (_prompt, onDelta) => {
-        onDelta('Paris');
-        return 'Paris';
-      },
-    };
-    const app = buildServer({ runner, dbPath: ':memory:' });
+  it('sends no step frames and no layerCreated frame for plain conversation', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onDelta('Paris');
+
+      return { text: 'Paris', toolCallCount: 0 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
@@ -108,25 +81,129 @@ describe('POST /paint/ai/chat', () => {
       payload: { message: 'Capital of France?' },
     });
 
-    expect(stepEvents(response.payload)).toEqual([
-      { id: 'prompt_built', label: '正在构建请求…' },
-      { id: 'codex_exec', label: 'AI 正在思考…' },
-      { id: 'action_parse', label: '正在解析结果…' },
+    expect(frames(response.payload)).toEqual([
+      { delta: 'Paris' },
+      { done: true },
     ]);
-    expect(frames(response.payload).at(-1)).toEqual({ done: true });
+    expect(response.payload).not.toContain('"step"');
+    expect(response.payload).not.toContain('layerCreated');
 
     await app.close();
   });
 
-  it('rejects a request without a message and never runs the runner', async () => {
-    let called = false;
-    const runner: CodexRunner = {
-      run: async () => {
-        called = true;
-        return '';
+  it('forwards tool item events as tool frames', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onToolEvent?.({
+        id: 'call-1',
+        name: 'canvas_update_layer',
+        status: 'running',
+      });
+      input.onToolEvent?.({
+        id: 'call-1',
+        name: 'canvas_update_layer',
+        status: 'ok',
+      });
+      input.onToolEvent?.({
+        id: 'call-2',
+        name: 'canvas_delete_layer',
+        status: 'failed',
+        code: 'revision_conflict',
+      });
+
+      return { text: '', toolCallCount: 2 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: 'Update the circle' },
+    });
+
+    expect(frames(response.payload)).toEqual([
+      {
+        tool: {
+          id: 'call-1',
+          name: 'canvas_update_layer',
+          status: 'running',
+        },
       },
-    };
-    const app = buildServer({ runner, dbPath: ':memory:' });
+      { tool: { id: 'call-1', name: 'canvas_update_layer', status: 'ok' } },
+      {
+        tool: {
+          id: 'call-2',
+          name: 'canvas_delete_layer',
+          status: 'failed',
+          code: 'revision_conflict',
+        },
+      },
+      { done: true },
+    ]);
+
+    await app.close();
+  });
+
+  it('forwards a suspended tool as a confirm frame', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onConfirm?.({
+        id: 'confirm-1',
+        title: '删除图层「红圆」',
+        detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+      });
+
+      return { text: '', toolCallCount: 1 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: '删掉红圆', canvasId: 'canvas-1' },
+    });
+
+    expect(frames(response.payload)).toEqual([
+      {
+        confirm: {
+          id: 'confirm-1',
+          title: '删除图层「红圆」',
+          detail: '这是不可逆操作：确认后该图层会从画布上移除。',
+        },
+      },
+      { done: true },
+    ]);
+
+    await app.close();
+  });
+
+  it('declares no canvas tools when the conversation has no canvas', async () => {
+    let toolCount = -1;
+    const runtime = fakeRuntime(async (input) => {
+      toolCount = input.tools.declarations.length;
+
+      return { text: '', toolCallCount: 0 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: 'Hello' },
+    });
+
+    expect(response.payload).toContain('"done":true');
+    expect(toolCount).toBe(0);
+
+    await app.close();
+  });
+
+  it('rejects a request without a message and never starts a turn', async () => {
+    let called = false;
+    const runtime = fakeRuntime(async () => {
+      called = true;
+
+      return { text: '', toolCallCount: 0 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',
@@ -146,13 +223,11 @@ describe('POST /paint/ai/chat', () => {
     await app.close();
   });
 
-  it('streams an error event when the runner fails', async () => {
-    const runner: CodexRunner = {
-      run: async () => {
-        throw new Error('codex exploded');
-      },
-    };
-    const app = buildServer({ runner, dbPath: ':memory:' });
+  it('streams an error event when the runtime fails', async () => {
+    const runtime = fakeRuntime(async () => {
+      throw new Error('codex exploded');
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
 
     const response = await app.inject({
       method: 'POST',

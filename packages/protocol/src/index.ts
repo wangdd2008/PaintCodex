@@ -1,5 +1,3 @@
-export const CANVAS_ACTION_MARKER = '<<<CANVAS_ACTION>>>';
-
 export type Actor = 'user' | 'agent';
 
 export type LayerType = 'raster' | 'vector' | 'ai-generated';
@@ -118,6 +116,66 @@ export interface AiChatRequest {
 }
 
 /**
+ * Answer to one `confirm` frame. `canvasId` is optional so a bare client can
+ * still answer, but the web sends it: the daemon refuses an answer whose canvas
+ * does not match the suspended request.
+ */
+export interface AiConfirmRequest {
+  requestId: string;
+  approved: boolean;
+  canvasId?: string;
+}
+
+/**
+ * The browser's answer to a `renderRequest` frame: one PNG data URL for one
+ * request id. The daemon accepts exactly one result per request, and only
+ * while that request is still pending.
+ */
+export interface AiRenderResultRequest {
+  requestId: string;
+  imageUrl: string;
+}
+
+/**
+ * The browser's answer to an `exportRequest` frame: the file it just downloaded
+ * and its size, or the reason it could not export. The PNG itself never travels
+ * back — the browser already saved it, and the tool result must not carry bytes.
+ */
+export interface AiExportResultRequest {
+  requestId: string;
+  /** Download filename; present only when the export succeeded. */
+  filename?: string;
+  /** Size of the downloaded PNG in bytes; present only on success. */
+  bytes?: number;
+  /** Why the browser could not export; the tool answers export_unavailable. */
+  error?: string;
+}
+
+/**
+ * A rectangle in canvas coordinates: the same units as `CanvasDocument.width`
+ * and `height`, origin at the top-left corner.
+ */
+export interface CanvasRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * `canvas_select`'s UI signal: point the user at one layer or one area. It is a
+ * one-way notification (the browser answers nothing), and it never touches the
+ * document, so it carries no revision and no undo/redo meaning.
+ */
+export interface CanvasSelectFrame {
+  canvasId: string;
+  layerId?: string;
+  region?: CanvasRegion;
+  /** True when `region` was clipped into the canvas bounds; the region is clipped. */
+  clamped?: boolean;
+}
+
+/**
  * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
  * frame carries exactly one of the optional members.
  */
@@ -125,9 +183,49 @@ export interface StreamPayload {
   delta?: unknown;
   done?: unknown;
   error?: { code?: unknown; message?: unknown };
-  /** Progress notification for the pending reply; `label` is UI copy. */
-  step?: { id: string; label: string };
+  /**
+   * One dynamic-tool call from the running turn. Emitted at `item/started`
+   * (`running`) and `item/completed` (`ok` / `failed`); `code` names the failure
+   * so the UI can localize it without parsing prose.
+   */
+  tool?: {
+    id: string;
+    name: string;
+    status: 'running' | 'ok' | 'failed';
+    code?: string;
+  };
+  /**
+   * A tool waits for the user before it may proceed (delete, export). The turn
+   * is suspended until `POST /paint/ai/confirm` answers `id`, or the deadline
+   * passes.
+   */
+  confirm?: {
+    id: string;
+    title: string;
+    detail: string;
+    /** CTA wording for this specific action; the web defaults to 「删除」. */
+    approveLabel?: string;
+  };
   layerCreated?: { id: string; name: string };
+  /**
+   * The running tool wants a PNG of the canvas. The browser answers with
+   * `POST /paint/ai/render-result` and the same request id.
+   */
+  renderRequest?: { id: string; canvasId: string };
+  /**
+   * The running tool asks the browser to download the canvas as a PNG. The
+   * browser answers with `POST /paint/ai/export-result` and the same id; the
+   * tool result carries only the filename and byte count.
+   */
+  exportRequest?: { id: string; canvasId: string };
+  /**
+   * The running tool asks the browser to move the UI focus: make `layerId` the
+   * active layer, or circle `region` on the canvas. One-way and ephemeral; the
+   * browser does not answer and nothing is persisted.
+   */
+  select?: CanvasSelectFrame;
+  /** A short, non-fatal status line; the turn keeps running after it. */
+  notice?: string;
 }
 
 export interface ApiErrorBody {
@@ -142,7 +240,8 @@ export const LOG_LEVELS = ['debug', 'info', 'warn', 'error'] as const;
 export type LogLevel = (typeof LOG_LEVELS)[number];
 
 export const LOG_CATEGORIES = [
-  'codex-runner',
+  'codex-runtime',
+  'canvas-tool',
   'ai-chat',
   'canvas-action',
   'http',

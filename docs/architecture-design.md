@@ -1,4 +1,4 @@
-﻿# AI 画图软件架构设计文档
+# AI 画图软件架构设计文档
 
 > 基于 OpenCreator 架构模式参考设计的个人 AI 画图工具
 
@@ -24,7 +24,7 @@
 | Q4 | 文件格式 | 双格式导出 | 工作时保存专有格式（完整信息），导出时生成标准图片 |
 | Q5 | AI 图层策略 | 强制新建 AI 图层 | 新内容一律新建 AI 图层；已存在的图层可由 canvas_update_layer 改写，删除需确认 |
 | Q6 | 存储策略 | 统一后端存储 | Web 和 Desktop 共用 Daemon 后端，Desktop 额外桥接本地文件选择 |
-| Q7 | Codex 工具集 | 7 个核心工具 | canvas_get_context, canvas_create_layer, canvas_update_layer, canvas_delete_layer, canvas_select, canvas_export_png, canvas_undo（另预留 render_preview） |
+| Q7 | Codex 工具集 | 7 个核心工具 + 1 个预览工具 | canvas_get_context, canvas_create_layer, canvas_update_layer, canvas_delete_layer, canvas_select, canvas_export_png, canvas_undo, canvas_render_preview |
 | Q8 | Undo/Redo | 快照级撤销 | 每次操作后保存画布完整快照，Undo 时恢复 |
 | Q9 | AI 安全策略 | 智能确认 | 可逆操作自动执行，不可逆操作请求确认 |
 | Q10 | AI 图片生成 | 纯 Codex 代码生成 | AI 通过生成 Canvas/SVG 代码来绘制图形，而非调用图像生成 API |
@@ -257,7 +257,7 @@ AI 能对画布做的事**只有**下面这七个工具。工具集是刻意的�
 | `canvas_export_png` | `{ canvasId }` | 客户端导出（ADR-0005） | 是 |
 | `canvas_undo` | `{ canvasId }` | `undo` | 否，但仅限 agent 自身动作 |
 
-另**预留** `canvas_render_preview`：返回当前渲染的 PNG，工具结果携带图片，供 AI 自查「有没有画出画布」。首版声明但不提示模型使用。
+`canvas_render_preview` 已端到端落地：返回当前渲染的 PNG，工具结果携带图片（`inputImage`），供 AI 自查「有没有画出画布」。它没有被写进开发者提示词，模型在需要时自行调用；daemon 不主动催促。
 
 **约定**：
 

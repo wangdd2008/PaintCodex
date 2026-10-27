@@ -1,11 +1,34 @@
 import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { LogLevel } from '@paintcodex/protocol';
-import { registerAiChatRoute } from './routes.ai.js';
+import {
+  registerAiChatRoute,
+  registerAiConfirmRoute,
+  registerExportResultRoute,
+  registerRenderResultRoute,
+} from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
 import { registerMonitorRoutes } from './routes.monitor.js';
 import { registerPaintRoutes } from './routes.paint.js';
-import { createCodexRunner, type CodexRunner } from '../paint/agent/codex-runner.js';
+import {
+  createCodexRuntime,
+  type CodexRuntime,
+  type CodexThreadStore,
+  type CodexVersionProbe,
+} from '../paint/agent/runtime/codex-runtime.js';
+import {
+  createConfirmationChannel,
+  type ConfirmationChannel,
+} from '../paint/agent/runtime/confirmation.js';
+import { createCanvasToolSet } from '../paint/agent/runtime/tools.js';
+import {
+  createRenderPreviewChannel,
+  type RenderPreviewChannel,
+} from '../paint/agent/runtime/render-preview.js';
+import {
+  createExportChannel,
+  type ExportChannel,
+} from '../paint/agent/runtime/export-png.js';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import { PaintEvents } from '../paint/events.js';
 import {
@@ -33,7 +56,15 @@ export interface ServerOptions {
   dbPath?: string;
   logger?: boolean;
   /** Injectable Codex seam; tests pass a fake so no CLI is spawned. */
-  runner?: CodexRunner;
+  runtime?: CodexRuntime;
+  /** Injectable version gate; tests pin it without a Codex install. */
+  codexVersion?: CodexVersionProbe;
+  /** Injectable confirmation seam; tests open and answer requests directly. */
+  confirmations?: ConfirmationChannel;
+  /** Injectable preview broker; tests pin request ids and the image cap. */
+  renderChannel?: RenderPreviewChannel;
+  /** Injectable export broker; tests pin request ids and the deadline. */
+  exportChannel?: ExportChannel;
 }
 
 export function defaultDbPath(): string {
@@ -45,17 +76,52 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const db = openDatabase(dbPath);
   const events = new PaintEvents();
   const observability = createObservability(db);
+  const canvases = new CanvasRepository(db);
   const service = new PaintService(
-    new CanvasRepository(db),
+    canvases,
     new LayerRepository(db),
     new SnapshotRepository(db),
     events,
     observability.logger,
   );
   const app = Fastify({ logger: options.logger ?? false });
-  const runner =
-    options.runner ?? createCodexRunner({ logger: observability.logger });
   const dispatcher = new CommandDispatcher(service);
+  const tools = createCanvasToolSet({
+    dispatcher,
+    service,
+    logger: observability.logger,
+  });
+  // `codex app-server`'s protocol is experimental: the daemon entry point pins
+  // the CLI floor at startup and refuses to register the AI route instead of
+  // failing on the first chat. Tests inject either the probe or a runtime.
+  const codexVersion: CodexVersionProbe = options.runtime
+    ? {
+        available: true,
+        version:
+          options.codexVersion?.available === true
+            ? options.codexVersion.version
+            : 'injected',
+      }
+    : (options.codexVersion ?? { available: true, version: 'unknown' });
+  const confirmations: ConfirmationChannel =
+    options.confirmations ??
+    createConfirmationChannel({ logger: observability.logger });
+  const canvasThreads: CodexThreadStore = {
+    load: (canvasId) => canvases.findById(canvasId)?.codexThreadId ?? null,
+    save: (canvasId, threadId) => canvases.setCodexThreadId(canvasId, threadId),
+    clear: (canvasId) => canvases.setCodexThreadId(canvasId, null),
+  };
+  const runtime =
+    options.runtime ??
+    (codexVersion.available
+      ? createCodexRuntime({
+          logger: observability.logger,
+          confirmations,
+          threadStore: canvasThreads,
+        })
+      : null);
+  const renderChannel = options.renderChannel ?? createRenderPreviewChannel();
+  const exportChannel = options.exportChannel ?? createExportChannel();
 
   app.decorate('observability', observability.logger);
 
@@ -92,13 +158,32 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   });
 
   app.addHook('onClose', async () => {
+    await runtime?.close();
+
+    // An injected channel belongs to the test; only close the one we created.
+    if (!options.confirmations) {
+      confirmations.close();
+    }
+
     db.close();
   });
 
-  app.get('/health', async () => ({ ok: true }));
+  app.get('/health', async () => ({
+    ok: true,
+    ai: codexVersion.available
+      ? { available: true, version: codexVersion.version }
+      : { available: false, reason: codexVersion.reason },
+  }));
   registerPaintRoutes(app, service);
   registerEventRoutes(app, service, events);
-  registerAiChatRoute(app, runner, dispatcher, service);
+
+  if (runtime) {
+    registerAiChatRoute(app, runtime, tools, service, renderChannel, exportChannel);
+    registerAiConfirmRoute(app, confirmations);
+    registerRenderResultRoute(app, renderChannel);
+    registerExportResultRoute(app, exportChannel);
+  }
+
   registerMonitorRoutes(app, observability);
 
   return app;

@@ -23,13 +23,27 @@ import { MAX_CANVAS_DIMENSION, type PaintService } from '../paint/service.js';
 
 type LayerCreateBody = CreateLayerInput & {
   expectedRevision?: number;
+  /** Ignored when `'user'`; any other value is rejected. REST writes are always user. */
   actor?: Actor;
 };
 
 type LayerUpdateBody = UpdateLayerPatch & {
   expectedRevision?: number;
+  /** Ignored when `'user'`; any other value is rejected. REST writes are always user. */
   actor?: Actor;
 };
+
+/**
+ * Attribution is not a client claim: snapshots record `actor`, and agent-only
+ * undo scoping reads it back. Every REST mutation is therefore written as
+ * `'user'`; a body that tries to claim `'agent'` is rejected rather than
+ * quietly downgraded, so the caller learns the contract.
+ */
+function restActorError(value: unknown): string | null {
+  return value === undefined || value === 'user'
+    ? null
+    : 'actor 由服务端决定，REST 写入恒为 user';
+}
 
 export function registerPaintRoutes(app: FastifyInstance, service: PaintService): void {
   const dispatcher = new CommandDispatcher(service);
@@ -44,7 +58,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       });
     }
 
-    return reply.code(201).send(dispatcher.createCanvas(body));
+    return reply.code(201).send(dispatcher.createCanvas(body, 'user'));
   });
 
   app.get<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
@@ -71,7 +85,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.renameCanvas(request.params.id, request.body.name.trim());
+        return dispatcher.renameCanvas(request.params.id, request.body.name.trim(), 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -90,12 +104,20 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
         });
       }
 
-      const { expectedRevision, actor, ...layer } = body;
+      const actorError = restActorError(body.actor);
+
+      if (actorError) {
+        return reply.code(400).send({
+          error: { code: 'invalid_actor', message: actorError },
+        });
+      }
+
+      const { expectedRevision, actor: _actor, ...layer } = body;
 
       try {
         return reply.code(201).send(
           dispatcher.dispatch(request.params.id, {
-            actor: actor ?? 'user',
+            actor: 'user',
             expectedRevision,
             action: { type: 'canvas_create_layer', layer },
           }),
@@ -118,11 +140,19 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
         });
       }
 
-      const { expectedRevision, actor, ...patch } = body;
+      const actorError = restActorError(body.actor);
+
+      if (actorError) {
+        return reply.code(400).send({
+          error: { code: 'invalid_actor', message: actorError },
+        });
+      }
+
+      const { expectedRevision, actor: _actor, ...patch } = body;
 
       try {
         return dispatcher.dispatch(request.params.id, {
-          actor: actor ?? 'user',
+          actor: 'user',
           expectedRevision,
           action: {
             type: 'canvas_update_layer',
@@ -178,7 +208,11 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.dispatch(request.params.id, body);
+        return dispatcher.dispatch(request.params.id, {
+          actor: 'user',
+          expectedRevision: body.expectedRevision,
+          action: body.action,
+        });
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -195,7 +229,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.undo(request.params.id, expectedRevision);
+        return dispatcher.undo(request.params.id, expectedRevision, 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -212,7 +246,7 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       }
 
       try {
-        return dispatcher.redo(request.params.id, expectedRevision);
+        return dispatcher.redo(request.params.id, expectedRevision, 'user');
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -381,8 +415,12 @@ function validateApplyAction(input: ApplyActionRequest | undefined): string | nu
     return '操作数据不能为空';
   }
 
-  if (input.actor !== 'user' && input.actor !== 'agent') {
-    return 'actor 必须是 user 或 agent';
+  // `actor` is not a client input on REST; only the tool executor may claim
+  // `'agent'`. A stale client that still sends `actor:'user'` keeps working.
+  const actorError = restActorError(input.actor);
+
+  if (actorError) {
+    return actorError;
   }
 
   if (

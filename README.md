@@ -1,8 +1,8 @@
 # PaintCodex
 
-AI-assisted painting in the browser: a React + Fabric.js canvas, a local Fastify daemon, and a Codex CLI agent that draws by adding SVG layers.
+AI-assisted painting in the browser: a React + Fabric.js canvas, a local Fastify daemon, and a Codex CLI agent that acts on the canvas through native tools.
 
-Phase 1 is a single-canvas MVP with brush strokes, layers, snapshot undo/redo, real-time multi-client sync, AI-generated SVG layers, and PNG export.
+Phase 1 is a single-canvas MVP with brush strokes, layers, snapshot undo/redo, real-time multi-client sync, AI-generated SVG layers, and PNG export. The AI layer drives the canvas through declared tools (create / update / delete / undo / select / export), with confirmations for destructive actions.
 
 ## Quick start
 
@@ -10,7 +10,7 @@ Requirements:
 
 - Node.js 22+
 - pnpm 12 (pinned by `packageManager`)
-- Codex CLI on `PATH`, signed in (needed only for AI chat)
+- Codex CLI 0.164+ on `PATH`, signed in (needed only for AI chat; the daemon disables the AI route and says why if the version is too old)
 
 ```bash
 pnpm install
@@ -29,7 +29,7 @@ Open the web URL, click **New Canvas**, and draw. A brush stroke should survive 
 ```text
 React + Fabric.js ── HTTP / SSE ──> Fastify daemon ──> SQLite (better-sqlite3)
                                          │
-                                         └── child process ──> codex CLI
+                                         └── codex app-server (JSON-RPC) ──> model
 ```
 
 **Human–machine equality.** Users and the AI mutate the canvas through the same `CommandDispatcher`, distinguished only by `actor: 'user' | 'agent'`. Every mutation bumps the canvas revision and publishes a `snapshot_changed` event.
@@ -40,12 +40,12 @@ React + Fabric.js ── HTTP / SSE ──> Fastify daemon ──> SQLite (bette
 
 **Full-snapshot SSE.** Clients receive only a change signal, then refetch `GET /paint/canvas/:id`; there are no incremental patches. See [ADR-0004](docs/adr/0004-sse-full-snapshot-push.md).
 
-**SVG-only AI.** Codex never executes canvas code. It returns prose plus `<<<CANVAS_ACTION>>>` and one JSON object; the daemon validates the SVG, then dispatches `canvas_create_layer` as `agent`. See [ADR-0001](docs/adr/0001-ai-generates-svg-only.md) and `apps/daemon/src/paint/agent/canvas-action.ts`.
+**AI acts through tools.** The daemon keeps a long-lived `codex app-server` child process and declares a small canvas tool set at thread start. The model calls a tool, the daemon executes it through the `CommandDispatcher` as `actor: 'agent'`, and the result goes back to the model so it can correct itself instead of guessing. The tool set is `canvas_get_context`, `canvas_create_layer`, `canvas_update_layer`, `canvas_delete_layer`, `canvas_select`, `canvas_export_png`, `canvas_undo`, `canvas_render_preview`; the preview tool is implemented end-to-end and returns a rendered PNG to the model as an image. Deleting and exporting ask the user first; context is pulled on demand rather than pasted into the prompt. See [ADR-0009](docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md).
 
 ## Project layout
 
 ```text
-apps/daemon/          Fastify API, SQLite storage, CommandDispatcher, Codex adapter
+apps/daemon/          Fastify API, SQLite storage, CommandDispatcher, Codex Runtime + canvas tools
 apps/web/             React + Vite + Fabric.js + Zustand UI
 packages/protocol/    Shared TypeScript contracts (Canvas, Layer, actions, SSE)
 docs/                 Architecture background, ADRs, agent workflow docs
@@ -62,14 +62,19 @@ docs/                 Architecture background, ADRs, agent workflow docs
 | `POST /paint/canvas/:id/layers` | Create a layer |
 | `PATCH /paint/canvas/:id/layers/:layerId` | Update name, visibility, opacity, or content |
 | `DELETE /paint/canvas/:id/layers/:layerId` | Delete a layer |
-| `POST /paint/canvas/:id/apply-action` | Apply a dispatcher action (`user` or `agent`) |
+| `POST /paint/canvas/:id/apply-action` | Apply a dispatcher action (REST writes are always `user`) |
 | `POST /paint/canvas/:id/undo` · `/redo` | Move through snapshot history |
 | `GET /paint/canvas/:id/events` | SSE stream of `snapshot_changed` |
-| `POST /paint/ai/chat` | Stream a Codex response; may create an SVG layer |
+| `POST /paint/ai/chat` | One agent turn as SSE: `delta`, `tool`, `confirm`, `renderRequest`, `exportRequest`, `notice`, `done` |
+| `POST /paint/ai/confirm` | Answer a pending confirmation (`requestId`, `approved`) |
+| `POST /paint/ai/render-result` | Browser returns the PNG a preview request asked for |
+| `POST /paint/ai/export-result` | Browser reports an export result (filename, bytes) |
 
 The full request/response contract is in [`.scratch/phase-1-mvp/spec.md`](.scratch/phase-1-mvp/spec.md) and `packages/protocol/src/index.ts`; route implementations are in `apps/daemon/src/api/`.
 
 Writes accept an optional `expectedRevision`. A stale value returns `409 revision_conflict`; brush layer creation refreshes and retries once, while other writes surface the error.
+
+Every REST write is attributed to `actor: 'user'`. A body-supplied `actor` other than `user` is rejected with `400 invalid_actor`; `actor: 'agent'` exists only on writes executed in-process by the AI tool executor, never as a client claim.
 
 ## Configuration
 
@@ -78,6 +83,7 @@ Writes accept an optional `expectedRevision`. A stale value returns `409 revisio
 | `PORT` | `3210` | Daemon |
 | `HOST` | `127.0.0.1` | Daemon |
 | `PAINTCODEX_DB` | `data/paintcodex.db` under the daemon cwd | Daemon |
+| `PAINTCODEX_CODEX_BIN` | `codex` (`codex.cmd` on Windows) | Daemon (AI) |
 
 The SQLite file is gitignored. Vite proxies `/paint` and `/health` to `127.0.0.1:3210`; update `apps/web/vite.config.ts` if you move the daemon port.
 
@@ -91,12 +97,23 @@ pnpm typecheck   # types only
 
 There is no browser E2E suite yet; verify UI changes with `pnpm dev`.
 
+**Known Windows issue.** On some Windows machines `pnpm -r build` fails in the web step with `[vite:esbuild-transpile] remove C:\...\Temp\esbuild-...: Access is denied`. This is esbuild's temp-file cleanup, not a source error (typecheck and the daemon bundle still pass). Workaround: point `TEMP`/`TMP` at a scratch directory outside the shared user temp tree, then rerun:
+
+```powershell
+New-Item -ItemType Directory -Force .agents\build-tmp | Out-Null
+$env:TEMP = (Resolve-Path .agents\build-tmp).Path
+$env:TMP = $env:TEMP
+pnpm -r build
+```
+
+`.agents/` is gitignored; do not commit the scratch directory.
+
 ## Phase 1 scope and deliberate limits
 
 - PNG export renders on the client from the live Fabric canvas; `POST /paint/canvas/:id/export` is deferred. See [ADR-0005](docs/adr/0005-client-side-png-export.md).
-- AI layers can be selected, moved, and scaled; changing color or shape means asking the AI for a new layer.
+- AI layers can be selected, moved, and scaled; asking the AI to change one updates it in place through `canvas_update_layer` instead of stacking a new layer.
 - Snapshot undo, full-snapshot SSE, and SVG-only AI are intentional Phase 1 choices, not unfinished incremental systems.
-- Out of scope: `.aipaint` files, shapes/text/eraser/fill, layer reorder/merge, AI confirmation, Electron.
+- Out of scope: `.aipaint` files, shapes/text/eraser/fill, layer reorder/merge, pixel-level AI editing, Electron.
 - Where `docs/architecture-design.md` differs from the spec or an ADR, the spec and ADR win.
 
 ## Documentation map
@@ -107,5 +124,6 @@ There is no browser E2E suite yet; verify UI changes with `pnpm dev`.
 | See why a design choice was made | [`docs/adr/`](docs/adr/) |
 | Check domain vocabulary | [`GLOSSARY.md`](GLOSSARY.md) |
 | Work a local ticket | [`.scratch/phase-1-mvp/issues/`](.scratch/phase-1-mvp/issues/) and [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) |
+| See how the AI/Codex layer was rebuilt | [`.scratch/codex-native-tools/`](.scratch/codex-native-tools/) |
 | See the original architecture background | [`docs/architecture-design.md`](docs/architecture-design.md) |
 | Contribute as an agent | [`AGENTS.md`](AGENTS.md) and [`docs/agents/`](docs/agents/) |

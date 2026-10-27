@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -27,5 +28,14 @@ export default defineConfig({
       '/health': target,
       '/monitor': target,
     },
+  },
+  test: {
+    // jsdom plus the Fabric mocks make several suites slow for wall-clock
+    // reasons only (they drive fake timers themselves). Under a parallel
+    // `pnpm -r test` the 5s default fails `delete-undo-bar` for being slow
+    // rather than for being wrong, so the budget is widened here and nowhere
+    // in the code under test.
+    testTimeout: 20_000,
+    hookTimeout: 20_000,
   },
 });

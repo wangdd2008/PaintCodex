@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type {
   CanvasDocument,
+  CanvasSelectFrame,
   CreateLayerInput,
   Layer,
   UpdateLayerPatch,
@@ -22,6 +23,20 @@ const STORAGE_KEY = 'paintcodex.canvasId';
 
 /** 连续笔画只结算成一次「已保存」状态（ADR-0008）。 */
 export const SAVE_DEBOUNCE_MS = 500;
+
+/**
+ * `canvas_select` 的画布高亮只活 3 秒：够用户把视线移过去，又不至于挡着继续画。
+ * 高亮消失后图层仍然是选中图层，只有这层短暂的视觉提示到期。
+ */
+export const AI_SELECTION_DURATION_MS = 3000;
+
+/**
+ * 一次 AI 指示：目标图层或区域，加上用于重播高亮的序号。它只存在于界面，
+ * 不参与画布文档、revision 或撤销栈。
+ */
+export interface AiSelection extends CanvasSelectFrame {
+  nonce: number;
+}
 
 const CHINESE_PATTERN = /[\u4e00-\u9fff]/;
 
@@ -64,6 +79,13 @@ interface CanvasState {
    * `activeLayerId`（新笔画成为活动图层），但它们不得重放画布的「定位」反馈。
    */
   activeLayerRequest: number;
+  /** AI 最近一次「看这里」：画布高亮据此渲染，3 秒后自动消失。 */
+  aiSelection: AiSelection | null;
+  /**
+   * 画笔正按在画布上。AI 指示不得打断这一笔：高亮等笔画结束再出现，
+   * 绝不切换工具或取消当前对象。
+   */
+  isDrawing: boolean;
   createNewCanvas: () => Promise<void>;
   returnToPreviousCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
@@ -76,6 +98,13 @@ interface CanvasState {
   undo: () => Promise<void>;
   redo: () => Promise<void>;
   setActiveLayer: (layerId: string | null) => void;
+  /**
+   * 消费 `canvas_select`：把目标图层设为活动图层并记下 3 秒高亮。与
+   * `setActiveLayer` 的区别是**不** bump `activeLayerRequest`——AI 指示不是
+   * 用户点击，不能切换工具，也不能打断正在画的那一笔。
+   */
+  selectFromAi: (selection: CanvasSelectFrame) => void;
+  setDrawing: (drawing: boolean) => void;
   showCanvasAlert: (message: string, retry?: SaveRetry | null) => void;
   dismissCanvasAlert: () => void;
   retryCanvasAlert: () => Promise<void>;
@@ -99,6 +128,14 @@ interface SaveReset {
 let mutationQueue: Promise<unknown> = Promise.resolve();
 let mutationDepth = 0;
 let savedTimer: ReturnType<typeof setTimeout> | null = null;
+let aiSelectionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cancelAiSelectionTimer(): void {
+  if (aiSelectionTimer !== null) {
+    clearTimeout(aiSelectionTimer);
+    aiSelectionTimer = null;
+  }
+}
 
 /**
  * Serialises canvas mutations so rapid brush strokes always send the revision
@@ -367,6 +404,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   canvasRetry: null,
   activeLayerId: null,
   activeLayerRequest: 0,
+  aiSelection: null,
+  isDrawing: false,
 
   createNewCanvas: async () => {
     const previous = get().canvas;
@@ -618,6 +657,49 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       activeLayerId: layerId,
       activeLayerRequest: get().activeLayerRequest + 1,
     });
+  },
+
+  selectFromAi: (selection: CanvasSelectFrame) => {
+    const current = get().canvas;
+
+    // 指示属于发出它的那张画布：切到别的画布后迟到的帧不能再动界面。
+    if (!current || current.id !== selection.canvasId) {
+      return;
+    }
+
+    const layerId = selection.layerId;
+
+    if (
+      layerId !== undefined &&
+      !current.layers.some((layer) => layer.id === layerId)
+    ) {
+      return;
+    }
+
+    cancelAiSelectionTimer();
+
+    const nonce = (get().aiSelection?.nonce ?? 0) + 1;
+
+    set({
+      // 区域指示不改变选中图层，只圈出位置。
+      ...(layerId === undefined ? {} : { activeLayerId: layerId }),
+      aiSelection: { ...selection, nonce },
+    });
+
+    aiSelectionTimer = setTimeout(() => {
+      aiSelectionTimer = null;
+
+      // 期间又来了新指示：旧计时器不能把新高亮一起清掉。
+      if (get().aiSelection?.nonce === nonce) {
+        set({ aiSelection: null });
+      }
+    }, AI_SELECTION_DURATION_MS);
+  },
+
+  setDrawing: (drawing: boolean) => {
+    if (get().isDrawing !== drawing) {
+      set({ isDrawing: drawing });
+    }
   },
 
   showCanvasAlert: (message: string, retry: SaveRetry | null = null) => {

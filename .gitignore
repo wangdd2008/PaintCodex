@@ -18,3 +18,9 @@ data/
 .env
 .env.*
 .DS_Store
+
+# generated codex app-server schema (maintenance script, never committed)
+.codex-schema/
+
+# agent worktrees
+.agents/

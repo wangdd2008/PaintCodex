@@ -40,7 +40,7 @@
 - 新增 `apps/daemon/src/paint/agent/runtime/`：`codex-runtime.ts`（进程与 JSON-RPC）、`tools.ts`（工具声明与执行器）、`protocol.ts`（由 `codex app-server generate-ts` 生成）。
 - 进程启停由 Runtime 负责：daemon 启动时拉起，崩溃自动重启一次，重启时重建内存中的 thread 映射。
 - **版本闸门**：`codex --version` < 0.164 时 AI 路由不注册，`/health` 返回原因。
-- 协议类型生成进 CI：`pnpm --filter @paintcodex/daemon codex:generate` 后比对，禁止手抄。
+- 协议类型是从 `codex app-server generate-json-schema --experimental` 输出中精选转写的子集，不是 CI 生成物；本仓库没有 CI。升级 codex 时运行 `pnpm --filter @paintcodex/daemon codex:protocol-schema` 重新生成并与 `protocol.ts` 比对，再跑全链路测试。
 - 保留 `CodexRunner` 接口直到切片 1 合入，之后删除。
 
 ### Thread 与 turn
@@ -49,20 +49,21 @@
 - 一条用户消息一个 turn。turn 内的工具调用串行执行（单写者），避免并发覆盖 revision。
 - 取消：SSE 断开 → `turn/interrupt`，thread 保留。
 
-### 工具集（7 个 + 1 预留）
+### 工具集（8 个）
 
 | 工具 | 参数 | 执行 | 确认 |
 |---|---|---|---|
 | `canvas_get_context` | `{ canvasId, layerId? }` | 读 service | 否 |
-| `canvas_create_layer` | `{ canvasId, name, svg, visible?, opacity? }` | `canvas_create_layer` | 否 |
-| `canvas_update_layer` | `{ canvasId, layerId, patch }` | `canvas_update_layer` | 否 |
-| `canvas_delete_layer` | `{ canvasId, layerId }` | `canvas_delete_layer` | 是 |
+| `canvas_create_layer` | `{ canvasId, name, svg, visible?, opacity?, expectedRevision? }` | `canvas_create_layer` | 否 |
+| `canvas_update_layer` | `{ canvasId, layerId, patch, expectedRevision? }` | `canvas_update_layer` | 否 |
+| `canvas_delete_layer` | `{ canvasId, layerId, expectedRevision? }` | `canvas_delete_layer` | 是 |
 | `canvas_select` | `{ canvasId, layerId?, region? }` | UI 焦点，不落库 | 否 |
 | `canvas_export_png` | `{ canvasId }` | 前端导出（ADR-0005） | 是 |
 | `canvas_undo` | `{ canvasId }` | `undo` | 否，仅限 agent 自身动作 |
-| `canvas_render_preview`（预留） | `{ canvasId }` | 返回渲染 PNG（`inputImage`） | 否 |
+| `canvas_render_preview` | `{ canvasId }` | 返回渲染 PNG（`inputImage`） | 否 |
 
 - 写类工具一律 `dispatcher.dispatch(canvasId, { actor: 'agent', expectedRevision, action })`；
+- `expectedRevision` 是「模型上次观察到的 revision」：传了且不匹配就返回 `revision_conflict`（附 `currentRevision`），不传则维持旧行为（用刚读到的 revision）；所有成功写结果都带回新的 `revision`；
 - SVG 入参过 `isSafeSvg`（由 marker 解析器转职而来）；
 - 返回统一为 `{ ok: true, ... }` / `{ ok: false, code, message }`。
 
@@ -72,27 +73,38 @@
 |---|---|---|
 | `revision_conflict` | `expectedRevision` 不匹配（附 `currentRevision`） | 是 |
 | `top_action_is_user` | `canvas_undo` 栈顶是用户动作 | 是 |
-| `user_declined` | 确认被拒 | 是 |
+| `nothing_to_undo` | 撤销栈已到最早快照（连快照都没有） | 是 |
+| `user_declined` | 确认被拒、超时或通道不可用 | 是 |
+| `invalid_arguments` | 参数类型/形状不合法 | 是 |
 | `invalid_svg` | `isSafeSvg` 拒绝（附原因） | 是 |
 | `layer_not_found` | layerId 不存在 | 是 |
+| `canvas_not_found` | 画布不存在，或请求了非当前画布 | 是 |
+| `canvas_required` | 当前对话没有画布 | 是 |
+| `render_unavailable` | 无浏览器或渲染超时 | 是 |
+| `export_unavailable` | 无浏览器或导出通道失败 | 是 |
+| `export_busy` | 同一画布已有导出在等待 | 是 |
+| `tool_timeout` | 工具执行超过 30s（人在等待的确认/渲染/导出不计入） | 是 |
 
 daemon 不再替 AI 重试 revision 冲突（删除 `MAX_ACTION_RETRIES` 路径）。
 
 ### 协议与 SSE
 
-`StreamPayload` 增加两种帧，其余保持不变：
+`StreamPayload` 的一帧只携带下列字段之一：
 
-```typescript
-interface StreamPayload {
-  delta?: string;
-  tool?: { id: string; name: string; status: 'running' | 'ok' | 'failed'; code?: string };
-  confirm?: { id: string; title: string; detail: string };
-  done?: true;
-  error?: { code: string; message: string };
-}
-```
+| 帧 | 形状 | 消费方 |
+|---|---|---|
+| `delta` | `string` | 追加到气泡 |
+| `tool` | `{ id, name, status: 'running' \| 'ok' \| 'failed', code? }` | 写操作成行显示，读操作折叠 |
+| `confirm` | `{ id, title, detail, approveLabel? }` | 气泡内确认条；60s 无答复视为拒绝 |
+| `layerCreated` | `{ id, name }` | 「图层已添加」提示 |
+| `renderRequest` | `{ id, canvasId }` | 浏览器渲染并 `POST /paint/ai/render-result` |
+| `exportRequest` | `{ id, canvasId }` | 浏览器下载并 `POST /paint/ai/export-result` |
+| `select` | `{ canvasId, layerId? \| region?, clamped? }` | 移动 UI 焦点，无回执 |
+| `notice` | `string` | 同一气泡里的一行状态（如「会话已重置」），turn 继续 |
+| `done` | `true` | 结束 |
+| `error` | `{ code, message }` | 终止并显示错误 |
 
-新增 `POST /paint/ai/confirm`：`{ requestId, approved }`，把答复送回挂起的工具调用。
+`POST /paint/ai/confirm`：`{ requestId, approved, canvasId? }`，把答复送回挂起的工具调用。
 
 ### Web
 
@@ -125,13 +137,22 @@ interface StreamPayload {
 | 1 | Runtime + get_context + create_layer + 删除 marker | 01 |
 | 2 | update / delete / undo + 工具事件行 | 02 |
 | 3 | 确认通道 + actor 归属 | 03、05 |
-| 4 | render_preview + thread 落库与恢复 | 04 |
+| 4 | render_preview（已落地，含图片结果）+ thread 落库与恢复 | 04 |
+| 5 | 导出工具 + 确认（依赖 03、04 的通道） | 06 |
 
 独立缺陷：`05-actor-attribution.md`（今天的 undo/redo 归属就是错的，与切片并行修）。
 
 ## Acceptance
 
-- `pnpm -r typecheck` / `pnpm -r test` / `pnpm -r build` 全绿；
+- `pnpm -r typecheck` / `pnpm -r test` / `pnpm -r build` 全绿（build 的 web 段在 Windows 需按 README「Checks」里的 TEMP 规避法执行）；
 - 全链路手工验收用真实 `codex` 跑通 User Story 1、2、4、6；
 - daemon 在 `codex` 版本过低时拒绝启动 AI 路由，错误信息可操作；
 - 全仓 grep 不到 `CANVAS_ACTION_MARKER`（切片 1 之后）。
+
+### 验收记录
+
+- 2026-10-28，真实 `codex-cli 0.164.0` + 构建后的 daemon（临时库，`PORT=3299`），SSE 逐帧核对：
+  - US1「把刚才那个圆改颜色」：`canvas_get_context` → `canvas_update_layer`，图层数 1→1（就地改写，未叠新层），revision 1→2，颜色由红改蓝；两次工具调用都成对出现 `running`/`ok` 帧。
+  - US2「把这个圆删掉」：先收到 `confirm`「删除图层「红色圆形」」，经 `POST /paint/ai/confirm` 批准后才执行 `canvas_delete_layer`，图层数 1→0，revision 3。
+  - US5（跨重启指代）与「resume 后工具仍可用」由票 04 的独立探针验证（见该票 Comments）。
+  - US6（并发编辑下的修订冲突）只有单元测试覆盖，未做双人实时手工复现——记录在此，避免被读成「已人工验证」。

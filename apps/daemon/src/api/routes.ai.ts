@@ -1,34 +1,39 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
-import type { AiChatRequest, Layer } from '@paintcodex/protocol';
-import { CommandDispatcher } from '../paint/command-dispatcher.js';
-import { RevisionConflictError } from '../paint/errors.js';
+import type {
+  AiChatRequest,
+  AiConfirmRequest,
+  AiExportResultRequest,
+  AiRenderResultRequest,
+} from '@paintcodex/protocol';
 import type { PaintService } from '../paint/service.js';
-import type { CodexRunner } from '../paint/agent/codex-runner.js';
-import { buildAiChatPrompt } from '../paint/agent/prompt.js';
 import {
-  CANVAS_ACTION_MARKER,
-  parseCanvasAction,
-  type CanvasAction,
-} from '../paint/agent/canvas-action.js';
+  EMPTY_CANVAS_TOOLS,
+  type CanvasToolSet,
+} from '../paint/agent/runtime/tools.js';
+import type { ConfirmationChannel } from '../paint/agent/runtime/confirmation.js';
+import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
+import {
+  MAX_RENDER_IMAGE_BYTES,
+  type RenderPreviewChannel,
+} from '../paint/agent/runtime/render-preview.js';
+import type {
+  ExportChannel,
+  ExportReport,
+} from '../paint/agent/runtime/export-png.js';
+import { buildAiChatPrompt } from '../paint/agent/prompt.js';
 import type {
   ObservabilitySpan,
   SpanFinishInput,
 } from '../observability/logger.js';
 import { getRequestSpan } from '../observability/request-context.js';
 
-/** User-facing progress labels; the SSE step id is the table key so the two cannot drift. */
-const AI_CHAT_STEPS = {
-  prompt_built: '正在构建请求…',
-  codex_exec: 'AI 正在思考…',
-  action_parse: '正在解析结果…',
-  action_apply: '正在应用到画布…',
-} as const;
-
 export function registerAiChatRoute(
   app: FastifyInstance,
-  runner: CodexRunner,
-  dispatcher: CommandDispatcher,
+  runtime: CodexRuntime,
+  tools: CanvasToolSet,
   service: PaintService,
+  renderChannel?: RenderPreviewChannel,
+  exportChannel?: ExportChannel,
 ): void {
   app.post('/paint/ai/chat', async (request, reply) => {
     const body: unknown = request.body;
@@ -75,12 +80,8 @@ export function registerAiChatRoute(
       try {
         response.write(`data: ${JSON.stringify(payload)}\n\n`);
       } catch {
-        // The client disconnected; the close handler aborts the runner.
+        // The client disconnected; the close handler aborts the turn.
       }
-    };
-
-    const sendStep = (id: keyof typeof AI_CHAT_STEPS) => {
-      send({ step: { id, label: AI_CHAT_STEPS[id] } });
     };
 
     const sendError = (code: string, message: string) => {
@@ -88,6 +89,18 @@ export function registerAiChatRoute(
       errorSent = true;
       send({ error: { code, message } });
     };
+
+    // Render requests belong to this stream: the browser listens on it and
+    // answers on a separate HTTP request, correlated by the id it just saw.
+    const renderTurn = renderChannel?.beginTurn((request) => {
+      send({ renderRequest: request });
+    });
+
+    // Export requests travel on the same stream: the browser downloads the PNG
+    // and answers on a separate endpoint, correlated by the id it just saw.
+    const exportTurn = exportChannel?.beginTurn((request) => {
+      send({ exportRequest: request });
+    });
 
     let assistantText = '';
 
@@ -99,6 +112,7 @@ export function registerAiChatRoute(
               id: canvas.id,
               width: canvas.width,
               height: canvas.height,
+              revision: canvas.revision,
               layers: canvas.layers.map((layer) => ({
                 name: layer.name,
                 type: layer.type,
@@ -116,99 +130,62 @@ export function registerAiChatRoute(
           layerCount: canvas?.layers.length ?? 0,
         },
       });
-      sendStep('prompt_built');
 
-      const codexSpan = chatSpan.startSpan({
+      const turnSpan = chatSpan.startSpan({
         category: 'ai-chat',
-        message: 'codex_exec',
-        payload: { promptLength: prompt.length },
+        message: 'codex_turn',
+        payload: { promptLength: prompt.length, hasCanvas: canvas !== null },
+        canvasId: canvas?.id ?? null,
       });
-      // Emitted as the span starts: the CLI is a black box, so this is the
-      // only progress signal until it exits.
-      sendStep('codex_exec');
 
       try {
-        await runner.run(
+        const result = await runtime.startTurn({
+          canvasId: canvas?.id ?? null,
           prompt,
-          (delta) => {
+          userMessage: body.message,
+          // Without a canvas the agent has nothing it may touch; declaring no
+          // tools keeps canvas ids from other conversations out of reach.
+          tools: canvas ? tools : EMPTY_CANVAS_TOOLS,
+          signal: controller.signal,
+          trace: turnSpan,
+          ...(renderTurn === undefined ? {} : { requestRender: renderTurn.request }),
+          ...(exportTurn === undefined ? {} : { requestExport: exportTurn.request }),
+          onNotice: (notice) => {
+            send({ notice });
+          },
+          onDelta: (delta) => {
             deltaCount += 1;
             assistantText += delta;
             send({ delta });
           },
-          controller.signal,
-          codexSpan,
-        );
-      } catch (error) {
-        codexSpan.finish({ level: 'error', error });
-        throw error;
-      }
-
-      codexSpan.finish({
-        level: 'info',
-        payload: {
-          deltaCount,
-          outputLength: assistantText.length,
-        },
-      });
-
-      const action = parseCanvasAction(assistantText);
-
-      chatSpan.log({
-        level: 'debug',
-        message: 'action_parse',
-        payload: {
-          hasAction: action !== null,
-          actionName: action?.name,
-          invalidMarker:
-            action === null && assistantText.includes(CANVAS_ACTION_MARKER),
-        },
-      });
-      sendStep('action_parse');
-
-      if (action) {
-        if (!canvas) {
-          sendError(
-            'canvas_required',
-            '请先打开画布再让 AI 绘制。'
-          );
-        } else {
-          // The span is only finished on success so `action_apply` always
-          // carries the id of the layer that was actually created.
-          const applySpan = chatSpan.startSpan({
-            category: 'ai-chat',
-            message: 'action_apply',
-            payload: { actionName: action.name, canvasId: canvas.id },
-          });
-          sendStep('action_apply');
-
-          try {
-            const layer = applyCanvasAction(
-              dispatcher,
-              service,
-              canvas.id,
-              action,
-              body.message,
-            );
-            applySpan.finish({
-              level: 'info',
-              payload: { layerId: layer.id, actionName: action.name },
-            });
+          onLayerCreated: (layer) => {
             actionApplied = true;
             send({ layerCreated: { id: layer.id, name: layer.name } });
-          } catch (error) {
-            applySpan.finish({
-              level: 'error',
-              error,
-              payload: { actionName: action.name, canvasId: canvas.id },
-            });
-            sendError('ai_canvas_action_failed', errorMessage(error));
-          }
-        }
-      } else if (assistantText.includes(CANVAS_ACTION_MARKER)) {
-        sendError(
-          'ai_canvas_action_invalid',
-          'AI 返回了无效的画布操作。'
-        );
+          },
+          onToolEvent: (event) => {
+            send({ tool: event });
+          },
+          onConfirm: (event) => {
+            send({ confirm: event });
+          },
+          // `canvas_select` only asks the browser to move its focus; unlike the
+          // render/export round-trips there is no result endpoint and no wait.
+          onSelect: (selection) => {
+            send({ select: selection });
+          },
+        });
+
+        turnSpan.finish({
+          level: 'info',
+          payload: {
+            deltaCount,
+            outputLength: assistantText.length,
+            toolCallCount: result.toolCallCount,
+          },
+        });
+      } catch (error) {
+        turnSpan.finish({ level: 'error', error });
+        throw error;
       }
 
       send({ done: true });
@@ -217,6 +194,10 @@ export function registerAiChatRoute(
         sendError('ai_chat_failed', errorMessage(error));
       }
     } finally {
+      // A disconnected stream must not leave a browser round-trip pending: the
+      // tool would otherwise sit on a browser that is no longer listening.
+      renderTurn?.close();
+      exportTurn?.close();
       response.off('close', onClose);
 
       const aborted = controller.signal.aborted;
@@ -252,6 +233,154 @@ export function registerAiChatRoute(
   });
 }
 
+/**
+ * The browser's half of `canvas_render_preview`: one PNG data URL per pending
+ * request id. The route accepts a single image and rejects anything above the
+ * cap, a stale id, or a body that is not a PNG data URL.
+ */
+export function registerRenderResultRoute(
+  app: FastifyInstance,
+  channel: RenderPreviewChannel,
+): void {
+  app.post<{ Body: unknown }>(
+    '/paint/ai/render-result',
+    // Room for the JSON envelope plus one capped data URL; the image cap
+    // itself is enforced on the string so the reply is a structured error.
+    { bodyLimit: MAX_RENDER_IMAGE_BYTES + 1024 * 1024 },
+    async (request, reply) => {
+      if (!isRenderResultRequest(request.body)) {
+        return reply.code(400).send({
+          error: {
+            code: 'invalid_render_result',
+            message: 'requestId 与 imageUrl 不能为空',
+          },
+        });
+      }
+
+      const delivery = channel.deliver(
+        request.body.requestId,
+        request.body.imageUrl,
+      );
+
+      switch (delivery.status) {
+        case 'accepted':
+          return reply.code(204).send();
+        case 'unknown':
+          return reply.code(409).send({
+            error: {
+              code: 'render_request_unknown',
+              message: '渲染请求不存在或这一轮已经结束',
+            },
+          });
+        case 'invalid':
+          return reply.code(400).send({
+            error: {
+              code: 'invalid_render_result',
+              message: '预览必须是 PNG data URL',
+            },
+          });
+        case 'too_large':
+          return reply.code(413).send({
+            error: {
+              code: 'render_image_too_large',
+              message: `预览图片不能超过 ${delivery.maxBytes} 字节`,
+            },
+          });
+      }
+    },
+  );
+}
+
+/**
+ * The browser's half of `canvas_export_png`: the file it downloaded, or why it
+ * could not. No image is accepted here, which is exactly why this is not the
+ * render-result endpoint — the export tool must never hold the PNG bytes.
+ */
+export function registerExportResultRoute(
+  app: FastifyInstance,
+  channel: ExportChannel,
+): void {
+  app.post<{ Body: unknown }>('/paint/ai/export-result', async (request, reply) => {
+    const parsed = readExportReport(request.body);
+
+    if (!parsed) {
+      return reply.code(400).send({
+        error: {
+          code: 'invalid_export_result',
+          message: 'requestId 与 filename/bytes 不能为空',
+        },
+      });
+    }
+
+    const delivery = channel.deliver(parsed.requestId, parsed.report);
+
+    switch (delivery.status) {
+      case 'accepted':
+        return reply.code(204).send();
+      case 'unknown':
+        return reply.code(409).send({
+          error: {
+            code: 'export_request_unknown',
+            message: '导出请求不存在或这一轮已经结束',
+          },
+        });
+      case 'invalid':
+        return reply.code(400).send({
+          error: {
+            code: 'invalid_export_result',
+            message: '导出结果必须带有效的 filename 与 bytes',
+          },
+        });
+    }
+  });
+}
+
+function readExportReport(
+  value: unknown,
+): { requestId: string; report: ExportReport } | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const candidate = value as Partial<AiExportResultRequest>;
+
+  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) {
+    return null;
+  }
+
+  if (typeof candidate.error === 'string' && candidate.error.length > 0) {
+    return { requestId: candidate.requestId, report: { error: candidate.error } };
+  }
+
+  if (
+    typeof candidate.filename === 'string' &&
+    candidate.filename.length > 0 &&
+    typeof candidate.bytes === 'number'
+  ) {
+    return {
+      requestId: candidate.requestId,
+      report: { filename: candidate.filename, bytes: candidate.bytes },
+    };
+  }
+
+  return null;
+}
+
+function isRenderResultRequest(value: unknown): value is AiRenderResultRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as { requestId?: unknown; imageUrl?: unknown };
+
+  return (
+    typeof candidate.requestId === 'string' &&
+    candidate.requestId.length > 0 &&
+    typeof candidate.imageUrl === 'string' &&
+    candidate.imageUrl.length > 0
+  );
+}
+
 function startChatSpan(
   app: FastifyInstance,
   request: FastifyRequest,
@@ -270,57 +399,6 @@ function startChatSpan(
   return parent ? parent.startSpan(start) : app.observability.startTrace(start);
 }
 
-const MAX_ACTION_RETRIES = 1;
-
-function applyCanvasAction(
-  dispatcher: CommandDispatcher,
-  service: PaintService,
-  canvasId: string,
-  action: CanvasAction,
-  prompt: string,
-): Layer {
-  let attempt = 0;
-
-  for (;;) {
-    const current = service.getCanvas(canvasId);
-
-    if (!current) {
-      throw new Error('画布不存在');
-    }
-
-    try {
-      const updated = dispatcher.dispatch(canvasId, {
-        actor: 'agent',
-        expectedRevision: current.revision,
-        action: {
-          type: 'canvas_create_layer',
-          layer: {
-            name: action.name,
-            type: 'ai-generated',
-            content: { kind: 'svg', svg: action.svg },
-            metadata: { prompt },
-          },
-        },
-      });
-
-      const created = updated.layers[updated.layers.length - 1];
-
-      if (!created) {
-        throw new Error('The AI layer was not created');
-      }
-
-      return created;
-    } catch (error) {
-      if (error instanceof RevisionConflictError && attempt < MAX_ACTION_RETRIES) {
-        attempt += 1;
-        continue;
-      }
-
-      throw error;
-    }
-  }
-}
-
 function isAiChatRequest(value: unknown): value is AiChatRequest {
   if (typeof value !== 'object' || value === null) {
     return false;
@@ -329,6 +407,68 @@ function isAiChatRequest(value: unknown): value is AiChatRequest {
   const candidate = value as { message?: unknown; canvasId?: unknown };
 
   if (typeof candidate.message !== 'string' || candidate.message.trim().length === 0) {
+    return false;
+  }
+
+  return candidate.canvasId === undefined || typeof candidate.canvasId === 'string';
+}
+
+/**
+ * The answer half of the confirmation channel. The endpoint deliberately has no
+ * knowledge of turns: it resolves whichever request carries the id, and refuses
+ * an answer whose canvas does not match the one that asked.
+ */
+export function registerAiConfirmRoute(
+  app: FastifyInstance,
+  confirmations: ConfirmationChannel,
+): void {
+  app.post('/paint/ai/confirm', async (request, reply) => {
+    const body: unknown = request.body;
+
+    if (!isAiConfirmRequest(body)) {
+      return reply.code(400).send({
+        error: {
+          code: 'invalid_request',
+          message: 'requestId 与 approved 不能为空',
+        },
+      });
+    }
+
+    const result = confirmations.answer(body.requestId, body.approved, body.canvasId);
+
+    if (!result) {
+      return reply.code(404).send({
+        error: {
+          code: 'confirmation_not_found',
+          message: '确认请求不存在或已失效',
+        },
+      });
+    }
+
+    return {
+      ok: true,
+      status: result.outcome,
+      duplicate: result.status === 'duplicate',
+    };
+  });
+}
+
+function isAiConfirmRequest(value: unknown): value is AiConfirmRequest {
+  if (typeof value !== 'object' || value === null) {
+    return false;
+  }
+
+  const candidate = value as {
+    requestId?: unknown;
+    approved?: unknown;
+    canvasId?: unknown;
+  };
+
+  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) {
+    return false;
+  }
+
+  if (typeof candidate.approved !== 'boolean') {
     return false;
   }
 

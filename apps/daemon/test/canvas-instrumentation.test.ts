@@ -101,7 +101,6 @@ async function createLayer(
   app: FastifyInstance,
   canvasId: string,
   expectedRevision: number,
-  actor?: 'user' | 'agent',
 ) {
   return app.inject({
     method: 'POST',
@@ -111,7 +110,6 @@ async function createLayer(
       type: 'vector',
       content: { kind: 'fabric', json: '{"type":"path","path":[]}' },
       expectedRevision,
-      ...(actor ? { actor } : {}),
     },
   });
 }
@@ -204,12 +202,35 @@ describe('canvas action instrumentation', () => {
     await app.close();
   });
 
-  it('records the requesting actor for apply-action mutations', async () => {
+  it('does not attribute a REST apply-action to the agent actor', async () => {
     const app = buildServer({ dbPath: ':memory:' });
     const canvas = await createCanvas(app);
 
-    const response = await applyAgentLayerCreate(app, canvas.id, 0);
-    const layerId = response.json().layers[0].id as string;
+    // A REST caller cannot claim the agent actor; the write is refused before
+    // it can produce a snapshot or a canvas-action log.
+    const rejected = await applyAgentLayerCreate(app, canvas.id, 0);
+    expect(rejected.statusCode).toBe(400);
+    expect(rejected.json()).toMatchObject({ error: { code: 'invalid_action' } });
+    expect(canvasActionLogs(app).find((log) => log.message === 'layer_create')).toBeUndefined();
+
+    // The same action as the user is recorded as user.
+    const accepted = await app.inject({
+      method: 'POST',
+      url: `/paint/canvas/${canvas.id}/apply-action`,
+      payload: {
+        actor: 'user',
+        expectedRevision: 0,
+        action: {
+          type: 'canvas_create_layer',
+          layer: {
+            name: 'User stroke',
+            type: 'vector',
+            content: { kind: 'fabric', json: '{"type":"path","path":[]}' },
+          },
+        },
+      },
+    });
+    const layerId = accepted.json().layers[0].id as string;
     const layerLog = canvasActionLogs(app).find(
       (log) => log.message === 'layer_create',
     );
@@ -217,7 +238,7 @@ describe('canvas action instrumentation', () => {
     expect(layerLog).toMatchObject({
       canvasId: canvas.id,
       revision: 1,
-      actor: 'agent',
+      actor: 'user',
       payload: { layerId, layerType: 'vector' },
     });
 
