@@ -1,4 +1,10 @@
-import type { CanvasDocument, Layer, UpdateLayerPatch } from '@paintcodex/protocol';
+import type {
+  CanvasDocument,
+  CanvasRegion,
+  CanvasSelectFrame,
+  Layer,
+  UpdateLayerPatch,
+} from '@paintcodex/protocol';
 import type { CommandDispatcher } from '../../command-dispatcher.js';
 import {
   CanvasNotFoundError,
@@ -152,6 +158,39 @@ const DELETE_LAYER_DECLARATION: DynamicToolSpec = {
   },
 };
 
+const SELECT_DECLARATION: DynamicToolSpec = {
+  type: 'function',
+  name: 'canvas_select',
+  description:
+    'Point the user at one layer or one area of the canvas so they can see what ' +
+    'you are talking about. Pass exactly one of layerId or region. This only ' +
+    'moves the UI focus (the layer becomes active, the area is circled briefly); ' +
+    'it changes nothing on the canvas and needs no confirmation.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      canvasId: { type: 'string', description: 'Canvas id to point at.' },
+      layerId: { type: 'string', description: 'Id of the layer to select.' },
+      region: {
+        type: 'object',
+        description:
+          'Canvas-space rectangle to circle. Values outside the canvas are clamped ' +
+          'and reported, not rejected.',
+        properties: {
+          x: { type: 'number', description: 'Left edge, in canvas units.' },
+          y: { type: 'number', description: 'Top edge, in canvas units.' },
+          width: { type: 'number', description: 'Positive width, in canvas units.' },
+          height: { type: 'number', description: 'Positive height, in canvas units.' },
+        },
+        required: ['x', 'y', 'width', 'height'],
+        additionalProperties: false,
+      },
+    },
+    required: ['canvasId'],
+    additionalProperties: false,
+  },
+};
+
 const UNDO_DECLARATION: DynamicToolSpec = {
   type: 'function',
   name: 'canvas_undo',
@@ -218,6 +257,8 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
         return updateLayer(options.dispatcher, options.service, args, context);
       case 'canvas_delete_layer':
         return deleteLayer(options.dispatcher, options.service, args, context);
+      case 'canvas_select':
+        return selectTarget(options.service, args, context);
       case 'canvas_undo':
         return undo(options.dispatcher, options.service, args, context);
       case 'canvas_export_png':
@@ -239,6 +280,7 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
       CREATE_LAYER_DECLARATION,
       UPDATE_LAYER_DECLARATION,
       DELETE_LAYER_DECLARATION,
+      SELECT_DECLARATION,
       EXPORT_PNG_DECLARATION,
       UNDO_DECLARATION,
       RENDER_PREVIEW_DECLARATION,
@@ -792,6 +834,136 @@ async function renderPreview(
   return { ok: true, imageUrl: rendered.imageUrl };
 }
 
+/**
+ * The one tool that does not change the canvas at all: it only tells the browser
+ * where to look. `layerId` and `region` are mutually exclusive, and validating
+ * that here keeps the refusal a result the model can read and correct.
+ */
+function selectTarget(
+  service: Pick<PaintService, 'getCanvas'>,
+  args: unknown,
+  context: CanvasToolContext,
+): CanvasToolResult {
+  const object = asObject(args);
+
+  if (!object) {
+    return invalidArguments('参数必须是对象');
+  }
+
+  const canvasId = readCanvasId(object, context);
+
+  if (!canvasId) {
+    return {
+      ok: false,
+      code: 'canvas_required',
+      message: '请先打开画布再让 AI 绘制。',
+    };
+  }
+
+  const canvas = service.getCanvas(canvasId);
+
+  if (!canvas) {
+    return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
+  }
+
+  const hasLayer = object.layerId !== undefined;
+  const hasRegion = object.region !== undefined;
+
+  if (hasLayer === hasRegion) {
+    return invalidArguments(
+      hasLayer ? 'layerId 与 region 只能二选一' : 'layerId 与 region 必须提供一个',
+    );
+  }
+
+  if (hasLayer) {
+    if (typeof object.layerId !== 'string' || object.layerId.length === 0) {
+      return invalidArguments('layerId 必须是字符串');
+    }
+
+    if (!canvas.layers.some((layer) => layer.id === object.layerId)) {
+      return { ok: false, code: 'layer_not_found', message: '图层不存在' };
+    }
+
+    const selection: CanvasSelectFrame = { canvasId, layerId: object.layerId };
+
+    return { ok: true, selection };
+  }
+
+  const requested = readRegion(object.region);
+
+  if (!requested) {
+    return invalidArguments('region 必须包含 x、y、width、height 四个数字，且宽高大于 0');
+  }
+
+  const { region, clamped } = clampRegion(requested, canvas.width, canvas.height);
+  const selection: CanvasSelectFrame = {
+    canvasId,
+    region,
+    ...(clamped ? { clamped: true } : {}),
+  };
+
+  return {
+    ok: true,
+    selection,
+    // An area partly off the canvas is still worth pointing at; the model only
+    // has to know which box the user will actually see.
+    ...(clamped ? { message: '区域已裁剪到画布范围内' } : {}),
+  };
+}
+
+/** A region argument must be a complete rectangle of finite numbers with area. */
+function readRegion(value: unknown): CanvasRegion | null {
+  const object = asObject(value);
+
+  if (!object) {
+    return null;
+  }
+
+  const { x, y, width, height } = object;
+
+  if (
+    typeof x !== 'number' ||
+    !Number.isFinite(x) ||
+    typeof y !== 'number' ||
+    !Number.isFinite(y) ||
+    typeof width !== 'number' ||
+    !Number.isFinite(width) ||
+    width <= 0 ||
+    typeof height !== 'number' ||
+    !Number.isFinite(height) ||
+    height <= 0
+  ) {
+    return null;
+  }
+
+  return { x, y, width, height };
+}
+
+/**
+ * Clip a rectangle into the canvas. The result keeps a positive area even for a
+ * box that starts past the edge: pointing at the edge is still a useful answer,
+ * and the caller is told the box changed.
+ */
+function clampRegion(
+  region: CanvasRegion,
+  canvasWidth: number,
+  canvasHeight: number,
+): { region: CanvasRegion; clamped: boolean } {
+  const maxX = Math.max(0, canvasWidth - 1);
+  const maxY = Math.max(0, canvasHeight - 1);
+  const x = Math.min(Math.max(region.x, 0), maxX);
+  const y = Math.min(Math.max(region.y, 0), maxY);
+  const width = Math.min(region.width, Math.max(1, canvasWidth - x));
+  const height = Math.min(region.height, Math.max(1, canvasHeight - y));
+  const clamped =
+    x !== region.x ||
+    y !== region.y ||
+    width !== region.width ||
+    height !== region.height;
+
+  return { region: { x, y, width, height }, clamped };
+}
+
 function failureFromError(error: unknown): CanvasToolResult {
   if (error instanceof RevisionConflictError) {
     return {
@@ -947,6 +1119,17 @@ function summarizeArguments(args: unknown): Record<string, unknown> {
 
   if (typeof object.svg === 'string') {
     summary.svgLength = object.svg.length;
+  }
+
+  const region = asObject(object.region);
+
+  if (region) {
+    summary.region = {
+      x: region.x,
+      y: region.y,
+      width: region.width,
+      height: region.height,
+    };
   }
 
   const patch = asObject(object.patch);

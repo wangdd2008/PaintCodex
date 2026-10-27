@@ -1,5 +1,9 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import type { LogLevel, StreamPayload } from '@paintcodex/protocol';
+import type {
+  CanvasSelectFrame,
+  LogLevel,
+  StreamPayload,
+} from '@paintcodex/protocol';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
 import type {
   AgentMessageDeltaNotification,
@@ -58,6 +62,11 @@ export interface CodexTurnInput {
   onToolEvent?(event: ToolFrameEvent): void;
   /** Fires when a tool suspends for a human confirmation. */
   onConfirm?(event: ConfirmFrameEvent): void;
+  /**
+   * Fires after `canvas_select` resolved: the browser moves its focus to a layer
+   * or an area. A one-way UI signal, so there is nothing to answer.
+   */
+  onSelect?(selection: CanvasSelectFrame): void;
   /**
    * Asks the browser that opened this chat stream to render the canvas. Bound
    * to the turn's abort signal by the runtime, so an interrupted turn cannot
@@ -260,6 +269,7 @@ interface MutableActiveTurn extends ActiveTurnInfo {
   onLayerCreated?: (layer: { id: string; name: string }) => void;
   onToolEvent?: (event: ToolFrameEvent) => void;
   onConfirm?: (event: ConfirmFrameEvent) => void;
+  onSelect?: (selection: CanvasSelectFrame) => void;
   requestRender?: RenderPreviewRequester;
   requestExport?: ExportRequester;
   onNotice?: (notice: string) => void;
@@ -873,6 +883,27 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
           });
         }
       }
+
+      // `canvas_select` is the only tool whose whole effect is a UI signal; the
+      // browser has no answer to send back, so it is forwarded, not requested.
+      const selection =
+        result.ok && call.tool === 'canvas_select' ? result.selection : undefined;
+
+      if (
+        typeof selection === 'object' &&
+        selection !== null &&
+        typeof (selection as { canvasId?: unknown }).canvasId === 'string'
+      ) {
+        try {
+          active.onSelect?.(selection as CanvasSelectFrame);
+        } catch (error) {
+          log('error', 'select_handler_failed', {
+            error,
+            canvasId: active.canvasId,
+            trace: active.trace,
+          });
+        }
+      }
     }
 
     const response: DynamicToolCallResponse = buildToolResponse(result);
@@ -1367,6 +1398,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         onLayerCreated: input.onLayerCreated,
         onToolEvent: input.onToolEvent,
         onConfirm: input.onConfirm,
+        onSelect: input.onSelect,
         requestRender: input.requestRender,
         requestExport: input.requestExport,
         onNotice: input.onNotice,

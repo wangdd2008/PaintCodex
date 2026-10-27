@@ -13,7 +13,10 @@ import {
   type Path,
 } from 'fabric';
 import { setActiveCanvas } from '../../services/canvas-engine';
-import { useCanvasStore } from '../../services/canvas-store';
+import {
+  AI_SELECTION_DURATION_MS,
+  useCanvasStore,
+} from '../../services/canvas-store';
 import { setLayerOpacityPreviewHandler } from '../../services/layer-preview';
 import { nextStrokeLayerName } from '../../services/naming';
 import {
@@ -50,6 +53,22 @@ function unsavedMessage(count: number, reason: string): string {
 const LOCATE_HIGHLIGHT_COLOR = '#ff8a00';
 const LOCATE_HIGHLIGHT_STROKE_WIDTH = 8;
 const LOCATE_HIGHLIGHT_DURATION_MS = 800;
+
+/** The `canvas_select` cue, expressed as CSS percentages of the canvas box. */
+interface AiHighlight {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function percent(value: number, total: number): number {
+  if (!(total > 0)) {
+    return 0;
+  }
+
+  return Math.min(100, Math.max(0, (value / total) * 100));
+}
 
 /**
  * Turns technical transport failures into a Chinese, actionable reason. The
@@ -193,6 +212,9 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const [ready, setReady] = useState(false);
   const [objectsVersion, setObjectsVersion] = useState(0);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
+  const [aiHighlight, setAiHighlight] = useState<AiHighlight | null>(null);
+  const aiSelection = useCanvasStore((state) => state.aiSelection);
+  const isDrawing = useCanvasStore((state) => state.isDrawing);
   const canvasAlert = useCanvasStore((state) => state.canvasAlert);
   const hasCanvasRetry = useCanvasStore((state) => state.canvasRetry !== null);
   const retryCanvasAlert = useCanvasStore((state) => state.retryCanvasAlert);
@@ -378,6 +400,10 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     canvas.freeDrawingBrush = brush;
 
     const handlePathCreated = (event: { path: Path }) => {
+      // A finished stroke is the strongest "drawing is over" signal we get,
+      // even if the pointer was released outside the canvas.
+      useCanvasStore.getState().setDrawing(false);
+
       const path = event.path;
       path.set({ selectable: false, evented: false });
 
@@ -478,10 +504,27 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
 
     canvas.on('path:created', handlePathCreated);
     canvas.on('object:modified', handleObjectModified);
+
+    /**
+     * A pointer held down on a brush canvas is a stroke in progress. The AI
+     * focus cue reads this instead of guessing from fabric's private state.
+     */
+    const handleMouseDown = () => {
+      if (useToolStore.getState().tool === 'brush') {
+        useCanvasStore.getState().setDrawing(true);
+      }
+    };
+    const handleMouseUp = () => {
+      useCanvasStore.getState().setDrawing(false);
+    };
+
+    canvas.on('mouse:down', handleMouseDown);
+    canvas.on('mouse:up', handleMouseUp);
     setReady(true);
 
     return () => {
       setReady(false);
+      useCanvasStore.getState().setDrawing(false);
       syncTokenRef.current += 1;
       objectsRef.current.clear();
       signaturesRef.current.clear();
@@ -491,6 +534,8 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       setActiveCanvas(null);
       canvas.off('path:created', handlePathCreated);
       canvas.off('object:modified', handleObjectModified);
+      canvas.off('mouse:down', handleMouseDown);
+      canvas.off('mouse:up', handleMouseUp);
       void canvas.dispose();
     };
   }, [width, height, backgroundColor]);
@@ -504,6 +549,11 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
 
     canvas.isDrawingMode = tool === 'brush';
     const selectMode = tool === 'select';
+
+    // Leaving the brush ends any stroke the canvas no longer tracks.
+    if (tool !== 'brush') {
+      useCanvasStore.getState().setDrawing(false);
+    }
 
     for (const [layerId, object] of objectsRef.current) {
       const layer = layers?.find((entry) => entry.id === layerId);
@@ -725,6 +775,63 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       }
     };
   }, [activeLayerRequest, activeLayerId, ready, layers]);
+
+  /**
+   * `canvas_select`'s cue: outline the chosen layer (from its real bounding box)
+   * or area for three seconds. It is a DOM overlay rather than a fabric
+   * mutation, so showing it can never disturb a stroke; while a stroke is in
+   * progress it waits for `mouse:up` instead of appearing mid-draw.
+   */
+  useEffect(() => {
+    if (
+      !ready ||
+      isDrawing ||
+      !aiSelection ||
+      aiSelection.canvasId !== canvasDocument.id
+    ) {
+      setAiHighlight(null);
+      return;
+    }
+
+    if (aiSelection.region) {
+      const { x, y, width: regionWidth, height: regionHeight } = aiSelection.region;
+
+      setAiHighlight({
+        left: percent(x, width),
+        top: percent(y, height),
+        width: percent(regionWidth, width),
+        height: percent(regionHeight, height),
+      });
+      return;
+    }
+
+    const object = aiSelection.layerId
+      ? objectsRef.current.get(aiSelection.layerId)
+      : undefined;
+    const bounds =
+      typeof object?.getBoundingRect === 'function' ? object.getBoundingRect() : null;
+
+    if (!bounds) {
+      setAiHighlight(null);
+      return;
+    }
+
+    setAiHighlight({
+      left: percent(bounds.left, width),
+      top: percent(bounds.top, height),
+      width: percent(bounds.width, width),
+      height: percent(bounds.height, height),
+    });
+  }, [
+    aiSelection,
+    isDrawing,
+    ready,
+    width,
+    height,
+    objectsVersion,
+    canvasDocument.id,
+  ]);
+
   // The document is scaled by CSS; report the real ratio in the status bar.
   useEffect(() => {
     const element = canvasElementRef.current;
@@ -782,6 +889,20 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       ) : null}
       <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}` }}>
         <canvas ref={canvasElementRef} aria-label="画布" />
+        {aiHighlight ? (
+          <div
+            className="canvas-ai-highlight"
+            aria-hidden="true"
+            style={{
+              left: `${aiHighlight.left}%`,
+              top: `${aiHighlight.top}%`,
+              width: `${aiHighlight.width}%`,
+              height: `${aiHighlight.height}%`,
+              // The store owns the lifetime; the fade must match it.
+              animationDuration: `${AI_SELECTION_DURATION_MS}ms`,
+            }}
+          />
+        ) : null}
       </div>
       {blockedStroke ? (
         <p className="canvas-warning" role="alert">

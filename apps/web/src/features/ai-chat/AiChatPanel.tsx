@@ -1,4 +1,4 @@
-import type { StreamPayload } from '@paintcodex/protocol';
+import type { CanvasRegion, StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { postExportResult, postRenderResult } from '../../services/api';
 import { exportActiveCanvasPng } from '../../services/canvas-engine';
@@ -298,6 +298,30 @@ function parseFrame(frame: string): StreamPayload | null {  const data = frame
   } catch {
     return null;
   }
+}
+
+/** 区域帧只接受完整的矩形；坏帧直接忽略，不能把界面设成半截状态。 */
+function readRegion(value: unknown): CanvasRegion | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return null;
+  }
+
+  const { x, y, width, height } = value as Record<string, unknown>;
+
+  if (
+    typeof x !== 'number' ||
+    !Number.isFinite(x) ||
+    typeof y !== 'number' ||
+    !Number.isFinite(y) ||
+    typeof width !== 'number' ||
+    !Number.isFinite(width) ||
+    typeof height !== 'number' ||
+    !Number.isFinite(height)
+  ) {
+    return null;
+  }
+
+  return { x, y, width, height };
 }
 
 export function AiChatPanel() {
@@ -700,6 +724,22 @@ export function AiChatPanel() {
         canvasId.length > 0
       ) {
         answerExportRequest(id, canvasId);
+      }
+      return;
+    }
+
+    if (payload.select) {
+      const { canvasId, layerId, clamped } = payload.select;
+      const region = readRegion(payload.select.region);
+
+      if (typeof canvasId === 'string' && canvasId.length > 0) {
+        // 纯界面信号：只更新 store，不碰画布、不落库、不抢焦点。
+        useCanvasStore.getState().selectFromAi({
+          canvasId,
+          ...(typeof layerId === 'string' && layerId.length > 0 ? { layerId } : {}),
+          ...(region === null ? {} : { region }),
+          ...(clamped === true ? { clamped: true } : {}),
+        });
       }
       return;
     }

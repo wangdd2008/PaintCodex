@@ -505,6 +505,28 @@ describe('Codex runtime tool frames', () => {
     expect(created).toEqual([]);
   });
 
+  it('hands the canvas_select target to the browser as a select signal', async () => {
+    const selections: unknown[] = [];
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_select', { canvasId: 'canvas-1', layerId: 'layer-1' }));`,
+        onToolResponse: `
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    await start(harnessed, {
+      tools: stubTools(async () => ({
+        ok: true,
+        selection: { canvasId: 'canvas-1', layerId: 'layer-1' },
+      })),
+      onSelect: (selection) => selections.push(selection),
+    });
+
+    expect(selections).toEqual([{ canvasId: 'canvas-1', layerId: 'layer-1' }]);
+  });
+
   it('executes the tool calls of one turn strictly one at a time per canvas', async () => {
     const order: string[] = [];
     let releaseFirst: () => void = () => {};

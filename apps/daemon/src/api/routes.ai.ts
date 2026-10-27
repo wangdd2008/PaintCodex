@@ -168,6 +168,11 @@ export function registerAiChatRoute(
           onConfirm: (event) => {
             send({ confirm: event });
           },
+          // `canvas_select` only asks the browser to move its focus; unlike the
+          // render/export round-trips there is no result endpoint and no wait.
+          onSelect: (selection) => {
+            send({ select: selection });
+          },
         });
 
         turnSpan.finish({
