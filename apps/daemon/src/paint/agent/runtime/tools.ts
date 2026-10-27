@@ -690,7 +690,13 @@ function undo(
 
   const target = service.getUndoTarget(canvasId);
 
-  if (!target) {
+  if (target.kind === 'canvas_not_found') {
+    return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
+  }
+
+  // An exhausted stack is not the user's action: there is simply nothing left
+  // to undo, and the model must not ask the user to undo it themselves.
+  if (target.kind === 'nothing_to_undo') {
     return { ok: false, code: 'nothing_to_undo', message: '没有可撤销的操作' };
   }
 

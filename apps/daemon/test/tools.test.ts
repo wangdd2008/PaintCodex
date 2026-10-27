@@ -802,12 +802,48 @@ describe('canvas_undo scoping', () => {
     expect(harness.service.getCanvas(canvas.id)!.layers).toHaveLength(1);
   });
 
+  it('reports nothing_to_undo on an exhausted stack instead of blaming the user', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    // One agent action: the canvas-create snapshot is the only thing beneath it.
+    await tools.execute(
+      'canvas_create_layer',
+      { canvasId: canvas.id, name: 'AI', svg: RED_CIRCLE_SVG },
+      context(canvas.id),
+    );
+
+    const first = await tools.execute(
+      'canvas_undo',
+      { canvasId: canvas.id },
+      context(canvas.id),
+    );
+
+    expect(first).toMatchObject({ ok: true, revision: 2 });
+
+    const second = await tools.execute(
+      'canvas_undo',
+      { canvasId: canvas.id },
+      context(canvas.id),
+    );
+
+    // The honest answer is "nothing left", not top_action_is_user: the user
+    // cannot undo anything either.
+    expect(second).toEqual({
+      ok: false,
+      code: 'nothing_to_undo',
+      message: '没有可撤销的操作',
+    });
+  });
+
   it('reports a revision conflict from the dispatcher as a readable failure', async () => {
     const harness = createHarness();
     const canvas = harness.service.createCanvas();
     const service = {
       getCanvas: (id: string) => harness.service.getCanvas(id),
       getUndoTarget: () => ({
+        kind: 'target' as const,
         revision: 1,
         actor: 'agent' as const,
         action: 'canvas_create_layer',

@@ -37,6 +37,16 @@ export interface UndoTargetSnapshot {
 }
 
 /**
+ * The full answer to "what would undo do next?". Nothing-to-undo is a distinct
+ * outcome from a missing canvas, and it mirrors `undo()`'s own precondition:
+ * a cursor alone is not enough, there must be a snapshot *before* it to restore.
+ */
+export type UndoTarget =
+  | ({ kind: 'target' } & UndoTargetSnapshot)
+  | { kind: 'nothing_to_undo' }
+  | { kind: 'canvas_not_found' };
+
+/**
  * A canvas without a name is still a document the user must be able to tell
  * apart from the next one, so the default carries the local wall-clock time
  * the daemon created it at (`未命名 2026-10-26 14:32`).
@@ -142,26 +152,39 @@ export class PaintService {
   /**
    * Read-only view of the top of the undo stack, so the agent lane can check
    * attribution before it asks for an undo. REST undo semantics stay untouched:
-   * this accessor only reads the same cursor `undo()` would leave.
+   * this accessor only reads the same cursor and the same `before()` check
+   * `undo()` uses. A cursor whose snapshot has no predecessor is "nothing to
+   * undo", not "someone else's action".
    */
-  getUndoTarget(canvasId: string): UndoTargetSnapshot | null {
+  getUndoTarget(canvasId: string): UndoTarget {
     const canvas = this.canvases.findById(canvasId);
 
     if (!canvas) {
-      return null;
+      return { kind: 'canvas_not_found' };
     }
 
     const cursor = this.cursor(canvas);
-    const snapshot = cursor === null ? null : this.snapshots.at(canvasId, cursor);
+    const previous = cursor === null ? null : this.snapshots.before(canvasId, cursor);
 
-    if (!snapshot) {
-      return null;
+    // `undo()` restores the snapshot before the cursor; without one there is
+    // nothing to undo, regardless of who owns the cursor's own action.
+    if (!previous || cursor === null) {
+      return { kind: 'nothing_to_undo' };
+    }
+
+    // The action that would be undone is the one at the cursor, not the state
+    // it restores to.
+    const action = this.snapshots.at(canvasId, cursor);
+
+    if (!action) {
+      return { kind: 'nothing_to_undo' };
     }
 
     return {
-      revision: snapshot.revision,
-      actor: snapshot.actor,
-      action: snapshot.action,
+      kind: 'target',
+      revision: action.revision,
+      actor: action.actor,
+      action: action.action,
     };
   }
 
