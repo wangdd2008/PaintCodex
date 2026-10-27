@@ -63,7 +63,7 @@ describe('ObservabilityLogger', () => {
 
     harness.advance(5);
     const child = root.startSpan({
-      category: 'codex-runner',
+      category: 'codex-runtime',
       message: 'codex_exec',
     });
 
@@ -89,7 +89,7 @@ describe('ObservabilityLogger', () => {
       traceId: root.traceId,
       spanId: child.spanId,
       parentId: root.spanId,
-      category: 'codex-runner',
+      category: 'codex-runtime',
       message: 'codex_exec',
       durationMs: 10,
     });
@@ -106,7 +106,7 @@ describe('ObservabilityLogger', () => {
   it('normalizes errors and lets finish override the span payload', () => {
     const harness = createHarness();
     const trace = harness.logger.startTrace({
-      category: 'codex-runner',
+      category: 'codex-runtime',
       message: 'codex_run',
       payload: { step: 'spawn' },
     });

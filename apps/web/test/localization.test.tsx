@@ -384,7 +384,6 @@ const ALLOWED_TOKENS = new Set([
   'sse_subscribe',
   'chat_completed',
   // 监控分类名（协议值，AI 对话分类含连字符）。
-  'codex-runner',
   'codex-runtime',
   'canvas-tool',
   'ai-chat',

@@ -143,6 +143,9 @@ describe('AI canvas tools', () => {
     expect(captured.input?.tools.declarations.map((tool) => tool.name)).toEqual([
       'canvas_get_context',
       'canvas_create_layer',
+      'canvas_update_layer',
+      'canvas_delete_layer',
+      'canvas_undo',
     ]);
 
     await app.close();

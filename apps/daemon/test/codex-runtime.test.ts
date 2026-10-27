@@ -29,6 +29,17 @@ const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
 const notify = (method, params) => send({ method, params, emittedAtMs: Date.now() });
 const threadId = '${THREAD_ID}';
 const turnId = '${TURN_ID}';
+let answered = 0;
+const dynamicToolItem = (id, tool, overrides = {}) => ({
+  type: 'dynamicToolCall',
+  id,
+  tool,
+  arguments: {},
+  status: 'inProgress',
+  contentItems: null,
+  success: null,
+  ...overrides,
+});
 const toolCall = (tool, args) => ({
   id: 0,
   method: 'item/tool/call',
@@ -57,7 +68,8 @@ rl.on('line', (line) => {
     notify('turn/completed', { threadId, turn: { id: turnId, status: 'interrupted', items: [] } });
     return;
   }
-  if (message.method === undefined && message.id === 0) {
+  if (message.method === undefined && typeof message.id === 'number') {
+    answered += 1;
     ${hooks.onToolResponse ?? ''}
     return;
   }
@@ -90,7 +102,9 @@ function harness(options: {
     command: process.execPath,
     args: fakeAppServer(options.hooks),
     logger: observability.logger,
-    requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
+    // 15s: the fake app-server is a real child process, and the full workspace
+    // suite runs it while other packages are compiling; 5s flaked under load.
+    requestTimeoutMs: options.requestTimeoutMs ?? 15_000,
     toolTimeoutMs: options.toolTimeoutMs,
   });
 
@@ -295,6 +309,143 @@ describe('Codex runtime dynamic tools', () => {
 
     expect(harnessed.runtimeLogs().some((record) => record.message === 'tool_timeout'))
       .toBe(true);
+  });
+});
+
+describe('Codex runtime tool frames', () => {
+  type ToolEvent = Parameters<NonNullable<Parameters<CodexRuntime['startTurn']>[0]['onToolEvent']>>[0];
+
+  it('maps dynamicToolCall item events to running and ok frames', async () => {
+    const events: ToolEvent[] = [];
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `
+    notify('item/started', { threadId, turnId, item: dynamicToolItem('call_1', 'canvas_update_layer') });
+    send(toolCall('canvas_update_layer', { canvasId: 'canvas-1', layerId: 'layer-1', patch: {} }));
+`,
+        onToolResponse: `
+    notify('item/completed', { threadId, turnId, item: dynamicToolItem('call_1', 'canvas_update_layer', { status: 'completed', success: true, contentItems: [] }) });
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const result = await start(harnessed, {
+      tools: stubTools(async () => ({ ok: true, revision: 2 })),
+      onToolEvent: (event) => events.push(event),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(events).toEqual([
+      { id: 'call_1', name: 'canvas_update_layer', status: 'running' },
+      { id: 'call_1', name: 'canvas_update_layer', status: 'ok' },
+    ]);
+  });
+
+  it('carries the failure code on the failed frame', async () => {
+    const events: ToolEvent[] = [];
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `
+    notify('item/started', { threadId, turnId, item: dynamicToolItem('call_1', 'canvas_delete_layer') });
+    send(toolCall('canvas_delete_layer', { canvasId: 'canvas-1', layerId: 'missing' }));
+`,
+        onToolResponse: `
+    notify('item/completed', { threadId, turnId, item: dynamicToolItem('call_1', 'canvas_delete_layer', { status: 'completed', success: false, contentItems: [] }) });
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    await start(harnessed, {
+      tools: stubTools(async () => ({
+        ok: false,
+        code: 'layer_not_found',
+        message: '图层不存在',
+      })),
+      onToolEvent: (event) => events.push(event),
+    });
+
+    expect(events.at(-1)).toEqual({
+      id: 'call_1',
+      name: 'canvas_delete_layer',
+      status: 'failed',
+      code: 'layer_not_found',
+    });
+  });
+
+  it('does not report a layer update as a created layer', async () => {
+    const created: Array<{ id: string; name: string }> = [];
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_update_layer', { canvasId: 'canvas-1', layerId: 'layer-1', patch: {} }));`,
+        onToolResponse: `
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    await start(harnessed, {
+      tools: stubTools(async () => ({
+        ok: true,
+        layer: { id: 'layer-1', name: 'AI — 红圆' },
+        revision: 2,
+      })),
+      onLayerCreated: (layer) => created.push(layer),
+    });
+
+    expect(created).toEqual([]);
+  });
+
+  it('executes the tool calls of one turn strictly one at a time per canvas', async () => {
+    const order: string[] = [];
+    let releaseFirst: () => void = () => {};
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `
+    send({ id: 0, method: 'item/tool/call', params: { threadId, turnId, callId: 'call_1', namespace: null, tool: 'first', arguments: {} } });
+    send({ id: 1, method: 'item/tool/call', params: { threadId, turnId, callId: 'call_2', namespace: null, tool: 'second', arguments: {} } });
+`,
+        onToolResponse: `
+    if (answered < 2) {
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const pending = start(harnessed, {
+      tools: stubTools(async (tool) => {
+        order.push(`start:${tool}`);
+
+        if (tool === 'first') {
+          await firstGate;
+        }
+
+        order.push(`end:${tool}`);
+        return { ok: true };
+      }),
+    });
+
+    await waitFor(() => (order.length > 0 ? order : null));
+    // Give an unqueued second call every chance to start before asserting.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(order).toEqual(['start:first']);
+
+    releaseFirst();
+    await pending;
+
+    expect(order).toEqual([
+      'start:first',
+      'end:first',
+      'start:second',
+      'end:second',
+    ]);
   });
 });
 

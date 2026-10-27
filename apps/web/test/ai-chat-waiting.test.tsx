@@ -1,4 +1,4 @@
-﻿// @vitest-environment jsdom
+// @vitest-environment jsdom
 import type { CanvasDocument } from '@paintcodex/protocol';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -172,45 +172,28 @@ describe('AiChatPanel 等待计时', () => {
 });
 
 describe('AiChatPanel 阶段顺序与落地确认', () => {
-  it('按 step → delta → done 顺序推进', async () => {
+  it('按 delta → done 顺序推进，不再有四步进度文案', async () => {
     const stream = controlledStream();
     stubFetch(stream.body);
     render(<AiChatPanel />);
 
     await sendMessage('Paint a cat');
 
-    await pushFrame(stream, {
-      step: { id: 'prompt_built', label: '正在构建请求…' },
-    });
-    expect(screen.getByText('正在构建请求…')).toBeTruthy();
-    expect(screen.queryByText('正在生成…')).toBeNull();
-
-    await pushFrame(stream, {
-      step: { id: 'codex_exec', label: 'AI 正在思考…' },
-    });
-    expect(screen.getByText('AI 正在思考…')).toBeTruthy();
-    expect(screen.queryByText('正在构建请求…')).toBeNull();
+    // 还没有第一个 token：只显示等待文案与计时。
+    expect(screen.getByText('思考中…')).toBeTruthy();
+    expect(screen.queryByText(/正在构建请求|AI 正在思考|正在解析结果|正在应用到画布/)).toBeNull();
 
     await pushFrame(stream, { delta: 'A red circle.' });
     expect(screen.getByText('正在生成…')).toBeTruthy();
-    expect(screen.queryByText('AI 正在思考…')).toBeNull();
+    expect(screen.queryByText('思考中…')).toBeNull();
     expect(screen.getByText('A red circle.')).toBeTruthy();
     expect(screen.queryByText(/已完成 · 用时/)).toBeNull();
-
-    // 落地步骤在首个 token 之后仍沿用 ADR-0007 的四段文案。
-    await pushFrame(stream, {
-      step: { id: 'action_parse', label: '正在解析结果…' },
-    });
-    await pushFrame(stream, {
-      step: { id: 'action_apply', label: '正在应用到画布…' },
-    });
-    expect(screen.getByText('正在应用到画布…')).toBeTruthy();
 
     await pushFrame(stream, { done: true });
     await closeStream(stream);
 
     expect(screen.getByText('已完成 · 用时 0s')).toBeTruthy();
-    expect(screen.queryByText('正在应用到画布…')).toBeNull();
+    expect(screen.queryByText('正在生成…')).toBeNull();
     expect(screen.getByText('A red circle.')).toBeTruthy();
   });
 

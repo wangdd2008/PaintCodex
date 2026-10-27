@@ -67,6 +67,58 @@ describe('POST /paint/ai/chat', () => {
     await app.close();
   });
 
+  it('forwards tool item events as tool frames', async () => {
+    const runtime = fakeRuntime(async (input) => {
+      input.onToolEvent?.({
+        id: 'call-1',
+        name: 'canvas_update_layer',
+        status: 'running',
+      });
+      input.onToolEvent?.({
+        id: 'call-1',
+        name: 'canvas_update_layer',
+        status: 'ok',
+      });
+      input.onToolEvent?.({
+        id: 'call-2',
+        name: 'canvas_delete_layer',
+        status: 'failed',
+        code: 'revision_conflict',
+      });
+
+      return { text: '', toolCallCount: 2 };
+    });
+    const app = buildServer({ runtime, dbPath: ':memory:' });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/paint/ai/chat',
+      payload: { message: 'Update the circle' },
+    });
+
+    expect(frames(response.payload)).toEqual([
+      {
+        tool: {
+          id: 'call-1',
+          name: 'canvas_update_layer',
+          status: 'running',
+        },
+      },
+      { tool: { id: 'call-1', name: 'canvas_update_layer', status: 'ok' } },
+      {
+        tool: {
+          id: 'call-2',
+          name: 'canvas_delete_layer',
+          status: 'failed',
+          code: 'revision_conflict',
+        },
+      },
+      { done: true },
+    ]);
+
+    await app.close();
+  });
+
   it('declares no canvas tools when the conversation has no canvas', async () => {
     let toolCount = -1;
     const runtime = fakeRuntime(async (input) => {

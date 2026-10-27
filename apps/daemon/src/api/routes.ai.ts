@@ -129,6 +129,9 @@ export function registerAiChatRoute(
             actionApplied = true;
             send({ layerCreated: { id: layer.id, name: layer.name } });
           },
+          onToolEvent: (event) => {
+            send({ tool: event });
+          },
         });
 
         turnSpan.finish({
