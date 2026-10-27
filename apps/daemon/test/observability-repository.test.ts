@@ -415,6 +415,8 @@ describe('AgentLogRepository', () => {
     });
     expect(stats.categoryCounts).toEqual([
       { category: 'codex-runner', count: 1, errorCount: 0 },
+      { category: 'codex-runtime', count: 0, errorCount: 0 },
+      { category: 'canvas-tool', count: 0, errorCount: 0 },
       { category: 'ai-chat', count: 3, errorCount: 1 },
       { category: 'canvas-action', count: 0, errorCount: 0 },
       { category: 'http', count: 2, errorCount: 1 },

@@ -1,26 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import type { AgentLog } from '@paintcodex/protocol';
+import type { CodexTurnInput } from '../src/paint/agent/runtime/codex-runtime.js';
 import { buildServer } from '../src/api/server.js';
-import type { CodexRunner } from '../src/paint/agent/codex-runner.js';
-import { CANVAS_ACTION_MARKER } from '../src/paint/agent/canvas-action.js';
+import { fakeRuntime } from './helpers/fake-runtime.js';
 
 const RED_CIRCLE_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080"><circle cx="960" cy="540" r="120" fill="red"/></svg>';
 
-function actionText(name: string, svg: string): string {
-  return `Drawing that now.\n${CANVAS_ACTION_MARKER}\n${JSON.stringify({ name, svg })}`;
-}
-
-function chatLogs(app: FastifyInstance): AgentLog[] {
-  return app.observability.repository.query({
-    category: 'ai-chat',
-    limit: 200,
-  }).items;
+function logsIn(app: FastifyInstance, category: 'ai-chat' | 'canvas-tool'): AgentLog[] {
+  return app.observability.repository.query({ category, limit: 200 }).items;
 }
 
 function messages(app: FastifyInstance, message: string): AgentLog[] {
-  return chatLogs(app).filter((log) => log.message === message);
+  return logsIn(app, 'ai-chat').filter((log) => log.message === message);
 }
 
 function single(app: FastifyInstance, message: string): AgentLog {
@@ -51,16 +44,32 @@ async function waitForMessage(
   return undefined;
 }
 
+async function runCreateLayer(
+  input: CodexTurnInput,
+  prompt: string,
+): Promise<void> {
+  const result = await input.tools.execute(
+    'canvas_create_layer',
+    { canvasId: input.canvasId, name: 'AI — Red circle', svg: RED_CIRCLE_SVG },
+    { canvasId: input.canvasId, prompt, trace: input.trace },
+  );
+
+  if (result.ok) {
+    input.onLayerCreated?.(result.layer as { id: string; name: string });
+  }
+}
+
 describe('AI chat instrumentation', () => {
-  it('records one chat trace with prompt, codex and sse events', async () => {
-    const runner: CodexRunner = {
-      run: async (_prompt, onDelta) => {
-        onDelta('Hel');
-        onDelta('lo');
-        return 'Hello';
-      },
-    };
-    const app = buildServer({ dbPath: ':memory:', runner });
+  it('records one chat trace with prompt, turn and sse events', async () => {
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(async (input) => {
+        input.onDelta('Hel');
+        input.onDelta('lo');
+
+        return { text: 'Hello', toolCallCount: 0 };
+      }),
+    });
 
     const response = await app.inject({
       method: 'POST',
@@ -69,12 +78,12 @@ describe('AI chat instrumentation', () => {
     });
 
     const promptBuilt = single(app, 'prompt_built');
-    const codexExec = single(app, 'codex_exec');
+    const codexTurn = single(app, 'codex_turn');
     const sseComplete = single(app, 'sse_complete');
     const completed = single(app, 'chat_completed');
     const traceIds = new Set([
       promptBuilt.traceId,
-      codexExec.traceId,
+      codexTurn.traceId,
       sseComplete.traceId,
       completed.traceId,
     ]);
@@ -88,12 +97,12 @@ describe('AI chat instrumentation', () => {
       payload: { promptLength: expect.any(Number), hasCanvas: false, layerCount: 0 },
     });
     expect((promptBuilt.payload as Record<string, unknown>).prompt).toBeUndefined();
-    expect(codexExec).toMatchObject({
+    expect(codexTurn).toMatchObject({
       traceId: completed.traceId,
       parentId: completed.spanId,
       level: 'info',
     });
-    expect(typeof codexExec.durationMs).toBe('number');
+    expect(typeof codexTurn.durationMs).toBe('number');
     expect(completed).toMatchObject({
       level: 'info',
       actor: 'agent',
@@ -109,13 +118,13 @@ describe('AI chat instrumentation', () => {
     await app.close();
   });
 
-  it('marks the chat as failed when the runner throws', async () => {
-    const runner: CodexRunner = {
-      run: async () => {
+  it('marks the chat as failed when the runtime throws', async () => {
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(async () => {
         throw new Error('codex exploded');
-      },
-    };
-    const app = buildServer({ dbPath: ':memory:', runner });
+      }),
+    });
 
     const response = await app.inject({
       method: 'POST',
@@ -124,6 +133,7 @@ describe('AI chat instrumentation', () => {
     });
 
     const completed = single(app, 'chat_completed');
+    const codexTurn = single(app, 'codex_turn');
 
     expect(response.payload).toContain('"code":"ai_chat_failed"');
     expect(completed).toMatchObject({
@@ -131,20 +141,21 @@ describe('AI chat instrumentation', () => {
       payload: { deltaCount: 0, assistantLength: 0, actionApplied: false },
     });
     expect(completed.error).toContain('codex exploded');
-    expect(messages(app, 'codex_exec')[0]).toMatchObject({ level: 'error' });
+    expect(codexTurn).toMatchObject({ level: 'error' });
 
     await app.close();
   });
 
-  it('records an applied canvas action with its layer id', async () => {
-    const runner: CodexRunner = {
-      run: async (_prompt, onDelta) => {
-        const text = actionText('AI — Red circle', RED_CIRCLE_SVG);
-        onDelta(text);
-        return text;
-      },
-    };
-    const app = buildServer({ dbPath: ':memory:', runner });
+  it('records a created layer as a canvas-tool result and a layerCreated frame', async () => {
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(async (input) => {
+        await runCreateLayer(input, input.userMessage ?? '');
+        input.onDelta('Done.');
+
+        return { text: 'Done.', toolCallCount: 1 };
+      }),
+    });
     const canvas = await app.inject({
       method: 'POST',
       url: '/paint/canvas',
@@ -158,19 +169,21 @@ describe('AI chat instrumentation', () => {
       payload: { message: 'Draw a red circle', canvasId },
     });
 
-    const actionParse = single(app, 'action_parse');
-    const actionApply = single(app, 'action_apply');
+    const toolResult = logsIn(app, 'canvas-tool').find(
+      (log) => log.message === 'tool_result',
+    );
     const completed = single(app, 'chat_completed');
 
     expect(response.payload).toContain('"layerCreated"');
-    expect(actionParse).toMatchObject({
-      level: 'debug',
-      payload: { hasAction: true, actionName: 'AI — Red circle' },
-    });
-    expect(actionApply).toMatchObject({
+    expect(toolResult).toMatchObject({
       level: 'info',
-      traceId: completed.traceId,
-      payload: { layerId: expect.any(String), actionName: 'AI — Red circle' },
+      actor: 'agent',
+      canvasId,
+      payload: {
+        tool: 'canvas_create_layer',
+        ok: true,
+        layerId: expect.any(String),
+      },
     });
     expect(completed).toMatchObject({
       canvasId,
@@ -178,18 +191,21 @@ describe('AI chat instrumentation', () => {
       level: 'info',
       payload: { actionApplied: true },
     });
+    expect(messages(app, 'action_parse')).toHaveLength(0);
+    expect(messages(app, 'action_apply')).toHaveLength(0);
 
     await app.close();
   });
 
-  it('does not record action events for a plain conversation', async () => {
-    const runner: CodexRunner = {
-      run: async (_prompt, onDelta) => {
-        onDelta('Paris');
-        return 'Paris';
-      },
-    };
-    const app = buildServer({ dbPath: ':memory:', runner });
+  it('records no tool events for a plain conversation', async () => {
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(async (input) => {
+        input.onDelta('Paris');
+
+        return { text: 'Paris', toolCallCount: 0 };
+      }),
+    });
 
     await app.inject({
       method: 'POST',
@@ -197,10 +213,7 @@ describe('AI chat instrumentation', () => {
       payload: { message: 'Capital of France?' },
     });
 
-    expect(single(app, 'action_parse')).toMatchObject({
-      payload: { hasAction: false },
-    });
-    expect(messages(app, 'action_apply')).toHaveLength(0);
+    expect(logsIn(app, 'canvas-tool')).toHaveLength(0);
     expect(single(app, 'chat_completed')).toMatchObject({
       payload: { actionApplied: false },
     });
@@ -209,22 +222,24 @@ describe('AI chat instrumentation', () => {
   });
 
   it('records a client disconnect as a warning without an error event', async () => {
-    const runner: CodexRunner = {
-      run: (_prompt, onDelta, signal) =>
-        new Promise<string>((_resolve, reject) => {
-          onDelta('partial');
-          signal?.addEventListener(
-            'abort',
-            () => {
-              const error = new Error('Codex request aborted');
-              error.name = 'AbortError';
-              reject(error);
-            },
-            { once: true },
-          );
-        }),
-    };
-    const app = buildServer({ dbPath: ':memory:', runner });
+    const app = buildServer({
+      dbPath: ':memory:',
+      runtime: fakeRuntime(
+        (input) =>
+          new Promise((_resolve, reject) => {
+            input.onDelta('partial');
+            input.signal?.addEventListener(
+              'abort',
+              () => {
+                const error = new Error('AI 轮次已中断');
+                error.name = 'AbortError';
+                reject(error);
+              },
+              { once: true },
+            );
+          }),
+      ),
+    });
     const address = await app.listen({ port: 0, host: '127.0.0.1' });
     const controller = new AbortController();
 
