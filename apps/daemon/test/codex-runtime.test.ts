@@ -102,7 +102,9 @@ function harness(options: {
     command: process.execPath,
     args: fakeAppServer(options.hooks),
     logger: observability.logger,
-    requestTimeoutMs: options.requestTimeoutMs ?? 5_000,
+    // 15s: the fake app-server is a real child process, and the full workspace
+    // suite runs it while other packages are compiling; 5s flaked under load.
+    requestTimeoutMs: options.requestTimeoutMs ?? 15_000,
     toolTimeoutMs: options.toolTimeoutMs,
   });
 
