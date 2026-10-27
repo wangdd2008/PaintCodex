@@ -82,6 +82,7 @@ export class PaintService {
       backgroundColor: input.backgroundColor ?? '#ffffff',
       revision: 0,
       undoCursorRevision: 0,
+      codexThreadId: null,
       createdAt: now,
       updatedAt: now,
     });

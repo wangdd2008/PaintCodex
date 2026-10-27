@@ -5,12 +5,16 @@ import type {
   AgentMessageDeltaNotification,
   DynamicToolCallParams,
   DynamicToolCallResponse,
+  DynamicToolCallOutputContentItem,
   InitializeParams,
   InitializeResponse,
   ItemNotification,
   JsonRpcError,
   JsonRpcId,
   JsonRpcRequest,
+  ThreadDeleteParams,
+  ThreadResumeParams,
+  ThreadResumeResult,
   ThreadStartParams,
   ThreadStartResult,
   TurnCompletedNotification,
@@ -30,6 +34,10 @@ import {
   type ConfirmationOutcome,
   type ConfirmationRequest,
 } from './confirmation.js';
+import type {
+  RenderPreviewRequester,
+  RenderPreviewResult,
+} from './render-preview.js';
 
 /** One `tool` SSE frame: the protocol owns the shape so daemon and web agree. */
 export type ToolFrameEvent = NonNullable<StreamPayload['tool']>;
@@ -49,6 +57,17 @@ export interface CodexTurnInput {
   onToolEvent?(event: ToolFrameEvent): void;
   /** Fires when a tool suspends for a human confirmation. */
   onConfirm?(event: ConfirmFrameEvent): void;
+  /**
+   * Asks the browser that opened this chat stream to render the canvas. Bound
+   * to the turn's abort signal by the runtime, so an interrupted turn cannot
+   * leave a render request pending.
+   */
+  requestRender?: RenderPreviewRequester;
+  /**
+   * A short, non-fatal status worth showing in the assistant bubble, such as a
+   * recovered conversation. The turn continues after a notice.
+   */
+  onNotice?(notice: string): void;
   signal?: AbortSignal;
   trace?: TraceContext;
 }
@@ -66,7 +85,8 @@ export interface ActiveTurnInfo {
 
 /**
  * The only seam between the daemon and the Codex protocol. One process, one
- * thread per canvas (in memory for this slice), one turn per user message.
+ * thread per canvas (durable when a `CodexThreadStore` is configured), one turn
+ * per user message.
  */
 export interface CodexRuntime {
   startTurn(input: CodexTurnInput): Promise<CodexTurnResult>;
@@ -74,7 +94,22 @@ export interface CodexRuntime {
   interrupt(canvasId: string | null): Promise<void>;
   getThreadId(canvasId: string): string | null;
   getActiveTurn(canvasId: string | null): ActiveTurnInfo | null;
+  /**
+   * Forgets and deletes the canvas' thread. Failures are logged, never thrown:
+   * a canvas whose thread cannot be deleted must still be deletable.
+   */
+  deleteThread(canvasId: string): Promise<void>;
   close(): Promise<void>;
+}
+
+/**
+ * Where a canvas' Codex thread id lives between daemon runs. The daemon backs it
+ * with `canvases.codexThreadId`; tests use an in-memory map.
+ */
+export interface CodexThreadStore {
+  load(canvasId: string): string | null;
+  save(canvasId: string, threadId: string): void;
+  clear(canvasId: string): void;
 }
 
 export type CodexVersionProbe =
@@ -96,6 +131,11 @@ export interface CodexRuntimeOptions {
   toolTimeoutMs?: number;
   /** Shared confirmation registry; created internally when omitted. */
   confirmations?: ConfirmationChannel;
+  /**
+   * Persists the canvas → thread mapping. Without it threads are in-memory and
+   * ephemeral, which is all a test double needs.
+   */
+  threadStore?: CodexThreadStore;
   clientInfo?: { name: string; version: string };
   /**
    * Test seam: replaces `child_process.spawn` so process-lifecycle behaviour
@@ -213,8 +253,16 @@ interface MutableActiveTurn extends ActiveTurnInfo {
   onLayerCreated?: (layer: { id: string; name: string }) => void;
   onToolEvent?: (event: ToolFrameEvent) => void;
   onConfirm?: (event: ConfirmFrameEvent) => void;
+  requestRender?: RenderPreviewRequester;
+  onNotice?: (notice: string) => void;
   trace?: TraceContext;
   signal?: AbortSignal;
+  /**
+   * Cancels every human wait of this turn — a confirmation or a browser render.
+   * Both channels already settle on abort, so this is the single surface the
+   * runtime uses to stop waiting when the turn ends, is interrupted, or dies.
+   */
+  waits: AbortController;
   settled: boolean;
   abortRequested: boolean;
   resolve(result: CodexTurnResult): void;
@@ -228,6 +276,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
   const args = options.args ?? DEFAULT_ARGS;
   const requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const toolTimeoutMs = options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS;
+  const threadStore = options.threadStore;
   const clientInfo = options.clientInfo ?? { name: 'paintcodex', version: '0.1.0' };
   const confirmations =
     options.confirmations ??
@@ -344,10 +393,13 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     }
 
     // A tool suspended on the human must never outlive its turn: settle the
-    // confirmation first, then reject or resolve the turn as usual.
+    // confirmation first (so the recorded outcome is the real reason), then
+    // abort anything else still waiting on the browser.
     if (active.canvasId !== null) {
       confirmations.cancelCanvas(active.canvasId, cancelReason);
     }
+
+    active.waits.abort();
 
     active.settled = true;
     activeTurns.delete(active.threadId);
@@ -629,6 +681,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     armTimer();
 
     const canvasId = active.canvasId;
+    const waitSignal = active.waits.signal;
     const requestConfirmation =
       canvasId === null
         ? undefined
@@ -645,8 +698,33 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
               return await confirmations.requestConfirmation(canvasId, request, {
                 onConfirm: active.onConfirm,
                 trace: active.trace,
-                signal: active.signal,
+                signal: waitSignal,
               });
+            } finally {
+              resumeTimeout();
+            }
+          };
+
+    const requestRender =
+      active.requestRender === undefined
+        ? undefined
+        : async (renderCanvasId: string): Promise<RenderPreviewResult> => {
+            if (finished) {
+              // Like a late confirmation, a render asked for after the tool gave
+              // up has nobody left to consume it.
+              return {
+                ok: false,
+                code: 'render_unavailable',
+                message: '画布工具已结束，无法请求预览',
+              };
+            }
+
+            // A browser round-trip is a human wait, not tool compute: pause the
+            // tool deadline with the same helper the confirmation path uses.
+            suspendTimeout();
+
+            try {
+              return await active.requestRender!(renderCanvasId, waitSignal);
             } finally {
               resumeTimeout();
             }
@@ -657,6 +735,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       prompt: active.prompt,
       trace: active.trace,
       ...(requestConfirmation === undefined ? {} : { requestConfirmation }),
+      ...(requestRender === undefined ? {} : { requestRender }),
     };
 
     // `Promise.resolve().then` also catches a tool that throws synchronously:
@@ -762,10 +841,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       }
     }
 
-    const response: DynamicToolCallResponse = {
-      success: result.ok,
-      contentItems: [{ type: 'inputText', text: JSON.stringify(result) }],
-    };
+    const response: DynamicToolCallResponse = buildToolResponse(result);
 
     write({ id, result: response });
   };
@@ -1044,22 +1120,42 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
     return ready;
   };
 
-  const startEphemeralThread = async (tools: CanvasToolSet): Promise<string> => {
-    const params: ThreadStartParams = {
-      cwd: options.cwd ?? process.cwd(),
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      ephemeral: true,
-      dynamicTools: tools.declarations,
-    };
+  const threadParams = (
+    tools: CanvasToolSet,
+    persistent: boolean,
+  ): ThreadStartParams => ({
+    cwd: options.cwd ?? process.cwd(),
+    sandbox: 'read-only',
+    approvalPolicy: 'never',
+    // A thread can only be resumed from disk, so persistence is exactly what
+    // makes `ephemeral: true` wrong.
+    ephemeral: !persistent,
+    dynamicTools: tools.declarations,
+  });
 
-    const result = await request<ThreadStartResult>('thread/start', params);
+  const startThread = async (
+    tools: CanvasToolSet,
+    persistent: boolean,
+  ): Promise<string> => {
+    const result = await request<ThreadStartResult>(
+      'thread/start',
+      threadParams(tools, persistent),
+    );
+
     return result.thread.id;
   };
 
+  /**
+   * Resolves the canvas' thread, in order: the in-memory map (same daemon run),
+   * the persisted id (`thread/resume`, daemon restart), a brand new thread.
+   *
+   * A resume that the server rejects (thread deleted or archived) must not fail
+   * the user's message: start over, persist the new id, and say so.
+   */
   const ensureThread = async (
     canvasId: string,
     tools: CanvasToolSet,
+    onNotice?: (notice: string) => void,
   ): Promise<string> => {
     const existing = threads.get(canvasId);
 
@@ -1067,25 +1163,61 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       return existing;
     }
 
-    const params: ThreadStartParams = {
-      cwd: options.cwd ?? process.cwd(),
-      sandbox: 'read-only',
-      approvalPolicy: 'never',
-      ephemeral: true,
-      dynamicTools: tools.declarations,
-    };
-    const result = await request<ThreadStartResult>('thread/start', params);
+    const stored = threadStore?.load(canvasId) ?? null;
 
-    threads.set(canvasId, result.thread.id);
+    if (stored !== null) {
+      try {
+        const resumed = await request<ThreadResumeResult>('thread/resume', {
+          threadId: stored,
+          cwd: options.cwd ?? process.cwd(),
+          sandbox: 'read-only',
+          approvalPolicy: 'never',
+        } satisfies ThreadResumeParams);
+        const threadId = resumed.thread.id;
+
+        threads.set(canvasId, threadId);
+
+        if (threadId !== stored) {
+          threadStore?.save(canvasId, threadId);
+        }
+
+        log('info', 'thread_resume', {
+          payload: { threadId, sandbox: 'read-only', toolCount: tools.declarations.length },
+          canvasId,
+        });
+        return threadId;
+      } catch (error) {
+        log('warn', 'thread_resume_failed', {
+          payload: { threadId: stored },
+          error,
+          canvasId,
+        });
+      }
+    }
+
+    const threadId = await startThread(tools, threadStore !== undefined);
+
+    threads.set(canvasId, threadId);
+    threadStore?.save(canvasId, threadId);
     log('info', 'thread_start', {
       payload: {
-        threadId: result.thread.id,
+        threadId,
         sandbox: 'read-only',
         toolCount: tools.declarations.length,
+        ephemeral: threadStore === undefined,
       },
       canvasId,
     });
-    return result.thread.id;
+
+    if (stored !== null) {
+      try {
+        onNotice?.('会话已重置，已开启新对话。');
+      } catch (error) {
+        log('warn', 'notice_handler_failed', { error, canvasId });
+      }
+    }
+
+    return threadId;
   };
 
   const interrupt = async (canvasId: string | null): Promise<void> => {
@@ -1103,7 +1235,46 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       confirmations.cancelCanvas(canvasId, 'interrupted');
     }
 
+    // Stop a pending render too: no answer can be useful once the turn is gone.
+    active.waits.abort();
+
     await sendInterrupt(active.threadId, active.turnId);
+  };
+
+  /**
+   * Deletes the thread of a canvas on the server and forgets it locally. The
+   * delete is best-effort: losing the conversation history is acceptable,
+   * blocking the canvas delete is not.
+   */
+  const deleteThread = async (canvasId: string): Promise<void> => {
+    const threadId = threads.get(canvasId) ?? threadStore?.load(canvasId) ?? null;
+
+    threads.delete(canvasId);
+    threadStore?.clear(canvasId);
+
+    if (threadId === null || !child) {
+      if (threadId !== null) {
+        log('warn', 'thread_delete_skipped', {
+          payload: { threadId, reason: 'app_server_not_running' },
+          canvasId,
+        });
+      }
+      return;
+    }
+
+    try {
+      await request('thread/delete', { threadId } satisfies ThreadDeleteParams);
+      log('info', 'thread_delete', {
+        payload: { threadId },
+        canvasId,
+      });
+    } catch (error) {
+      log('warn', 'thread_delete_failed', {
+        payload: { threadId },
+        error,
+        canvasId,
+      });
+    }
   };
 
   const close = async (): Promise<void> => {
@@ -1139,9 +1310,10 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         input.canvasId === null ? null : (threads.get(input.canvasId) ?? null);
 
       if (threadId === null) {
-        threadId = await (input.canvasId === null
-          ? startEphemeralThread(input.tools)
-          : ensureThread(input.canvasId, input.tools));
+        threadId =
+          input.canvasId === null
+            ? await startThread(input.tools, false)
+            : await ensureThread(input.canvasId, input.tools, input.onNotice);
       }
 
       if (activeTurns.has(threadId)) {
@@ -1161,6 +1333,8 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         onLayerCreated: input.onLayerCreated,
         onToolEvent: input.onToolEvent,
         onConfirm: input.onConfirm,
+        requestRender: input.requestRender,
+        onNotice: input.onNotice,
         trace: input.trace,
         settled: false,
         abortRequested: false,
@@ -1168,6 +1342,7 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         reject: () => {},
         onAbort: () => {},
         signal: input.signal,
+        waits: new AbortController(),
       };
       const outcome = new Promise<CodexTurnResult>((resolve, reject) => {
         active.resolve = resolve;
@@ -1246,8 +1421,37 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       return active ?? null;
     },
 
+    deleteThread,
+
     close,
   };
+}
+
+/**
+ * Turns a tool result into what the model receives. A rendered preview travels
+ * as an `inputImage` item — the only content kind the model can actually look
+ * at — while every other result stays readable JSON text.
+ */
+function buildToolResponse(result: CanvasToolResult): DynamicToolCallResponse {
+  const imageUrl =
+    result.ok &&
+    typeof result.imageUrl === 'string' &&
+    result.imageUrl.length > 0
+      ? result.imageUrl
+      : null;
+  const contentItems: DynamicToolCallOutputContentItem[] = [];
+
+  if (imageUrl === null) {
+    contentItems.push({ type: 'inputText', text: JSON.stringify(result) });
+  } else {
+    // The base64 image would be duplicated token-by-token inside the text.
+    const text: Record<string, unknown> = { ...result };
+    delete text.imageUrl;
+    contentItems.push({ type: 'inputText', text: JSON.stringify(text) });
+    contentItems.push({ type: 'inputImage', imageUrl });
+  }
+
+  return { success: result.ok, contentItems };
 }
 
 function terminate(proc: ChildProcess): void {

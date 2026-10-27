@@ -146,6 +146,7 @@ describe('AI canvas tools', () => {
       'canvas_update_layer',
       'canvas_delete_layer',
       'canvas_undo',
+      'canvas_render_preview',
     ]);
 
     await app.close();

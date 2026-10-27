@@ -290,6 +290,13 @@
   font-size: 11px;
 }
 
+.ai-chat__notice {
+  display: block;
+  margin-top: 2px;
+  color: #cfb26c;
+  font-size: 11px;
+}
+
 @keyframes ai-chat-fade-in {
   from {
     opacity: 0;

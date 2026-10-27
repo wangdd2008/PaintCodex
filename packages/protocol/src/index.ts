@@ -127,6 +127,16 @@ export interface AiConfirmRequest {
 }
 
 /**
+ * The browser's answer to a `renderRequest` frame: one PNG data URL for one
+ * request id. The daemon accepts exactly one result per request, and only
+ * while that request is still pending.
+ */
+export interface AiRenderResultRequest {
+  requestId: string;
+  imageUrl: string;
+}
+
+/**
  * One frame of the `POST /paint/ai/chat` SSE stream. Frames are partial: each
  * frame carries exactly one of the optional members.
  */
@@ -156,6 +166,13 @@ export interface StreamPayload {
     detail: string;
   };
   layerCreated?: { id: string; name: string };
+  /**
+   * The running tool wants a PNG of the canvas. The browser answers with
+   * `POST /paint/ai/render-result` and the same request id.
+   */
+  renderRequest?: { id: string; canvasId: string };
+  /** A short, non-fatal status line; the turn keeps running after it. */
+  notice?: string;
 }
 
 export interface ApiErrorBody {

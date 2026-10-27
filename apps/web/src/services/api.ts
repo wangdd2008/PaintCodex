@@ -1,4 +1,5 @@
 import type {
+  AiRenderResultRequest,
   CanvasDocument,
   CreateCanvasRequest,
   CreateLayerInput,
@@ -34,6 +35,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
       response.status,
       body?.error?.code,
     );
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
   }
 
   return (await response.json()) as T;
@@ -121,5 +126,16 @@ export function redoCanvas(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ expectedRevision }),
+  });
+}
+
+/** Answers a `renderRequest` SSE frame with the PNG it asked for. */
+export function postRenderResult(requestId: string, imageUrl: string): Promise<void> {
+  const payload: AiRenderResultRequest = { requestId, imageUrl };
+
+  return request<void>('/paint/ai/render-result', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
   });
 }

@@ -96,6 +96,7 @@ describe('canvas tool declarations', () => {
       'canvas_update_layer',
       'canvas_delete_layer',
       'canvas_undo',
+      'canvas_render_preview',
     ]);
     expect(tools.declarations).toContainEqual(
       expect.objectContaining({
@@ -687,5 +688,89 @@ describe('unknown canvas tools', () => {
     await expect(
       tools.execute('canvas_export_png', {}, context('canvas-1')),
     ).resolves.toMatchObject({ ok: false, code: 'unknown_tool' });
+  });
+});
+
+describe('canvas_render_preview', () => {
+  const PNG = 'data:image/png;base64,AAAA';
+
+  it('declares the preview tool without telling the model to call it constantly', () => {
+    const harness = createHarness();
+    const declaration = createCanvasToolSet(harness).declarations.find(
+      (candidate) => candidate.name === 'canvas_render_preview',
+    );
+
+    expect(declaration).toMatchObject({
+      type: 'function',
+      inputSchema: expect.objectContaining({
+        type: 'object',
+        required: ['canvasId'],
+      }),
+    });
+    expect(declaration?.description.toLowerCase()).not.toContain('always');
+  });
+
+  it('returns the rendered PNG for the canvas the turn belongs to', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+    const rendered: string[] = [];
+
+    const result = await tools.execute(
+      'canvas_render_preview',
+      { canvasId: canvas.id },
+      {
+        ...context(canvas.id),
+        requestRender: async (canvasId) => {
+          rendered.push(canvasId);
+          return { ok: true, imageUrl: PNG };
+        },
+      },
+    );
+
+    expect(rendered).toEqual([canvas.id]);
+    expect(result).toEqual({ ok: true, imageUrl: PNG });
+  });
+
+  it('degrades to render_unavailable when the browser cannot render', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    const canvas = harness.service.createCanvas();
+
+    await expect(
+      tools.execute('canvas_render_preview', {}, context(canvas.id)),
+    ).resolves.toMatchObject({ ok: false, code: 'render_unavailable' });
+
+    await expect(
+      tools.execute('canvas_render_preview', {}, {
+        ...context(canvas.id),
+        requestRender: async () => ({
+          ok: false,
+          code: 'render_unavailable',
+          message: '超时',
+        }),
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'render_unavailable' });
+  });
+
+  it('refuses a canvas other than the active one', async () => {
+    const harness = createHarness();
+    const tools = createCanvasToolSet(harness);
+    let called = false;
+
+    await expect(
+      tools.execute(
+        'canvas_render_preview',
+        { canvasId: 'another-canvas' },
+        {
+          ...context('canvas-1'),
+          requestRender: async () => {
+            called = true;
+            return { ok: true, imageUrl: PNG };
+          },
+        },
+      ),
+    ).resolves.toMatchObject({ ok: false, code: 'canvas_not_found' });
+    expect(called).toBe(false);
   });
 });
