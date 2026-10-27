@@ -29,3 +29,8 @@
   - 偏差：进程崩溃后未做「自动重启一次」的显式计数；下一次 turn 会重新 spawn 并清空内存 thread 映射。
   - 说明：删除 `codex-runner.ts` 与 `codex-instrumentation.test.ts`（净替代）；`CANVAS_ACTION_MARKER` / `parseCanvasAction` 已全仓清除，`isSafeSvg` 迁至 `runtime/validate-svg.ts`。
   - 合并提示：`item/tool/call` 必须始终回复（超时也回 `success:false`），否则 turn 永远不收尾；服务端请求 id 与客户端请求 id 是两套编号。
+- 2026-10-28 — 并行回归修复：`d453a2f fix(daemon): reject pending codex requests deterministically on process death`；随后合入 `feat/codex-native-tools`（merge `d05600b`，含票 02、05 与文档）。
+  - 修复：app-server 的 `exit`/`close` 现在幂等并立即拒绝全部 pending 请求与进行中的 turn；请求超时若进程已死则改报退出码错误；首个请求在 `spawn` 事件后才开始计时，避免把进程启动时间算进请求超时。
+  - 测试：进程崩溃用例改为通过 `spawn` 测试接缝注入假 `ChildProcess`，确定性驱动 `exit`/`close`，不再与真实子进程启动竞速；daemon 包增加 `vitest.config.ts`（`testTimeout`/`hookTimeout` 30s）覆盖真实子进程用例。
+  - 稳定性：合并前 `pnpm -r test` 连续两次全绿（daemon 154 / web 203）；合并票 02/05 后 daemon 169 / web 205，连跑两次全绿（daemon 多 1 个用例，是把崩溃用例拆成「pending 请求」与「in-flight turn」两条）。
+  - 注：上一条「`StreamPayload.step` 暂留」的偏差已由票 02 的工具事件帧取代。
