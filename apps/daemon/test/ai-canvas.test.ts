@@ -145,6 +145,7 @@ describe('AI canvas tools', () => {
       'canvas_create_layer',
       'canvas_update_layer',
       'canvas_delete_layer',
+      'canvas_export_png',
       'canvas_undo',
       'canvas_render_preview',
     ]);

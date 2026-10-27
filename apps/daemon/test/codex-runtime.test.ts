@@ -654,6 +654,108 @@ describe('Codex runtime render preview results', () => {
   });
 });
 
+describe('Codex runtime export results', () => {
+  it('gives the model the downloaded filename and size, never image bytes', async () => {
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_export_png', { canvasId: 'canvas-1' }));`,
+        onToolResponse: `
+    const items = message.result?.contentItems ?? [];
+    const image = items.find((item) => item.type === 'inputImage');
+    const text = items.find((item) => item.type === 'inputText')?.text ?? '';
+    if (message.result?.success !== true || image) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'unexpected payload: ' + JSON.stringify(items) } } });
+      return;
+    }
+    if (!text.includes('exported.png') || !text.includes('4321') || text.includes('data:image')) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'bad export text: ' + text } } });
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const result = await start(harnessed, {
+      requestExport: async () => ({
+        ok: true,
+        filename: 'exported.png',
+        bytes: 4321,
+      }),
+      tools: stubTools(async (_tool, _args, context) =>
+        context.requestExport!('canvas-1'),
+      ),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+  });
+
+  it('pauses the tool deadline while the browser exports', async () => {
+    const harnessed = harness({
+      toolTimeoutMs: 30,
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_export_png', { canvasId: 'canvas-1' }));`,
+        onToolResponse: `
+    if (message.result?.success !== true) {
+      notify('turn/completed', { threadId, turn: { id: turnId, status: 'failed', items: [], error: { message: 'expected success: ' + JSON.stringify(message.result) } } });
+      return;
+    }
+    notify('turn/completed', { threadId, turn: { id: turnId, status: 'completed', items: [] } });
+`,
+      },
+    });
+
+    const result = await start(harnessed, {
+      requestExport: async () => {
+        // Longer than the whole tool budget: only a suspended deadline passes.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return { ok: true, filename: 'slow.png', bytes: 1 };
+      },
+      tools: stubTools(async (_tool, _args, context) =>
+        context.requestExport!('canvas-1'),
+      ),
+    });
+
+    expect(result.toolCallCount).toBe(1);
+    expect(harnessed.runtimeLogs().some((record) => record.message === 'tool_timeout'))
+      .toBe(false);
+  });
+
+  it('cancels a pending export when the turn is interrupted', async () => {
+    const harnessed = harness({
+      hooks: {
+        onTurnStart: `send(toolCall('canvas_export_png', { canvasId: 'canvas-1' }));`,
+      },
+    });
+    const controller = new AbortController();
+    let exportSignal: AbortSignal | undefined;
+
+    const pending = start(harnessed, {
+      signal: controller.signal,
+      requestExport: (_canvasId, signal) =>
+        new Promise((resolve) => {
+          exportSignal = signal;
+          signal?.addEventListener('abort', () =>
+            resolve({
+              ok: false,
+              code: 'export_unavailable',
+              message: 'dirty',
+            }),
+          );
+        }),
+      tools: stubTools(async (_tool, _args, context) =>
+        context.requestExport!('canvas-1'),
+      ),
+    });
+
+    await waitFor(() => exportSignal ?? null);
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(exportSignal?.aborted).toBe(true);
+  });
+});
+
 describe('Codex runtime interruption', () => {
   it('sends turn/interrupt and rejects the pending turn with an AbortError', async () => {
     const harnessed = harness();

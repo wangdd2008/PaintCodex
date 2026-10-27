@@ -13,6 +13,7 @@ import type {
   ConfirmationRequest,
 } from './confirmation.js';
 import type { DynamicToolSpec } from './protocol.js';
+import type { ExportRequester } from './export-png.js';
 import type { RenderPreviewRequester } from './render-preview.js';
 import { unsafeSvgReason } from './validate-svg.js';
 
@@ -32,6 +33,8 @@ export interface CanvasToolContext {
   prompt: string;
   /** Asks the browser that owns the canvas for a PNG of the current state. */
   requestRender?: RenderPreviewRequester;
+  /** Asks the browser to download the canvas as a PNG and report the file. */
+  requestExport?: ExportRequester;
   trace?: TraceContext;
   /**
    * Ask the user before an irreversible action. The runtime binds this to the
@@ -166,6 +169,24 @@ const UNDO_DECLARATION: DynamicToolSpec = {
   },
 };
 
+const EXPORT_PNG_DECLARATION: DynamicToolSpec = {
+  type: 'function',
+  name: 'canvas_export_png',
+  description:
+    'Download the current canvas as a PNG file on the user\'s computer. The user ' +
+    'is asked to confirm the download first; if they decline or do not answer, ' +
+    'the tool returns user_declined and nothing is downloaded. Returns the ' +
+    'downloaded filename and its size in bytes, never the image itself.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      canvasId: { type: 'string', description: 'Canvas id to export.' },
+    },
+    required: ['canvasId'],
+    additionalProperties: false,
+  },
+};
+
 const RENDER_PREVIEW_DECLARATION: DynamicToolSpec = {
   type: 'function',
   name: 'canvas_render_preview',
@@ -199,6 +220,8 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
         return deleteLayer(options.dispatcher, options.service, args, context);
       case 'canvas_undo':
         return undo(options.dispatcher, options.service, args, context);
+      case 'canvas_export_png':
+        return exportPng(options.service, args, context);
       case 'canvas_render_preview':
         return renderPreview(options.service, args, context);
       default:
@@ -216,6 +239,7 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
       CREATE_LAYER_DECLARATION,
       UPDATE_LAYER_DECLARATION,
       DELETE_LAYER_DECLARATION,
+      EXPORT_PNG_DECLARATION,
       UNDO_DECLARATION,
       RENDER_PREVIEW_DECLARATION,
     ],
@@ -649,6 +673,72 @@ function undo(
   } catch (error) {
     return failureFromError(error);
   }
+}
+
+/**
+ * The export is the browser's job (ADR-0005): the daemon only asks, and the
+ * browser downloads the PNG. Like the preview, a missing or slow browser is a
+ * normal failure the model can read, not a reason to fail the whole turn.
+ */
+async function exportPng(
+  service: Pick<PaintService, 'getCanvas'>,
+  args: unknown,
+  context: CanvasToolContext,
+): Promise<CanvasToolResult> {
+  const object = asObject(args);
+
+  if (!object) {
+    return invalidArguments('参数必须是对象');
+  }
+
+  const canvasId = readCanvasId(object, context);
+
+  if (!canvasId) {
+    return {
+      ok: false,
+      code: 'canvas_required',
+      message: '请先打开画布再让 AI 绘制。',
+    };
+  }
+
+  const canvas = service.getCanvas(canvasId);
+
+  if (!canvas) {
+    return { ok: false, code: 'canvas_not_found', message: '画布不存在' };
+  }
+
+  // Export overwrites a file the user picked, so it is confirmed even though
+  // the canvas itself is untouched. The copy says download, not delete.
+  const refusal = await requireConfirmation(context, {
+    title: `导出画布「${canvas.name}」为 PNG`,
+    detail: '确认后会下载一张 PNG 图片到你的电脑。',
+    approveLabel: '下载 PNG',
+  });
+
+  if (refusal) {
+    return refusal;
+  }
+
+  if (!context.requestExport) {
+    return {
+      ok: false,
+      code: 'export_unavailable',
+      message: '当前对话没有连接中的浏览器，无法导出画布',
+    };
+  }
+
+  const exported = await context.requestExport(canvasId);
+
+  if (!exported.ok) {
+    return {
+      ok: false,
+      code: exported.code,
+      message: exported.message,
+    };
+  }
+
+  // Only the pointer to the download; the PNG bytes stay in the browser.
+  return { ok: true, filename: exported.filename, bytes: exported.bytes };
 }
 
 /**

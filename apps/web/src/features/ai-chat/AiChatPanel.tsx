@@ -1,8 +1,10 @@
 import type { StreamPayload } from '@paintcodex/protocol';
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
-import { postRenderResult } from '../../services/api';
+import { postExportResult, postRenderResult } from '../../services/api';
 import { exportActiveCanvasPng } from '../../services/canvas-engine';
 import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
+import { displayCanvasName } from '../../services/naming';
+import { canvasPngFilename, dataUrlToBlob, downloadPng } from '../../services/png-export';
 import { describeChatFailure, type ChatFailure } from './chat-error';
 import './ai-chat.css';
 
@@ -59,6 +61,8 @@ interface ChatConfirmation {
   id: string;
   title: string;
   detail: string;
+  /** daemon 给这条确认的 CTA 文案；缺省沿用删除文案。 */
+  approveLabel?: string;
   status: 'pending' | 'submitting' | 'approved' | 'declined' | 'expired';
   /** 提交失败的原因；确认条保持可重试。 */
   error?: string;
@@ -144,6 +148,8 @@ const TOOL_FAILURE_TEXT: Record<string, string> = {
   invalid_arguments: '工具参数不合法',
   user_declined: '你取消了这次操作',
   nothing_to_undo: '没有可撤销的操作',
+  export_unavailable: '浏览器无法导出，请确认画布已打开',
+  export_busy: '这张画布已有导出在进行',
   no_active_turn: '这一轮已经结束',
   tool_timeout: '操作超时',
   tool_failed: '工具执行失败',
@@ -529,6 +535,37 @@ export function AiChatPanel() {
     void postRenderResult(requestId, imageUrl).catch(() => undefined);
   };
 
+  /**
+   * 回答导出请求：复用已有的 PNG 导出与下载实现，然后把落盘的文件名与大小
+   * 回传给 daemon。PNG 本体留在浏览器，不进模型上下文。
+   * 失败不打断对话——daemon 会把这次工具结果降级为 export_unavailable。
+   */
+  const answerExportRequest = (requestId: string, canvasId: string) => {
+    const dataUrl = exportActiveCanvasPng();
+
+    if (!dataUrl) {
+      void postExportResult(requestId, { error: '画布尚未准备好导出' }).catch(
+        () => undefined,
+      );
+      return;
+    }
+
+    try {
+      const current = useCanvasStore.getState().canvas;
+      // 画布名只取同 id 的当前画布；切到别的画布时不冒用它的名字。
+      const name = current?.id === canvasId ? displayCanvasName(current.name) : null;
+      const filename = canvasPngFilename(name, canvasId);
+      const bytes = dataUrlToBlob(dataUrl).size;
+
+      downloadPng(dataUrl, filename);
+      void postExportResult(requestId, { filename, bytes }).catch(() => undefined);
+    } catch {
+      void postExportResult(requestId, { error: '无法导出 PNG' }).catch(
+        () => undefined,
+      );
+    }
+  };
+
   const handleFrame = (frame: string) => {
     const payload = parseFrame(frame);
     if (!payload) {
@@ -575,6 +612,11 @@ export function AiChatPanel() {
 
     if (payload.confirm) {
       const { id, title, detail } = payload.confirm;
+      const approveLabel =
+        typeof payload.confirm.approveLabel === 'string' &&
+        payload.confirm.approveLabel.length > 0
+          ? payload.confirm.approveLabel
+          : undefined;
 
       if (
         typeof id === 'string' &&
@@ -603,7 +645,13 @@ export function AiChatPanel() {
             ...last,
             confirmations: [
               ...confirmations,
-              { id, title, detail, status: 'pending' },
+              {
+                id,
+                title,
+                detail,
+                ...(approveLabel === undefined ? {} : { approveLabel }),
+                status: 'pending',
+              },
             ],
           };
         });
@@ -638,6 +686,20 @@ export function AiChatPanel() {
 
       if (typeof requestId === 'string' && requestId.length > 0) {
         answerRenderRequest(requestId);
+      }
+      return;
+    }
+
+    if (payload.exportRequest) {
+      const { id, canvasId } = payload.exportRequest;
+
+      if (
+        typeof id === 'string' &&
+        id.length > 0 &&
+        typeof canvasId === 'string' &&
+        canvasId.length > 0
+      ) {
+        answerExportRequest(id, canvasId);
       }
       return;
     }
@@ -951,7 +1013,7 @@ export function AiChatPanel() {
                                   }
                                   disabled={settled}
                                 >
-                                  删除
+                                  {confirmation.approveLabel ?? '删除'}
                                 </button>
                                 <button
                                   type="button"

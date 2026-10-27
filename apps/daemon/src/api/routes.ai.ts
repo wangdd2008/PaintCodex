@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type {
   AiChatRequest,
   AiConfirmRequest,
+  AiExportResultRequest,
   AiRenderResultRequest,
 } from '@paintcodex/protocol';
 import type { PaintService } from '../paint/service.js';
@@ -15,6 +16,10 @@ import {
   MAX_RENDER_IMAGE_BYTES,
   type RenderPreviewChannel,
 } from '../paint/agent/runtime/render-preview.js';
+import type {
+  ExportChannel,
+  ExportReport,
+} from '../paint/agent/runtime/export-png.js';
 import { buildAiChatPrompt } from '../paint/agent/prompt.js';
 import type {
   ObservabilitySpan,
@@ -28,6 +33,7 @@ export function registerAiChatRoute(
   tools: CanvasToolSet,
   service: PaintService,
   renderChannel?: RenderPreviewChannel,
+  exportChannel?: ExportChannel,
 ): void {
   app.post('/paint/ai/chat', async (request, reply) => {
     const body: unknown = request.body;
@@ -90,6 +96,12 @@ export function registerAiChatRoute(
       send({ renderRequest: request });
     });
 
+    // Export requests travel on the same stream: the browser downloads the PNG
+    // and answers on a separate endpoint, correlated by the id it just saw.
+    const exportTurn = exportChannel?.beginTurn((request) => {
+      send({ exportRequest: request });
+    });
+
     let assistantText = '';
 
     try {
@@ -137,6 +149,7 @@ export function registerAiChatRoute(
           signal: controller.signal,
           trace: turnSpan,
           ...(renderTurn === undefined ? {} : { requestRender: renderTurn.request }),
+          ...(exportTurn === undefined ? {} : { requestExport: exportTurn.request }),
           onNotice: (notice) => {
             send({ notice });
           },
@@ -176,9 +189,10 @@ export function registerAiChatRoute(
         sendError('ai_chat_failed', errorMessage(error));
       }
     } finally {
-      // A disconnected stream must not leave a render request pending: the tool
-      // would otherwise sit on a browser that is no longer listening.
+      // A disconnected stream must not leave a browser round-trip pending: the
+      // tool would otherwise sit on a browser that is no longer listening.
       renderTurn?.close();
+      exportTurn?.close();
       response.off('close', onClose);
 
       const aborted = controller.signal.aborted;
@@ -270,6 +284,81 @@ export function registerRenderResultRoute(
       }
     },
   );
+}
+
+/**
+ * The browser's half of `canvas_export_png`: the file it downloaded, or why it
+ * could not. No image is accepted here, which is exactly why this is not the
+ * render-result endpoint — the export tool must never hold the PNG bytes.
+ */
+export function registerExportResultRoute(
+  app: FastifyInstance,
+  channel: ExportChannel,
+): void {
+  app.post<{ Body: unknown }>('/paint/ai/export-result', async (request, reply) => {
+    const parsed = readExportReport(request.body);
+
+    if (!parsed) {
+      return reply.code(400).send({
+        error: {
+          code: 'invalid_export_result',
+          message: 'requestId 与 filename/bytes 不能为空',
+        },
+      });
+    }
+
+    const delivery = channel.deliver(parsed.requestId, parsed.report);
+
+    switch (delivery.status) {
+      case 'accepted':
+        return reply.code(204).send();
+      case 'unknown':
+        return reply.code(409).send({
+          error: {
+            code: 'export_request_unknown',
+            message: '导出请求不存在或这一轮已经结束',
+          },
+        });
+      case 'invalid':
+        return reply.code(400).send({
+          error: {
+            code: 'invalid_export_result',
+            message: '导出结果必须带有效的 filename 与 bytes',
+          },
+        });
+    }
+  });
+}
+
+function readExportReport(
+  value: unknown,
+): { requestId: string; report: ExportReport } | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const candidate = value as Partial<AiExportResultRequest>;
+
+  if (typeof candidate.requestId !== 'string' || candidate.requestId.length === 0) {
+    return null;
+  }
+
+  if (typeof candidate.error === 'string' && candidate.error.length > 0) {
+    return { requestId: candidate.requestId, report: { error: candidate.error } };
+  }
+
+  if (
+    typeof candidate.filename === 'string' &&
+    candidate.filename.length > 0 &&
+    typeof candidate.bytes === 'number'
+  ) {
+    return {
+      requestId: candidate.requestId,
+      report: { filename: candidate.filename, bytes: candidate.bytes },
+    };
+  }
+
+  return null;
 }
 
 function isRenderResultRequest(value: unknown): value is AiRenderResultRequest {

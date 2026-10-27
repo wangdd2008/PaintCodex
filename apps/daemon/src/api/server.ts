@@ -4,6 +4,7 @@ import type { LogLevel } from '@paintcodex/protocol';
 import {
   registerAiChatRoute,
   registerAiConfirmRoute,
+  registerExportResultRoute,
   registerRenderResultRoute,
 } from './routes.ai.js';
 import { registerEventRoutes } from './routes.events.js';
@@ -24,6 +25,10 @@ import {
   createRenderPreviewChannel,
   type RenderPreviewChannel,
 } from '../paint/agent/runtime/render-preview.js';
+import {
+  createExportChannel,
+  type ExportChannel,
+} from '../paint/agent/runtime/export-png.js';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import { PaintEvents } from '../paint/events.js';
 import {
@@ -58,6 +63,8 @@ export interface ServerOptions {
   confirmations?: ConfirmationChannel;
   /** Injectable preview broker; tests pin request ids and the image cap. */
   renderChannel?: RenderPreviewChannel;
+  /** Injectable export broker; tests pin request ids and the deadline. */
+  exportChannel?: ExportChannel;
 }
 
 export function defaultDbPath(): string {
@@ -114,6 +121,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
         })
       : null);
   const renderChannel = options.renderChannel ?? createRenderPreviewChannel();
+  const exportChannel = options.exportChannel ?? createExportChannel();
 
   app.decorate('observability', observability.logger);
 
@@ -170,9 +178,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   registerEventRoutes(app, service, events);
 
   if (runtime) {
-    registerAiChatRoute(app, runtime, tools, service, renderChannel);
+    registerAiChatRoute(app, runtime, tools, service, renderChannel, exportChannel);
     registerAiConfirmRoute(app, confirmations);
     registerRenderResultRoute(app, renderChannel);
+    registerExportResultRoute(app, exportChannel);
   }
 
   registerMonitorRoutes(app, observability);
