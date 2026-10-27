@@ -58,7 +58,14 @@ export class PaintService {
     private readonly observability?: ObservabilityLogger,
   ) {}
 
-  createCanvas(input: CreateCanvasRequest = {}): CanvasDocument {
+  /**
+   * `actor` defaults to `'user'` so existing callers keep their attribution;
+   * the agent lane passes `'agent'`. Attribution is what undo scoping reads.
+   */
+  createCanvas(
+    input: CreateCanvasRequest = {},
+    actor: Actor = 'user',
+  ): CanvasDocument {
     const now = Date.now();
     const canvas = this.canvases.create({
       id: randomUUID(),
@@ -77,12 +84,18 @@ export class PaintService {
       layers: [],
       history: { canUndo: false, canRedo: false },
     };
-    this.recordSnapshot(canvas.id, canvas.revision, 'user', 'canvas_create', document);
+    this.recordSnapshot(
+      canvas.id,
+      canvas.revision,
+      actor,
+      'canvas_create',
+      document,
+    );
     this.logCanvasAction({
       message: 'canvas_create',
       canvasId: canvas.id,
       revision: 0,
-      actor: 'user',
+      actor,
       payload: { name: canvas.name, width: canvas.width, height: canvas.height },
     });
 
@@ -100,7 +113,7 @@ export class PaintService {
    * revision, the undo stack, and any in-flight stroke's `expectedRevision`
    * untouched, and returns the same shape `GET /paint/canvas/:id` returns.
    */
-  renameCanvas(canvasId: string, name: string): CanvasDocument {
+  renameCanvas(canvasId: string, name: string, actor: Actor = 'user'): CanvasDocument {
     const renamed = this.canvases.rename(canvasId, name.trim());
 
     if (!renamed) {
@@ -111,7 +124,7 @@ export class PaintService {
       message: 'canvas_rename',
       canvasId,
       revision: renamed.revision,
-      actor: 'user',
+      actor,
       payload: { name: renamed.name },
     });
 
@@ -210,7 +223,11 @@ export class PaintService {
     return updated;
   }
 
-  undo(canvasId: string, expectedRevision?: number): CanvasDocument {
+  undo(
+    canvasId: string,
+    expectedRevision?: number,
+    actor: Actor = 'user',
+  ): CanvasDocument {
     const canvas = this.canvases.findById(canvasId);
 
     if (!canvas) {
@@ -241,14 +258,18 @@ export class PaintService {
       message: 'undo',
       canvasId,
       revision: bumped.revision,
-      actor: 'user',
+      actor,
       payload: { restoredRevision: target.revision },
     });
 
     return updated;
   }
 
-  redo(canvasId: string, expectedRevision?: number): CanvasDocument {
+  redo(
+    canvasId: string,
+    expectedRevision?: number,
+    actor: Actor = 'user',
+  ): CanvasDocument {
     const canvas = this.canvases.findById(canvasId);
 
     if (!canvas) {
@@ -279,7 +300,7 @@ export class PaintService {
       message: 'redo',
       canvasId,
       revision: bumped.revision,
-      actor: 'user',
+      actor,
       payload: { restoredRevision: target.revision },
     });
 
