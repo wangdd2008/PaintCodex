@@ -40,7 +40,7 @@ React + Fabric.js ── HTTP / SSE ──> Fastify daemon ──> SQLite (bette
 
 **Full-snapshot SSE.** Clients receive only a change signal, then refetch `GET /paint/canvas/:id`; there are no incremental patches. See [ADR-0004](docs/adr/0004-sse-full-snapshot-push.md).
 
-**AI acts through tools.** The daemon keeps a long-lived `codex app-server` child process and declares a small canvas tool set at thread start. The model calls a tool, the daemon executes it through the `CommandDispatcher` as `actor: 'agent'`, and the result goes back to the model so it can correct itself instead of guessing. The tool set is `canvas_get_context`, `canvas_create_layer`, `canvas_update_layer`, `canvas_delete_layer`, `canvas_select`, `canvas_export_png`, `canvas_undo`; `canvas_render_preview` is declared but reserved. Deleting and exporting ask the user first; context is pulled on demand rather than pasted into the prompt. See [ADR-0009](docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md).
+**AI acts through tools.** The daemon keeps a long-lived `codex app-server` child process and declares a small canvas tool set at thread start. The model calls a tool, the daemon executes it through the `CommandDispatcher` as `actor: 'agent'`, and the result goes back to the model so it can correct itself instead of guessing. The tool set is `canvas_get_context`, `canvas_create_layer`, `canvas_update_layer`, `canvas_delete_layer`, `canvas_select`, `canvas_export_png`, `canvas_undo`, `canvas_render_preview`; the preview tool is implemented end-to-end and returns a rendered PNG to the model as an image. Deleting and exporting ask the user first; context is pulled on demand rather than pasted into the prompt. See [ADR-0009](docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md).
 
 ## Project layout
 
@@ -96,6 +96,17 @@ pnpm typecheck   # types only
 ```
 
 There is no browser E2E suite yet; verify UI changes with `pnpm dev`.
+
+**Known Windows issue.** On some Windows machines `pnpm -r build` fails in the web step with `[vite:esbuild-transpile] remove C:\...\Temp\esbuild-...: Access is denied`. This is esbuild's temp-file cleanup, not a source error (typecheck and the daemon bundle still pass). Workaround: point `TEMP`/`TMP` at a scratch directory outside the shared user temp tree, then rerun:
+
+```powershell
+New-Item -ItemType Directory -Force .agents\build-tmp | Out-Null
+$env:TEMP = (Resolve-Path .agents\build-tmp).Path
+$env:TMP = $env:TEMP
+pnpm -r build
+```
+
+`.agents/` is gitignored; do not commit the scratch directory.
 
 ## Phase 1 scope and deliberate limits
 

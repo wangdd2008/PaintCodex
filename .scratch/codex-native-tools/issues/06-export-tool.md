@@ -17,6 +17,8 @@
 - [x] `pnpm -r typecheck`、`pnpm -r test` 通过
 - [ ] 手工验收：说「把这张图导出来」→ 出现确认 → 确认后浏览器下载 `<画布名>.png`（未在本环境执行，见 Comments）
 
+> **Waiver（2026-10-28）**：未验证的是**真实 codex + 真实浏览器的端到端手工路径**——模型发起 `canvas_export_png`、确认条在侧栏出现、点击后浏览器真的保存 `<画布名>.png`。原因：本执行环境没有可交互浏览器，无法完成「点击确认并观察下载」这一步。已用假 runtime / jsdom 覆盖相邻环节（确认帧、`POST /paint/ai/export-result`、Web 调用 `exportActiveCanvasPng()` + `downloadPng()` 并回传 filename/bytes），因此这是**已记录的环境豁免**，不是遗漏的 DoD。
+
 ## Comments
 
 - 2026-10-28 — 实现完成：`4e75bfd feat(daemon,web): add confirmed canvas export tool`。

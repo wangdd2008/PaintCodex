@@ -30,3 +30,10 @@
   - 合并提示（给 03）：本票在 `routes.ai.ts`、`codex-runtime.ts` 上与确认通道会有冲突——渲染结果路由是独立注册函数 `registerRenderResultRoute`，`CodexRuntime` 接口新增了 `deleteThread`（测试替身需补），`CodexTurnInput` 新增 `requestRender` / `onNotice`；`fake-runtime.ts` 已同步。
 
 - 2026-10-28 — 合并 `feat/codex-native-tools`（merge `2cebfbe`）：冲突在 `apps/daemon/test/codex-runtime.test.ts`（采纳上游用 `FakeAppServerProcess` 的确定性崩溃用例，替换旧的「真实 `process.exit(7)` + 2s 请求超时」用例）与 `apps/daemon/vitest.config.ts`（两侧内容等价，采纳上游注释）。合并后 `pnpm -r typecheck` 通过、daemon 198 通过、web 208 通过。上游 `d453a2f` 的进程死亡处理与本票的 thread store 不冲突：进程死亡立即清空内存 thread 映射并拒绝挂起请求，下一次 turn 从 `canvases.codexThreadId` resume。
+
+- 2026-10-28 — 复核「resume 后工具是否仍可用」（此前只有 chat-only 冒烟，证据不足）。用真实 `codex-cli 0.164.0` 做了一次临时探针（脚本在 `%TEMP%`，未入库）：
+  1. `thread/start` 声明一个 `probe_echo` dynamic tool（`experimentalApi: true`、`ephemeral: false`），第一轮要求模型调用它；收到 `item/tool/call`，答复 `echo: pineapple`，turn 正常完成。
+  2. `taskkill` 掉 app-server 进程（等价 daemon 进程消失），重新 spawn 并 `initialize`，再用同一个 thread id `thread/resume`（只传 `threadId/cwd/sandbox/approvalPolicy`，**没有** `dynamicTools`）。
+  3. 第二轮要求模型调用同一个工具；再次收到 `item/tool/call`（同一 thread，turn 不同），答复 `echo: banana`，模型在最终回答里引用了 `echo: banana`。
+  - 结论：0.164.0 会把 `thread/start` 声明的 dynamic tools 随 thread 持久化，`thread/resume` 不传 `dynamicTools` 也能调用。因此**不需要**「resume 后工具不可用就重建 thread」的 fail-safe；`thread_resume_failed` 分支仍只处理 resume 被拒（thread 不存在/归档）的情形。
+  - 旁证：探针里 resume 后 thread id 未变（`01a17e96-a3f8-7312-be38-2ff0a84270f2`），且第二轮的工具回调 `threadId` 与之一致。
