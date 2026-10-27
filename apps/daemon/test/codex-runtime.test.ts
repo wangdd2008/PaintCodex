@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentLog } from '@paintcodex/protocol';
 import {
   createCodexRuntime,
@@ -14,6 +14,14 @@ import {
 import type { CanvasToolSet } from '../src/paint/agent/runtime/tools.js';
 import { createObservability } from '../src/observability/index.js';
 import { openDatabase } from '../src/storage/database.js';
+
+/**
+ * Every test here spawns a real Node child as the fake app-server. Running the
+ * whole workspace suite in parallel can push a single spawn/handshake past
+ * Vitest's 5s default, so the file budget matches the runtime's 15s request
+ * deadline instead of failing the test for being slow.
+ */
+vi.setConfig({ testTimeout: 30_000 });
 
 const THREAD_ID = 'thread-1';
 const TURN_ID = 'turn-1';
