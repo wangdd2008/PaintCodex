@@ -3,6 +3,7 @@ import type { CanvasDocument } from '@paintcodex/protocol';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatPanel } from '../src/features/ai-chat/AiChatPanel';
+import { useChatStore } from '../src/features/ai-chat/chat-store';
 import { exportActiveCanvasPng } from '../src/services/canvas-engine';
 import { useCanvasStore } from '../src/services/canvas-store';
 
@@ -94,6 +95,8 @@ beforeEach(() => {
     saving: false,
     activeLayerId: null,
   });
+  // 会话记录现在是模块级 store，每个用例从空桶开始。
+  useChatStore.setState({ transcripts: {} });
   vi.mocked(exportActiveCanvasPng).mockReset();
   vi.mocked(exportActiveCanvasPng).mockReturnValue(PNG);
 });
