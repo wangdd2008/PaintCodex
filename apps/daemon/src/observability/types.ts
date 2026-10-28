@@ -41,3 +41,21 @@ export interface AgentLogStatsOptions {
   windowMs?: number;
   now?: number;
 }
+
+/**
+ * 追踪摘要（monitor-readability ③03）的查询参数。窗口必须带：
+ * 没有 `timestamp >= since` 的约束，`GROUP BY trace_id` 会随 `agent_logs`
+ * 无界增长退化为全表扫描（ADR-0012 的已知代价）。
+ */
+export interface TraceSummaryOptions {
+  /** 窗口长度（毫秒），结束于 `now`。默认 900_000（15 分钟）。 */
+  windowMs?: number;
+  /** 注入当前时间，便于测试固定窗口。 */
+  now?: number;
+  limit?: number;
+  offset?: number;
+  /** 只保留触碰过该画布的追踪（画布页下钻用）。 */
+  canvasId?: string;
+  /** 为 true 时只返回 errorCount > 0 的追踪。 */
+  hasError?: boolean;
+}

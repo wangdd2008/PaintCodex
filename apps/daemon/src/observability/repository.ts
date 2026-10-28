@@ -6,6 +6,8 @@ import type {
   LogComponent,
   LogLevel,
   MonitorStats,
+  TraceSummary,
+  TraceSummaryPage,
 } from '@paintcodex/protocol';
 import { LOG_CATEGORIES } from '@paintcodex/protocol';
 import type { DatabaseConnection } from '../storage/database.js';
@@ -13,11 +15,16 @@ import type {
   AgentLogQuery,
   AgentLogStatsOptions,
   NewAgentLogRecord,
+  TraceSummaryOptions,
 } from './types.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 5 * 60_000;
+/** 追踪摘要默认窗口 15 分钟；上限 24 小时（路由层校验范围）。 */
+const DEFAULT_TRACE_WINDOW_MS = 15 * 60_000;
+const DEFAULT_TRACE_LIMIT = 50;
+const MAX_TRACE_LIMIT = 100;
 /** Below this many non-aborted chats a success rate is shown as unknown. */
 const MIN_AI_CHAT_SAMPLE = 5;
 /** Payload flag written by the AI chat route when the client cancels a chat. */
@@ -48,6 +55,29 @@ interface AgentLogRow {
   actor: Actor | null;
   source: LogComponent | null;
   target: LogComponent | null;
+}
+
+/** `GROUP BY trace_id` 的聚合行：只装核心计数，代表行字段在内存里归并。 */
+interface TraceAggregateRow {
+  trace_id: string;
+  started_at: number;
+  ended_at: number;
+  span_count: number;
+  error_count: number;
+}
+
+/** 摘要归并用的明细行：按 (trace_id, timestamp, id) 有序读出。 */
+interface TraceDetailRow {
+  trace_id: string;
+  timestamp: number;
+  id: number;
+  parent_id: string | null;
+  category: LogCategory;
+  message: string;
+  payload: string | null;
+  canvas_id: string | null;
+  actor: Actor | null;
+  source: LogComponent | null;
 }
 
 const INSERT_SQL = `
@@ -137,6 +167,171 @@ export class AgentLogRepository {
       .all(traceId) as AgentLogRow[];
 
     return rows.map(mapRow);
+  }
+
+  /**
+   * 窗口内按 trace_id 聚合的一行一个追踪（monitor-readability ③03）。
+   *
+   * 起止/节点数/错误数由一条 GROUP BY SQL 算出来；`components`、`rootMessage`、
+   * `requestPath` 这类「取一条代表行」的字段，用第二句话把本页 ≤100 个追踪的
+   * 明细行拉回内存按时间顺序归并——既走 `(trace_id, timestamp)` 索引，又避开
+   * 在聚合 SQL 里写一堆相关子查询。
+   */
+  summarizeTraces(options: TraceSummaryOptions = {}): TraceSummaryPage {
+    const windowMs = Math.max(1, Math.trunc(options.windowMs ?? DEFAULT_TRACE_WINDOW_MS));
+    const since = (options.now ?? Date.now()) - windowMs;
+    const limit = clamp(options.limit ?? DEFAULT_TRACE_LIMIT, 1, MAX_TRACE_LIMIT);
+    const offset = Math.max(0, Math.trunc(options.offset ?? 0));
+
+    const whereParams: unknown[] = [since];
+    // 窗口是硬约束：先把行限制在 `timestamp >= since` 内再 GROUP BY，
+    // 否则全表分组会随日志无界增长变慢（ADR-0012）。
+    let where = 'timestamp >= ? AND trace_id IS NOT NULL';
+
+    // canvasId 下钻：只保留窗口内触碰过该画布的追踪，但聚合仍算该追踪的全部窗口内行。
+    if (options.canvasId !== undefined) {
+      where += ` AND trace_id IN (
+        SELECT trace_id FROM agent_logs
+        WHERE canvas_id = ? AND timestamp >= ? AND trace_id IS NOT NULL
+      )`;
+      whereParams.push(options.canvasId, since);
+    }
+
+    const having = options.hasError
+      ? " HAVING SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) > 0"
+      : '';
+
+    // 一次分组取回窗口内全部追踪的聚合值（窗口内 trace 数有限，几十到几千），
+    // total 与分页都在内存里切片——避免为 COUNT 再扫一遍 10 万行。
+    const rows = this.db
+      .prepare(
+        `SELECT trace_id,
+                MIN(timestamp) AS started_at,
+                MAX(timestamp + COALESCE(duration_ms, 0)) AS ended_at,
+                COUNT(*) AS span_count,
+                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count
+         FROM agent_logs
+         WHERE ${where}
+         GROUP BY trace_id
+         ${having}
+         ORDER BY started_at DESC, trace_id ASC`,
+      )
+      .all(...whereParams) as TraceAggregateRow[];
+
+    const items = this.enrichTraceSummaries(rows.slice(offset, offset + limit), since);
+
+    return {
+      items,
+      total: rows.length,
+      windowMs,
+    };
+  }
+
+  /**
+   * 把本页追踪的明细行按 trace_id 拉回内存，归并出 components（去重、按首次出现
+   * 排序）、根消息、根 http 路径、画布与操作者。明细行按 (trace_id, timestamp, id)
+   * 有序返回，归并是线性的。
+   */
+  private enrichTraceSummaries(
+    aggregates: TraceAggregateRow[],
+    since: number,
+  ): TraceSummary[] {
+    if (aggregates.length === 0) {
+      return [];
+    }
+
+    const byTrace = new Map<string, TraceSummary>();
+
+    for (const row of aggregates) {
+      byTrace.set(row.trace_id, {
+        traceId: row.trace_id,
+        startedAt: row.started_at,
+        endedAt: row.ended_at,
+        spanCount: row.span_count,
+        errorCount: row.error_count,
+        components: [],
+        rootMessage: '',
+        requestPath: null,
+        canvasId: null,
+        actor: null,
+      });
+    }
+
+    const placeholders = aggregates.map(() => '?').join(', ');
+    const detailRows = this.db
+      .prepare(
+        `SELECT trace_id, timestamp, id, parent_id, category, message,
+                payload, canvas_id, actor, source
+         FROM agent_logs
+         WHERE trace_id IN (${placeholders}) AND timestamp >= ?
+         ORDER BY trace_id ASC, timestamp ASC, id ASC`,
+      )
+      .all(...aggregates.map((row) => row.trace_id), since) as TraceDetailRow[];
+
+    // 同一追踪的明细行已按时间排好，逐行归并即可得到「首次出现」顺序。
+    const seenComponents = new Map<string, Set<LogComponent>>();
+    const firstHttpPath = new Map<string, string | null>();
+
+    for (const row of detailRows) {
+      const summary = byTrace.get(row.trace_id);
+
+      if (!summary) {
+        continue;
+      }
+
+      if (row.source !== null) {
+        let seen = seenComponents.get(row.trace_id);
+
+        if (!seen) {
+          seen = new Set();
+          seenComponents.set(row.trace_id, seen);
+        }
+
+        if (!seen.has(row.source)) {
+          seen.add(row.source);
+          summary.components.push(row.source);
+        }
+      }
+
+      // 根 span：无父记录的那条；整段都没有无父记录时，最早一条即根。
+      if (summary.rootMessage === '' && row.parent_id === null) {
+        summary.rootMessage = row.message;
+        summary.canvasId = row.canvas_id;
+        summary.actor = row.actor;
+      }
+
+      // 兜底：根记录本身没有画布/操作者时，取本追踪首个非空值。
+      if (summary.canvasId === null && row.canvas_id !== null) {
+        summary.canvasId = row.canvas_id;
+      }
+
+      if (summary.actor === null && row.actor !== null) {
+        summary.actor = row.actor;
+      }
+
+      if (row.category === 'http' && !firstHttpPath.has(row.trace_id)) {
+        firstHttpPath.set(row.trace_id, httpPathOf(row.payload));
+      }
+    }
+
+    // 根记录缺失（整段都是孤儿行）时，最早一条 message 就是根消息。
+    for (const row of detailRows) {
+      const summary = byTrace.get(row.trace_id);
+
+      if (summary && summary.rootMessage === '') {
+        summary.rootMessage = row.message;
+      }
+    }
+
+    for (const summary of byTrace.values()) {
+      const path = firstHttpPath.get(summary.traceId);
+
+      if (path !== undefined) {
+        summary.requestPath = path;
+      }
+    }
+
+    return aggregates.map((row) => byTrace.get(row.trace_id)!);
   }
 
   stats(options: AgentLogStatsOptions = {}): MonitorStats {
@@ -318,6 +513,21 @@ function parsePayload(payload: string | null): unknown {
   } catch {
     return payload;
   }
+}
+
+/** 根 http span 的请求路径；payload 里没有 `path` 或不是对象时返回 null。 */
+function httpPathOf(payload: string | null): string | null {
+  const parsed = parsePayload(payload);
+
+  if (parsed !== null && typeof parsed === 'object' && 'path' in parsed) {
+    const path = (parsed as { path?: unknown }).path;
+
+    if (typeof path === 'string') {
+      return path;
+    }
+  }
+
+  return null;
 }
 
 function mapRow(row: AgentLogRow): AgentLog {
