@@ -53,7 +53,8 @@ describe('图层布局 CSS 契约', () => {
     expect(sidePanel).toMatch(/overflow:\s*hidden/);
     expect(sidePanel).not.toMatch(/overflow-y:\s*(auto|scroll)/);
 
-    const aiPanel = ruleBody(rawAppCss, '.side-panel > .ai-chat');
+    // 票 ②01：AI 对话在独立的对话列里，保底高度随列走。
+    const aiPanel = ruleBody(rawAppCss, '.chat-column .ai-chat');
     expect(aiPanel).toMatch(/flex:\s*1/);
     expect(aiPanel).toMatch(/min-height:\s*240px/);
   });

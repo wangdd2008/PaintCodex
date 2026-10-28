@@ -14,6 +14,11 @@ import {
 } from 'fabric';
 import { setActiveCanvas } from '../../services/canvas-engine';
 import {
+  computeThumbnailCrop,
+  ThumbnailScheduler,
+  uploadCanvasThumbnail,
+} from '../../services/canvas-thumbnail';
+import {
   AI_SELECTION_DURATION_MS,
   useCanvasStore,
 } from '../../services/canvas-store';
@@ -209,12 +214,15 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const syncTokenRef = useRef(0);
   const lastSelectionRequestRef = useRef(activeLayerRequest);
   const lastLocateRequestRef = useRef(activeLayerRequest);
+  const thumbnailSchedulerRef = useRef<ThumbnailScheduler | null>(null);
+  const readyRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [objectsVersion, setObjectsVersion] = useState(0);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
   const [aiHighlight, setAiHighlight] = useState<AiHighlight | null>(null);
   const aiSelection = useCanvasStore((state) => state.aiSelection);
   const isDrawing = useCanvasStore((state) => state.isDrawing);
+  const saving = useCanvasStore((state) => state.saving);
   const canvasAlert = useCanvasStore((state) => state.canvasAlert);
   const hasCanvasRetry = useCanvasStore((state) => state.canvasRetry !== null);
   const retryCanvasAlert = useCanvasStore((state) => state.retryCanvasAlert);
@@ -863,6 +871,59 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     },
     [],
   );
+
+  // 懒生成缩略图：调度器在组件挂载期间只建一次，按 revision 去重，失败静默。
+  useEffect(() => {
+    const scheduler = new ThumbnailScheduler({
+      getSnapshot: () => {
+        const state = useCanvasStore.getState();
+        const doc = state.canvas;
+
+        if (!doc) {
+          return null;
+        }
+
+        return {
+          canvasId: doc.id,
+          revision: doc.revision,
+          ready: readyRef.current,
+          inFlightMutation: state.saving,
+        };
+      },
+      renderDataUrl: () => {
+        const fabric = fabricRef.current;
+        const doc = useCanvasStore.getState().canvas;
+
+        if (!fabric || !doc) {
+          return null;
+        }
+
+        // 走 Fabric 现有 toDataURL，不开新的离屏画布；裁剪策略见 computeThumbnailCrop。
+        const crop = computeThumbnailCrop(doc.width, doc.height);
+        return fabric.toDataURL({ format: 'png', ...crop });
+      },
+      upload: (id, imageUrl, revision) => uploadCanvasThumbnail(id, imageUrl, revision),
+      debug: (message) => console.debug(message),
+    });
+
+    thumbnailSchedulerRef.current = scheduler;
+
+    return () => {
+      scheduler.dispose();
+      thumbnailSchedulerRef.current = null;
+    };
+  }, []);
+
+  // ready 用 ref 暴露给调度器的 getSnapshot，避免重建调度器。
+  useEffect(() => {
+    readyRef.current = ready;
+  }, [ready]);
+
+  // 画布就绪、图层同步完、保存空闲、或 revision 变化后，通知调度器重新评估。
+  useEffect(() => {
+    thumbnailSchedulerRef.current?.notify();
+  }, [ready, saving, objectsVersion, canvasDocument.id, canvasDocument.revision]);
+
   return (
     <div className="canvas-viewport">
       {canvasAlert ? (
