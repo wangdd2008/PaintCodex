@@ -283,6 +283,21 @@ export const LOG_CATEGORIES = [
 export type LogCategory = (typeof LOG_CATEGORIES)[number];
 
 /**
+ * 消息方向的端点词表：参与一次「谁发给谁」的可命名组件。
+ * 前端画拓扑、后端校验共用同一份。`model` 没有任何直接日志，
+ * 只存在于术语与拓扑里；前三个可直接观测，后两个由相邻组件代为标注。
+ */
+export const LOG_COMPONENTS = [
+  'browser',
+  'daemon',
+  'codex',
+  'model',
+  'sqlite',
+] as const;
+
+export type LogComponent = (typeof LOG_COMPONENTS)[number];
+
+/**
  * One structured observability record. A record either describes a finished
  * span (`durationMs` set) or a point event emitted inside a span.
  */
@@ -301,6 +316,13 @@ export interface AgentLog {
   canvasId: string | null;
   revision: number | null;
   actor: Actor | null;
+  /**
+   * 消息的发出方与接收方。只有「消息型」记录才有方向；内部事件
+   * （system 启动、进程错误等）保持 `null`，语义是「内部」而非「未知」。
+   * 新增的可空字段：旧客户端读取新记录时忽略它们即可正常工作。
+   */
+  source: LogComponent | null;
+  target: LogComponent | null;
 }
 
 export interface AgentLogPage {

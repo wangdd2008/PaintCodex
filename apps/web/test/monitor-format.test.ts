@@ -32,6 +32,8 @@ function makeLog(id: number, overrides: Partial<AgentLog> = {}): AgentLog {
     canvasId: null,
     revision: null,
     actor: null,
+    source: null,
+    target: null,
     ...overrides,
   };
 }

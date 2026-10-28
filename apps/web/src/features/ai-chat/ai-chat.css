@@ -28,6 +28,8 @@
   flex-direction: column;
   gap: 10px;
   padding: 14px;
+  /* 面板加高时多余高度全归消息列表，而不是堆在输入框下面。 */
+  flex: 1;
   min-height: 0;
 }
 
@@ -35,7 +37,9 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 280px;
+  flex: 1;
+  /* 不再硬顶 280px：剩余高度全归消息列表，溢出由自己滚动。 */
+  max-height: none;
   min-height: 48px;
   overflow-y: auto;
   padding-right: 2px;

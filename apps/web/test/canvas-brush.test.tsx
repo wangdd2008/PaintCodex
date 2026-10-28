@@ -25,6 +25,7 @@ const fabricDouble = vi.hoisted(() => {
     isDrawingMode = false;
     selection = false;
     freeDrawingBrush: { color: string; width: number } | null = null;
+    viewportTransform: number[] = [1, 0, 0, 1, 0, 0];
     added: unknown[] = [];
     handlers = new Map<string, Handler>();
 
@@ -49,6 +50,19 @@ const fabricDouble = vi.hoisted(() => {
     discardActiveObject(): void {}
 
     requestRenderAll(): void {}
+
+    // 视口接线（②04）在挂载时就调用；笔刷测试只关心笔画，这些留空即可。
+    setDimensions(): void {}
+
+    setViewportTransform(vpt: number[]): void {
+      this.viewportTransform = [...vpt];
+    }
+
+    zoomToPoint(_point: unknown, value: number): void {
+      this.viewportTransform[0] = value;
+    }
+
+    relativePan(): void {}
 
     async dispose(): Promise<void> {}
   }

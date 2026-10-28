@@ -64,6 +64,11 @@ const fabricDouble = vi.hoisted(() => {
 
     requestRenderAll(): void {}
 
+    setDimensions() {}
+    setViewportTransform() {}
+    zoomToPoint() {}
+    relativePan() {}
+
     async dispose(): Promise<void> {}
   }
 
@@ -504,6 +509,8 @@ describe('语义化文本中文化', () => {
       canvasId: 'canvas-1',
       revision: 1,
       actor: 'user',
+      source: null,
+      target: null,
     };
     const stats: MonitorStats = {
       windowMs: 300_000,

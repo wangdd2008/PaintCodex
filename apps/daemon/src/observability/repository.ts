@@ -3,6 +3,7 @@ import type {
   AgentLog,
   AgentLogPage,
   LogCategory,
+  LogComponent,
   LogLevel,
   MonitorStats,
 } from '@paintcodex/protocol';
@@ -45,15 +46,17 @@ interface AgentLogRow {
   canvas_id: string | null;
   revision: number | null;
   actor: Actor | null;
+  source: LogComponent | null;
+  target: LogComponent | null;
 }
 
 const INSERT_SQL = `
   INSERT INTO agent_logs
     (trace_id, span_id, parent_id, timestamp, level, category, message, payload,
-     duration_ms, error, canvas_id, revision, actor)
+     duration_ms, error, canvas_id, revision, actor, source, target)
   VALUES
     (@traceId, @spanId, @parentId, @timestamp, @level, @category, @message, @payload,
-     @durationMs, @error, @canvasId, @revision, @actor)
+     @durationMs, @error, @canvasId, @revision, @actor, @source, @target)
 `;
 
 /**
@@ -78,6 +81,8 @@ export class AgentLogRepository {
       canvasId: record.canvasId ?? null,
       revision: record.revision ?? null,
       actor: record.actor ?? null,
+      source: record.source ?? null,
+      target: record.target ?? null,
     });
 
     const created = this.findById(Number(result.lastInsertRowid));
@@ -331,6 +336,8 @@ function mapRow(row: AgentLogRow): AgentLog {
     canvasId: row.canvas_id,
     revision: row.revision,
     actor: row.actor,
+    source: row.source,
+    target: row.target,
   };
 }
 

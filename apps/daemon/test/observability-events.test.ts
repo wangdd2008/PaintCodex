@@ -17,6 +17,8 @@ const log: AgentLog = {
   canvasId: null,
   revision: null,
   actor: null,
+  source: null,
+  target: null,
 };
 
 describe('ObservabilityEvents', () => {

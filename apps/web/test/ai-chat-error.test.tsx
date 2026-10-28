@@ -11,6 +11,7 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AiChatPanel } from '../src/features/ai-chat/AiChatPanel';
+import { useChatStore } from '../src/features/ai-chat/chat-store';
 import { useCanvasStore } from '../src/services/canvas-store';
 
 function readyCanvas(): CanvasDocument {
@@ -124,6 +125,8 @@ beforeEach(() => {
     saving: false,
     activeLayerId: null,
   });
+  // 会话记录现在是模块级 store，每个用例从空桶开始。
+  useChatStore.setState({ transcripts: {} });
 });
 
 afterEach(() => {
