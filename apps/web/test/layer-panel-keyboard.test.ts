@@ -82,6 +82,11 @@ vi.mock('fabric', () => {
 
     requestRenderAll() {}
 
+    setDimensions() {}
+    setViewportTransform() {}
+    zoomToPoint() {}
+    relativePan() {}
+
     emit(event: string, payload: any) {
       for (const listener of this.listeners.get(event) ?? []) {
         listener(payload);

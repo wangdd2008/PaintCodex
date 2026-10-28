@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Canvas,
   PencilBrush,
+  Point,
   loadSVGFromString,
   util,
   type FabricObject,
@@ -29,6 +30,7 @@ import {
   NETWORK_FAILURE_MESSAGE,
 } from '../../services/network-error';
 import { useToolStore } from '../../services/tool-store';
+import { clampScale, fitViewport } from '../../services/viewport-math';
 import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
 
 const FALLBACK_WIDTH = 1920;
@@ -205,6 +207,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const brushColor = useToolStore((state) => state.brushColor);
   const brushWidth = useToolStore((state) => state.brushWidth);
   const canvasElementRef = useRef<HTMLCanvasElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
   const fabricRef = useRef<Canvas | null>(null);
   const objectsRef = useRef(new Map<string, FabricObject>());
   const signaturesRef = useRef(new Map<string, string>());
@@ -214,12 +217,17 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const syncTokenRef = useRef(0);
   const lastSelectionRequestRef = useRef(activeLayerRequest);
   const lastLocateRequestRef = useRef(activeLayerRequest);
+  // 缩放/平移视口态：fit 模式下容器变化重算；手动缩放过则保持 scale。
+  const fitModeRef = useRef(true);
+  const spaceHeldRef = useRef(false);
+  const lastPanRef = useRef<{ x: number; y: number } | null>(null);
   const thumbnailSchedulerRef = useRef<ThumbnailScheduler | null>(null);
   const readyRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [objectsVersion, setObjectsVersion] = useState(0);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
   const [aiHighlight, setAiHighlight] = useState<AiHighlight | null>(null);
+  const [panning, setPanning] = useState(false);
   const aiSelection = useCanvasStore((state) => state.aiSelection);
   const isDrawing = useCanvasStore((state) => state.isDrawing);
   const saving = useCanvasStore((state) => state.saving);
@@ -382,6 +390,73 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     }
   }
 
+  /** 读当前缩放比（视口矩阵的 a 分量）。 */
+  function currentScale(): number {
+    return fabricRef.current?.viewportTransform?.[0] ?? 1;
+  }
+
+  function reportZoom(): void {
+    useViewportStore.getState().setZoomPercent(computeZoomPercent(currentScale()));
+  }
+
+  /** 容器像素尺寸应用给 Fabric，并在 fit 模式下重新居中适配。 */
+  function applyFitFromFrame(): void {
+    const canvas = fabricRef.current;
+    const frame = frameRef.current;
+
+    if (!canvas || !frame) {
+      return;
+    }
+
+    const cw = frame.clientWidth;
+    const ch = frame.clientHeight;
+    canvas.setDimensions({ width: cw, height: ch });
+    canvas.setViewportTransform(fitViewport(cw, ch, width, height));
+    fitModeRef.current = true;
+    reportZoom();
+  }
+
+  /** 以容器中心为锚点缩放一个倍率（+/− 按钮）。 */
+  function zoomByFactor(factor: number): void {
+    const canvas = fabricRef.current;
+    const frame = frameRef.current;
+
+    if (!canvas || !frame) {
+      return;
+    }
+
+    const next = clampScale(currentScale() * factor);
+
+    if (next === currentScale()) {
+      return;
+    }
+
+    canvas.zoomToPoint(new Point(frame.clientWidth / 2, frame.clientHeight / 2), next);
+    fitModeRef.current = false;
+    reportZoom();
+  }
+
+  /** 回到 100%：1 文档像素 = 1 CSS 像素，内容居中。 */
+  function zoomTo100(): void {
+    const canvas = fabricRef.current;
+    const frame = frameRef.current;
+
+    if (!canvas || !frame) {
+      return;
+    }
+
+    canvas.setViewportTransform([
+      1,
+      0,
+      0,
+      1,
+      (frame.clientWidth - width) / 2,
+      (frame.clientHeight - height) / 2,
+    ]);
+    fitModeRef.current = false;
+    reportZoom();
+  }
+
   useEffect(() => {
     const element = canvasElementRef.current;
 
@@ -390,15 +465,17 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     }
 
     const canvas = new Canvas(element, {
-      width,
-      height,
       backgroundColor,
       preserveObjectStacking: true,
     });
     fabricRef.current = canvas;
-    setActiveCanvas(canvas);
+    setActiveCanvas(canvas, { width, height });
     canvas.isDrawingMode = useToolStore.getState().tool === 'brush';
     canvas.selection = false;
+
+    // ADR-0011：Fabric 画布尺寸 = 容器像素尺寸；文档尺寸仍是 width/height。
+    // 初始即 fit：内容等比缩放后居中；缩放不持久化，切画布/刷新重新 fit。
+    applyFitFromFrame();
 
     // The canvas is rebuilt on resize; pick up whatever the session currently holds.
     const settings = useToolStore.getState();
@@ -840,30 +917,105 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
     canvasDocument.id,
   ]);
 
-  // The document is scaled by CSS; report the real ratio in the status bar.
+  // 容器尺寸变化：同步 Fabric 画布尺寸；fit 模式重算适配，手动缩放过则保持 scale。
   useEffect(() => {
-    const element = canvasElementRef.current;
+    const frame = frameRef.current;
 
-    if (!element || typeof ResizeObserver === 'undefined') {
+    if (!frame || typeof ResizeObserver === 'undefined') {
       return;
     }
 
-    const observer = new ResizeObserver((entries) => {
-      const renderedWidth = entries[0]?.contentRect.width ?? 0;
+    const observer = new ResizeObserver(() => {
+      const canvas = fabricRef.current;
 
-      if (renderedWidth <= 0) {
+      if (!canvas) {
         return;
       }
 
-      useViewportStore
-        .getState()
-        .setZoomPercent(computeZoomPercent(renderedWidth, width));
+      canvas.setDimensions({ width: frame.clientWidth, height: frame.clientHeight });
+
+      if (fitModeRef.current) {
+        canvas.setViewportTransform(
+          fitViewport(frame.clientWidth, frame.clientHeight, width, height),
+        );
+        reportZoom();
+      }
     });
 
-    observer.observe(element);
+    observer.observe(frame);
 
     return () => observer.disconnect();
-  }, [width]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, width, height]);
+
+  // 滚轮以指针为中心缩放；scale clamp 在 [0.05, 8]。
+  useEffect(() => {
+    const frame = frameRef.current;
+
+    if (!frame) {
+      return;
+    }
+
+    const handleWheel = (event: WheelEvent) => {
+      const canvas = fabricRef.current;
+
+      if (!canvas) {
+        return;
+      }
+
+      event.preventDefault();
+      const next = clampScale(currentScale() * (event.deltaY < 0 ? 1.1 : 1 / 1.1));
+
+      if (next === currentScale()) {
+        return;
+      }
+
+      canvas.zoomToPoint(new Point(event.offsetX, event.offsetY), next);
+      fitModeRef.current = false;
+      reportZoom();
+    };
+
+    frame.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => frame.removeEventListener('wheel', handleWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, width, height]);
+
+  // 空格按住 → 平移模式；输入框内不触发。
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== ' ' && event.code !== 'Space') {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+
+      spaceHeldRef.current = true;
+    };
+
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === ' ' || event.code === 'Space') {
+        spaceHeldRef.current = false;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
 
   useEffect(
     () => () => {
@@ -950,7 +1102,55 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
           </button>
         </div>
       ) : null}
-      <div className="canvas-frame" style={{ aspectRatio: `${width} / ${height}` }}>
+      <div
+        ref={frameRef}
+        className={panning ? 'canvas-frame canvas-frame--panning' : 'canvas-frame'}
+        onPointerDown={(event) => {
+          const canvas = fabricRef.current;
+
+          if (!canvas) {
+            return;
+          }
+
+          // 空格按住或鼠标中键 → 平移；其余指针事件照常给笔刷/对象。
+          if (!spaceHeldRef.current && event.button !== 1) {
+            return;
+          }
+
+          event.preventDefault();
+          setPanning(true);
+          lastPanRef.current = { x: event.clientX, y: event.clientY };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const canvas = fabricRef.current;
+          const start = lastPanRef.current;
+
+          if (!canvas || !start) {
+            return;
+          }
+
+          const dx = event.clientX - start.x;
+          const dy = event.clientY - start.y;
+          lastPanRef.current = { x: event.clientX, y: event.clientY };
+          canvas.relativePan(new Point(dx, dy));
+          fitModeRef.current = false;
+          reportZoom();
+        }}
+        onPointerUp={(event) => {
+          if (!lastPanRef.current) {
+            return;
+          }
+
+          lastPanRef.current = null;
+          setPanning(false);
+          event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onPointerCancel={() => {
+          lastPanRef.current = null;
+          setPanning(false);
+        }}
+      >
         <canvas ref={canvasElementRef} aria-label="画布" />
         {aiHighlight ? (
           <div
@@ -966,6 +1166,22 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
             }}
           />
         ) : null}
+        <div className="canvas-zoom-controls" role="toolbar" aria-label="画布缩放控制">
+          <button type="button" onClick={applyFitFromFrame} aria-label="适应窗口">
+            适应窗口
+          </button>
+          <span className="canvas-zoom-controls__divider" aria-hidden="true" />
+          <button type="button" onClick={zoomTo100} aria-label="缩放到 100%">
+            100%
+          </button>
+          <span className="canvas-zoom-controls__divider" aria-hidden="true" />
+          <button type="button" onClick={() => zoomByFactor(1 / 1.2)} aria-label="缩小">
+            −
+          </button>
+          <button type="button" onClick={() => zoomByFactor(1.2)} aria-label="放大">
+            +
+          </button>
+        </div>
       </div>
       {blockedStroke ? (
         <p className="canvas-warning" role="alert">
