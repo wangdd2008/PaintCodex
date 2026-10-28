@@ -4,6 +4,7 @@ import type {
   ApplyActionRequest,
   Canvas,
   CanvasDocument,
+  CanvasListPage,
   CanvasState,
   CreateCanvasRequest,
 } from '@paintcodex/protocol';
@@ -20,6 +21,7 @@ import {
   CanvasRepository,
   LayerRepository,
   SnapshotRepository,
+  type CanvasListQuery,
   type CanvasRecord,
   type SnapshotRecord,
 } from './repository.js';
@@ -124,6 +126,19 @@ export class PaintService {
     const canvas = this.canvases.findById(id);
 
     return canvas ? this.toDocument(canvas) : null;
+  }
+
+  /**
+   * One page of the canvas library: read-only collection semantics. `total` is
+   * the whole-library count, computed separately from the paged `items`.
+   */
+  listCanvases(query: CanvasListQuery): CanvasListPage {
+    return {
+      items: this.canvases.list(query),
+      total: this.canvases.count(),
+      limit: query.limit,
+      offset: query.offset,
+    };
   }
 
   /**
