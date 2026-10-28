@@ -4,6 +4,7 @@ import type {
   ApplyActionRequest,
   Canvas,
   CanvasDocument,
+  CanvasListPage,
   CanvasState,
   CreateCanvasRequest,
 } from '@paintcodex/protocol';
@@ -20,6 +21,7 @@ import {
   CanvasRepository,
   LayerRepository,
   SnapshotRepository,
+  type CanvasListQuery,
   type CanvasRecord,
   type SnapshotRecord,
 } from './repository.js';
@@ -124,6 +126,27 @@ export class PaintService {
     const canvas = this.canvases.findById(id);
 
     return canvas ? this.toDocument(canvas) : null;
+  }
+
+  /**
+   * One page of the canvas library: read-only collection semantics. `total` is
+   * the whole-library count, computed separately from the paged `items`.
+   */
+  listCanvases(query: CanvasListQuery): CanvasListPage {
+    return {
+      items: this.canvases.list(query),
+      total: this.canvases.count(),
+      limit: query.limit,
+      offset: query.offset,
+    };
+  }
+
+  /**
+   * 硬删除一张画布（级联由 schema 的外键保证）。返回 false 表示画布不存在。
+   * Codex thread 的清理由路由在事务提交之后调用 `runtime.deleteThread` 完成。
+   */
+  deleteCanvas(id: string): boolean {
+    return this.canvases.delete(id);
   }
 
   /**
