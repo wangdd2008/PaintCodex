@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasNameEditor } from '../features/canvas/CanvasNameEditor';
 import { CanvasStage } from '../features/canvas/CanvasStage';
@@ -14,6 +20,13 @@ import { Toolbox } from '../features/toolbox/Toolbox';
 import { subscribeToCanvas } from '../runtime/paint-sse';
 import { exportActiveCanvasPng } from '../services/canvas-engine';
 import { canvasJsonFilename, downloadCanvasJson } from '../services/json-export';
+import {
+  CHAT_WIDTH_DEFAULT,
+  clampChatWidth,
+  nextChatWidth,
+  readChatWidth,
+  writeChatWidth,
+} from '../services/chat-width';
 import { describeCanvasError, readRememberedCanvasId, useCanvasStore } from '../services/canvas-store';
 import { displayCanvasName } from '../services/naming';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
@@ -41,6 +54,18 @@ export function App() {
   // SSE 连接状态只由 EventSource 的 open/error 驱动，不轮询、不手动重连。
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const drawerToggleRef = useRef<HTMLButtonElement | null>(null);
+
+  // 对话列宽度（票 ②01）：记住的值，范围由 chat-width 模块 clamp。
+  const [chatWidth, setChatWidth] = useState<number>(() => readChatWidth());
+  // 对话列整体收起：列宽回 0，记住的宽度保留在 chatWidth 里。
+  const [chatCollapsed, setChatCollapsed] = useState(false);
+  // 图层列折叠：折成一条纵向把手，再点把手展开。
+  const [layersCollapsed, setLayersCollapsed] = useState(false);
+  // 拖动期间：禁文本选择、画布不收指针。
+  const [resizing, setResizing] = useState(false);
+  const dragStartX = useRef(0);
+  const dragStartWidth = useRef(chatWidth);
+  const dragMoved = useRef(false);
 
   useEffect(() => {
     const canvasId = readRememberedCanvasId();
@@ -169,6 +194,108 @@ export function App() {
     setView(next);
   }
 
+  // 把宽度写到 documentElement 的 --chat-width：收起时列宽回 0，记住的值保留。
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--chat-width',
+      chatCollapsed ? '0px' : `${chatWidth}px`,
+    );
+  }, [chatWidth, chatCollapsed]);
+
+  // 记住宽度：变化即持久化（读在 useState 初值里）。
+  useEffect(() => {
+    writeChatWidth(chatWidth);
+  }, [chatWidth]);
+
+  // 拖动结束时清理拖动态（pointerup 漏触发时兜底）。
+  useEffect(() => {
+    if (!resizing) {
+      return;
+    }
+
+    function stop() {
+      setResizing(false);
+    }
+
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+
+    return () => {
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+  }, [resizing]);
+
+  function handleResizerPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragStartX.current = event.clientX;
+    dragStartWidth.current = chatCollapsed ? CHAT_WIDTH_DEFAULT : chatWidth;
+    dragMoved.current = false;
+    setResizing(true);
+
+    // 拖动一开始就展开对话列：拖把手等于要调它的宽度。
+    if (chatCollapsed) {
+      setChatCollapsed(false);
+    }
+  }
+
+  function handleResizerPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!resizing) {
+      return;
+    }
+
+    const delta = event.clientX - dragStartX.current;
+
+    if (Math.abs(delta) > 3) {
+      dragMoved.current = true;
+    }
+
+    setChatWidth(clampChatWidth(dragStartWidth.current + delta));
+  }
+
+  function handleResizerPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
+    setResizing(false);
+  }
+
+  // 键盘：←/→ ±16，Home/End 到最小/最大。
+  function handleResizerKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const next = nextChatWidth(chatWidth, event.key);
+
+    if (next === chatWidth) {
+      return;
+    }
+
+    event.preventDefault();
+    setChatCollapsed(false);
+    setChatWidth(next);
+  }
+
+  // 双击复位到默认 380px。
+  function handleResizerDoubleClick() {
+    setChatCollapsed(false);
+    setChatWidth(CHAT_WIDTH_DEFAULT);
+  }
+
+  // 点把手（非拖动）时若对话列收起，则展开；拖过就不展开。
+  function handleResizerClick() {
+    if (dragMoved.current) {
+      dragMoved.current = false;
+      return;
+    }
+
+    if (chatCollapsed) {
+      setChatCollapsed(false);
+    }
+  }
+
   async function handleConfirmNewCanvas() {
     // Keep the bar open (with a busy CTA) until the create settles, so a
     // failure is visible instead of looking like nothing happened.
@@ -293,7 +420,15 @@ export function App() {
         The workspace stays mounted while monitoring so an in-flight AI chat
         and the canvas state survive the view switch.
       */}
-      <div className={view === 'monitor' ? 'workspace app-hidden' : 'workspace'}>
+      <div
+        className={[
+          view === 'monitor' ? 'workspace app-hidden' : 'workspace',
+          resizing ? 'workspace--resizing' : '',
+          layersCollapsed ? 'workspace--layers-collapsed' : '',
+        ]
+          .filter(Boolean)
+          .join(' ')}
+      >
         <Toolbox />
         <main className="canvas-area">
           {confirmNewCanvas && canvas ? (
@@ -310,8 +445,75 @@ export function App() {
           id="side-panel"
           className={drawerOpen ? 'side-panel side-panel--open' : 'side-panel'}
         >
-          <LayerPanel />
-          <AiChatPanel />
+          <div
+            className={
+              layersCollapsed
+                ? 'layer-column layer-column--collapsed'
+                : 'layer-column'
+            }
+          >
+            {layersCollapsed ? (
+              <button
+                type="button"
+                className="layer-collapse-handle"
+                aria-label="展开图层面板"
+                onClick={() => setLayersCollapsed(false)}
+              >
+                <span className="layer-collapse-handle__label">图层</span>
+              </button>
+            ) : (
+              <>
+                <div className="column-header">
+                  <button
+                    type="button"
+                    className="column-collapse-button"
+                    aria-label="收起图层面板"
+                    onClick={() => setLayersCollapsed(true)}
+                  >
+                    «
+                  </button>
+                </div>
+                <LayerPanel />
+              </>
+            )}
+            <div
+              className="chat-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuenow={chatWidth}
+              aria-valuemin={320}
+              aria-valuemax={640}
+              aria-label="对话面板宽度"
+              tabIndex={0}
+              onPointerDown={handleResizerPointerDown}
+              onPointerMove={handleResizerPointerMove}
+              onPointerUp={handleResizerPointerUp}
+              onKeyDown={handleResizerKeyDown}
+              onDoubleClick={handleResizerDoubleClick}
+              onClick={handleResizerClick}
+            />
+          </div>
+          <div
+            className={
+              chatCollapsed ? 'chat-column chat-column--collapsed' : 'chat-column'
+            }
+          >
+            {chatCollapsed ? null : (
+              <>
+                <div className="column-header">
+                  <button
+                    type="button"
+                    className="column-collapse-button"
+                    aria-label="收起对话面板"
+                    onClick={() => setChatCollapsed(true)}
+                  >
+                    »
+                  </button>
+                </div>
+                <AiChatPanel />
+              </>
+            )}
+          </div>
         </aside>
       </div>
 
