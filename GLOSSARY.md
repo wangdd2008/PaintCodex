@@ -5,6 +5,14 @@
 ### Canvas
 The primary drawing surface. In PaintCodex, a canvas has fixed dimensions (1920×1080 by default), a background color, and a stack of layers.
 
+### 画布文档（Canvas Document）
+画布库中可被列出、打开、重命名和删除的那一张画布，携带自己的名称、尺寸、图层栈与修订号。它是持久化与寻址的单位。
+_避免_: 画布（当指"某一张可管理的画布"时）、文件、项目
+
+### 画布库（Canvas Library）
+全部画布文档的集合，以及浏览、打开和删除它们的入口。它负责「找回」，不负责「写入」。
+_避免_: 画布列表、画廊、文件列表
+
 ### Layer
 An individual drawable element within a canvas. Layers can be raster (imported images), vector (Fabric.js brush paths and other vector objects), or AI-generated (SVG code produced by the agent). Each layer has properties like opacity, visibility, and z-index.
 
@@ -116,3 +124,35 @@ _避免_: 在线状态
 ### 选中图层（Active Layer）
 图层面板中当前被选中的图层，画布据此定位或短暂高亮。它表示查看焦点，不表示绘制目标——一笔仍然只生成一个图层。
 _避免_: 当前图层、活动图层
+
+### 会话记录（Chat Transcript）
+界面上一次对话往来的消息序列，与某一张画布文档绑定。它是会话态：刷新即失，不做跨会话恢复。
+_避免_: 聊天历史、对话持久化、消息表
+
+## Observability Concepts
+
+### 追踪（Trace）
+一个 `traceId` 下的全部 span 与事件，描述一次请求或一次对话从发起到结束的完整经过。
+_避免_: 链路、调用链、日志组
+
+### 消息（Message）
+带有发出方与接收方的事件，方向形如 `浏览器 → Daemon`。它与 span（有耗时的区间）和内部事件（无方向）互斥。
+_避免_: 日志、事件（当泛指一切记录时）
+
+### 方向（Direction）
+一条消息的发出方与接收方。只有消息有方向；span 与内部事件没有。
+_避免_: 流向、来源
+
+### 组件（Component）
+参与消息往来的一个可命名实体：浏览器、Daemon、Codex app-server、模型、SQLite。前三个可直接观测，后两个由相邻组件代为标注。
+_避免_: 服务、模块、分类（category 是日志的归类，不是组件）
+
+### 拓扑（Topology）
+组件与它们之间消息通道的固定关系图，用于解释「谁和谁说话」。它由代码声明，不因数据缺失而改变形状。
+_避免_: 架构图（当指带实时数据的那个时）、依赖图
+
+## Viewport Concepts
+
+### 缩放（Viewport Zoom）
+画布的显示比例与平移，只改变渲染视图，不改变文档坐标、图层内容或笔刷宽度。
+_避免_: 画布尺寸、分辨率
