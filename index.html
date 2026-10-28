@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>把 Codex 变成引擎 · 课程首页</title>
+<meta name="description" content="以 PaintCodex 为样本，学会用 codex app-server + dynamic tools 给自己的 Web 产品装一个能动手的 AI。">
+<link rel="stylesheet" href="assets/course.css">
+</head>
+<body>
+<main class="page">
+
+  <header class="lesson-head">
+    <p class="kicker">
+      <span>课程</span>
+      <span class="sep">/</span>
+      <span class="course">把 Codex 变成引擎</span>
+    </p>
+    <h1>给 AI 装手，而不是只给它一张嘴</h1>
+    <p class="lede">
+      以 PaintCodex 为样本，拆开 <code>codex app-server</code> + dynamic tools 的集成：
+      AI 怎样读你的状态、调用你的工具、看到失败、在下一句话里还记得「刚才那个」。
+      学会之后，把同一套骨架搬到你自己的 Web 产品。
+    </p>
+    <p class="lesson-meta">
+      <span>6 课</span>
+      <span>中文</span>
+      <span>基线 codex-cli 0.164.0</span>
+      <span>每课 10–15 分钟</span>
+    </p>
+
+    <div class="objectives">
+      <h2>建议的起点</h2>
+      <ul>
+        <li>先花 12 分钟做完 <a href="lessons/0001-from-exec-to-app-server.html">课程 01</a>，建立「进程 / 线程 / 轮次 / 条目」的心智模型；</li>
+        <li>做完 4 道检索题，再打开 <a href="reference/protocol-cheatsheet.html">协议速查卡</a> 对照；</li>
+        <li>卡住就回到对话里问——贴报错、贴收到的 JSON 行，比“没看懂”更有用。</li>
+      </ul>
+    </div>
+  </header>
+
+  <article class="lesson">
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">01</span>课程</h2>
+      <p>
+        每一课只解决一个可验证的小问题；学完一课，你应该能用自己的话讲清它，并在代码里指出来。
+        课程 02 起是动手环节。
+      </p>
+
+      <ol class="transfer">
+        <li>
+          <b><a href="lessons/0001-from-exec-to-app-server.html">一条消息的旅程</a></b>
+          <span>从 <code>exec</code> 到 <code>app-server</code>：四个名词、五道接缝、一条真实消息流。</span>
+        </li>
+        <li>
+          <b><a href="lessons/0002-run-your-first-session.html">亲手跑通一次会话</a></b>
+          <span>运行一个最小脚本：建线程、声明 <code>notes_add</code>、回答一次 <code>item/tool/call</code>，再给它加字段。</span>
+        </li>
+        <li>
+          <b>给模型装手</b>
+          <span>工具 schema、失败语义、<code>expectedRevision</code>、串行队列——什么该暴露，什么不该。</span>
+        </li>
+        <li>
+          <b>把 turn 接到浏览器</b>
+          <span>SSE 帧、确认通道、浏览器往返（渲染预览、导出）与取消语义。</span>
+        </li>
+        <li>
+          <b>会话与故障</b>
+          <span>thread 持久化、懒重启、版本闸门、协议漂移；升级 codex 时先看哪里。</span>
+        </li>
+        <li>
+          <b>迁移演练</b>
+          <span>为你的 Web 应用设计工具集，并写一个能跑的最小垂直切片。</span>
+        </li>
+      </ol>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">02</span>参考</h2>
+      <p>
+        课程会反复引用这两份材料；它们比课程更适合在实现时打开。
+      </p>
+
+      <div class="source-card" style="margin-top:1rem">
+        <h2>速查</h2>
+        <dl>
+          <div class="source-row">
+            <dt>协议</dt>
+            <dd><a href="reference/protocol-cheatsheet.html">Codex app-server 集成速查</a> —— 生命周期、消息方向、最小会话、失败码、超时、升级清单。可打印。</dd>
+          </div>
+          <div class="source-row">
+            <dt>术语</dt>
+            <dd><a href="reference/glossary.html">术语表</a> —— 课程里统一的 25 个词，避免“会话 / 请求 / 事件”混用。</dd>
+          </div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">03</span>它为什么值得学</h2>
+      <p>
+        大多数「AI 集成」停在文本：模型回一段话，产品再自己解析。那等于让模型隔着一层玻璃指挥，
+        它看不见结果，也没法多步修正。dynamic tools 把玻璃拿掉：模型请求一个已声明的函数，
+        宿主在进程内执行，把结构化结果送回模型。于是「读 → 改 → 复核 → 再改」才成立。
+      </p>
+
+      <p>
+        代价是你得自己维护一条会话状态机：进程、线程、轮次、请求 id、超时、取消、确认、崩溃恢复。
+        这六课就是这条状态机的拆解。
+      </p>
+
+      <div class="callout callout--insight">
+        <span class="callout-label">一句话</span>
+        <p>
+          模型没有手。手是你在建线程时声明的工具；集成工作的大半，是维护「调用 → 执行 → 结果」这条回路。
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">04</span>材料怎么用</h2>
+      <ul>
+        <li>课程页是主教材，带交互和检索题；参考页是实现时查的压缩版。</li>
+        <li>课程会引用本仓库的真实文件，路径都相对于仓库根目录；读代码时对着看。</li>
+        <li>每课末尾都有「迁移到你的项目」——那才是这门课的终点，不是读懂 PaintCodex。</li>
+      </ul>
+      <p class="small">
+        教学材料（课程、参考、使命、学习记录）放在仓库根目录，和 <code>apps/</code>、<code>packages/</code> 的产品代码分开。
+      </p>
+    </section>
+
+  </article>
+
+  <footer class="lesson-foot">
+    <p class="ask-teacher">
+      <b>我是你的老师，不是文档。</b>
+      想从哪一课开始、想先解决你项目里的哪个动作，直接说。我们可以跳过顺序，按你的问题走。
+    </p>
+    <div class="foot-links">
+      <a href="MISSION.md">课程使命</a>
+      <a href="RESOURCES.md">资源清单</a>
+      <a href="lessons/0001-from-exec-to-app-server.html">开始课程 01 →</a>
+    </div>
+  </footer>
+
+</main>
+</body>
+</html>

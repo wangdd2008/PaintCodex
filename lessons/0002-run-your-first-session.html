@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02 · 亲手跑通一次会话</title>
+<meta name="description" content="运行一个最小 app-server 脚本：声明 notes_add，收到 item/tool/call，在本地执行，把结果送回模型。">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="page">
+
+  <header class="lesson-head">
+    <p class="kicker">
+      <span>课程 02</span>
+      <span class="sep">/</span>
+      <span class="course">把 Codex 变成引擎</span>
+    </p>
+    <h1>亲手跑通一次会话：让 JSON 行变成一次工具调用</h1>
+    <p class="lede">
+      上一课看了地图：五道接缝、十个步骤。这一课把车开起来。你会运行一个不依赖 PaintCodex 业务代码的小脚本，
+      亲眼看到 <code>initialize</code>、<code>thread/start</code>、<code>item/tool/call</code> 与
+      <code>turn/completed</code>，再把它改成你自己的第一个工具。
+    </p>
+    <p class="lesson-meta">
+      <span>约 20 分钟</span>
+      <span>1 个可运行实验</span>
+      <span>4 道检索题</span>
+      <span>基线 codex-cli 0.164.0</span>
+    </p>
+
+    <div class="objectives">
+      <h2>本课结束时，你能</h2>
+      <ul>
+        <li>独立运行 lab，并指出输出里哪一行是模型在请求执行工具；</li>
+        <li>说清客户端请求 id 与服务端请求 id 为什么可以同时存在；</li>
+        <li>给工具加一个字段，让模型按新 schema 传参并看到结果。</li>
+      </ul>
+    </div>
+  </header>
+
+  <article class="lesson">
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">01</span>先跑起来</h2>
+
+      <p>
+        脚本在 <a href="../labs/02-minimal-session/session.mjs"><code>labs/02-minimal-session/session.mjs</code></a>，
+        只用 Node 内置模块，没有依赖。它维护一个内存里的笔记数组，声明一个
+        <code>notes_add</code> 工具，然后让模型添加一条笔记。
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-cap"><span>PowerShell / bash</span><span>仓库根目录</span></div>
+        <pre><code>node labs/02-minimal-session/session.mjs</code></pre>
+      </div>
+
+      <p>前提只有三个：</p>
+      <ul>
+        <li>Node.js 22+；</li>
+        <li><code>codex --version</code> 不低于 <code>0.164.0</code>；</li>
+        <li>Codex 已经登录，能正常对话。Windows 上脚本会自动通过 <code>cmd.exe</code> 调 <code>codex.cmd</code>。</li>
+      </ul>
+
+      <p>
+        跑起来后，终端会按顺序打印四段：握手、建线程、开始一轮、结果。你应该在几秒内看到类似下面的一段
+        （id 和时间会不同）：
+      </p>
+
+      <div class="code-wrap">
+        <div class="code-cap"><span>真实输出（已截断长字段）</span><span>2026-10-28 · 0.164.0</span></div>
+        <pre class="transcript"><code>→ {"id":1,"method":"initialize","params":{...}}
+← #1 initialize ok {"userAgent":"codex-lab/0.164.0 ..."}
+
+→ {"id":2,"method":"thread/start","params":{...,"dynamicTools":[...]}}
+← #2 thread/start ok {"thread":{"id":"01a1..."}}
+
+→ {"id":3,"method":"turn/start","params":{...}}
+← #3 turn/start ok {"turn":{"id":"01a1...","status":"inProgress"}}
+← item/started tool=notes_add callId=call_00_...
+
+← {"method":"item/tool/call","id":0,"params":{
+    "threadId":"01a1...","turnId":"01a1...",
+    "callId":"call_00_...","namespace":null,
+    "tool":"notes_add",
+    "arguments":{"text":"来自 app-server 的第一条笔记"}}}
+
+  ⚙  app-server 请求执行工具
+  ⚙  本地执行结果：{"ok":true,"note":{...},"notes":[...],"revision":1}
+
+→ {"id":0,"result":{"success":true,
+    "contentItems":[{"type":"inputText","text":"{\"ok\":true,...}"}]}}
+
+← item/completed tool=notes_add callId=call_00_... status=ok
+← item/agentMessage/delta "已"
+...
+← turn/completed completed
+
+assistant: 已添加笔记，现在一共有 1 条。</code></pre>
+      </div>
+
+      <div class="callout callout--warning">
+        <span class="callout-label">如果没看到工具调用</span>
+        <p>
+          脚本会以退出码 2 结束，并提示「这一轮没有触发 <code>item/tool/call</code>」。
+          先重跑一次；仍然不行就检查登录状态与 <code>codex --version</code>。
+          模型偶尔会直接回答，这本身不是协议失败，但说明你的
+          <code>developerInstructions</code> 或工具描述还不够强硬。
+        </p>
+      </div>
+
+      <p class="small">
+        stderr 里可能出现一条 <code>preferred_auth_method is ignored</code> 的警告；那是你本机
+        <code>config.toml</code> 的旧字段，不影响本次会话。
+      </p>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">02</span>三段拆解</h2>
+
+      <p>
+        整个脚本可以拆成三段：传输、生命周期、工具。真正需要你写的只有第三段；
+        前两段在<a href="0001-from-exec-to-app-server.html">课程 01</a>的五道接缝里已经出现过。
+      </p>
+
+      <div class="seam-map">
+        <div class="seam">
+          <span class="seam-num">01</span>
+          <div>
+            <p class="seam-title">传输：一行一个 JSON，三个分支</p>
+            <p class="seam-desc">
+              有 <code>method</code> 有 <code>id</code> 是反向请求；有 <code>method</code> 无
+              <code>id</code> 是通知；只有 <code>id</code> 是响应。客户端请求用自增数字，服务端请求用它自己的 id。
+            </p>
+          </div>
+          <span class="seam-file">session.mjs:80–145</span>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">02</span>
+          <div>
+            <p class="seam-title">生命周期：握手 → 建线程 → 开始一轮</p>
+            <p class="seam-desc">
+              <code>initialize</code> 打开实验能力，<code>thread/start</code> 声明工具，
+              <code>turn/start</code> 发起工作；一个 deferred 在 <code>turn/completed</code> 时结算。
+            </p>
+          </div>
+          <span class="seam-file">session.mjs:342–430</span>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">03</span>
+          <div>
+            <p class="seam-title">工具：反向请求，本地执行，结果回传</p>
+            <p class="seam-desc">
+              收到 <code>item/tool/call</code> 后调用 <code>runTool</code>，把
+              <code>{ success, contentItems }</code> 按原 id 写回去。失败也是结果。
+            </p>
+          </div>
+          <span class="seam-file">session.mjs:209–300</span>
+        </div>
+      </div>
+
+      <h3>传输：三行判断，三种消息</h3>
+
+      <div class="code-wrap">
+        <div class="code-cap"><span>session.mjs · handleLine</span><span>简化</span></div>
+        <pre><code>const hasMethod = typeof message.method === 'string';
+const hasId = message.id !== undefined;
+
+if (!hasMethod &amp;&amp; hasId) {
+  settleResponse(message);          // 我们请求的响应
+} else if (hasMethod &amp;&amp; hasId) {
+  void handleServerRequest(message); // 服务端反向请求
+} else if (hasMethod) {
+  handleNotification(message);       // 通知，不需要回答
+}</code></pre>
+      </div>
+
+      <p>
+        这三行就是整个协议的分类器。注意：服务端请求的 <code>id</code> 由 app-server 分配，
+        第一次是 <code>0</code>；它和我们自己请求的 <code>1</code>、<code>2</code>、<code>3</code>
+        是两个命名空间。响应时原样回传，不要重新编号。
+      </p>
+
+      <h3>生命周期：先挂好 deferred，再发 turn</h3>
+
+      <div class="code-wrap">
+        <div class="code-cap"><span>session.mjs · main</span><span>简化</span></div>
+        <pre><code>const done = deferred();
+turnDone = done;
+
+await request('turn/start', {
+  threadId,
+  input: [{ type: 'text', text: PROMPT }],
+});
+
+await done.promise;</code></pre>
+      </div>
+
+      <p>
+        为什么先挂 deferred？因为 <code>turn/completed</code> 可能在
+        <code>turn/start</code> 的响应之后立刻到达；如果先 await 响应再挂监听，就会漏掉它。
+        这和浏览器里「先注册监听，再发请求」是同一个道理。
+      </p>
+
+      <h3>工具：把 <code>ok</code> 翻译成 <code>success</code></h3>
+
+      <div class="code-wrap">
+        <div class="code-cap"><span>session.mjs · handleServerRequest</span><span>简化</span></div>
+        <pre><code>const result = runTool(tool, args);
+
+send({
+  id: message.id,
+  result: {
+    success: result.ok,
+    contentItems: [
+      { type: 'inputText', text: JSON.stringify(result) },
+    ],
+  },
+});</code></pre>
+      </div>
+
+      <p>
+        <code>runTool</code> 返回的 <code>{ ok, ... }</code> 是业务语义；
+        <code>success</code> 是协议语义。两者之间只隔一层翻译：成功就
+        <code>success:true</code>，失败就 <code>success:false</code>，但
+        <code>contentItems</code> 里仍然放完整 JSON，让模型读得到原因。
+      </p>
+
+      <div class="callout callout--insight">
+        <span class="callout-label">记住这个形状</span>
+        <p>
+          工具结果永远是 <code>{ success, contentItems }</code>；
+          业务结果永远放在 <code>contentItems[0].text</code> 的 JSON 里。
+          前者给协议，后者给模型。
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">03</span>读输出：三个对照</h2>
+
+      <p>回到你的终端输出，找这三组关系。先自己想，再展开对答案。</p>
+
+      <ol class="transfer">
+        <li>
+          <b><code>threadId</code> 出现在哪些消息里？</b>
+          <span>它是这一轮所有事件的归属；<code>turn/start</code>、<code>item/*</code>、<code>turn/completed</code> 都带它。</span>
+        </li>
+        <li>
+          <b><code>callId</code> 把哪几条消息串起来？</b>
+          <span><code>item/started</code>、<code>item/tool/call</code>、<code>item/completed</code> 共享同一个 callId。</span>
+        </li>
+        <li>
+          <b>为什么响应 id 是 <code>0</code>？</b>
+          <span>因为服务端请求的 id 就是 0；原样回传。它不是客户端的自增序号。</span>
+        </li>
+      </ol>
+
+      <details>
+        <summary>展开：一条工具调用的完整关联</summary>
+        <pre class="transcript"><code>item/started       callId=call_00_...      status=running
+item/tool/call     callId=call_00_...      arguments={text:"..."}
+item/completed     callId=call_00_...      status=ok
+
+turn/start         turn.id=tu_...          status=inProgress
+turn/completed     turn.id=tu_...          status=completed</code></pre>
+        <p>
+          工具事件回答「做了什么」，turn 事件回答「这一轮有没有结束」。
+          它们是两条线，不要用 <code>item/completed</code> 去结算整个轮次。
+        </p>
+      </details>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">04</span>检验一下</h2>
+
+      <div class="quiz-set" data-quiz-set>
+
+        <div class="quiz" data-quiz
+             data-explain="服务端请求的 id 是它自己分配的；客户端只负责原样回传。重新编号会让响应匹配不上。">
+          <p class="quiz-q"><span class="qnum">01</span><span><code>item/tool/call</code> 的 id 是 <code>0</code>，响应应该用哪个 id？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span>原样回传 <code>0</code></span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>改成下一个客户端 id</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>省略 id，只回 result</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>用 callId 代替 id</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="失败也要作为结果送回模型：success:false，contentItems 里保留可读的错误码与消息，它才有机会修正。">
+          <p class="quiz-q"><span class="qnum">02</span><span>工具执行失败时，lab 怎么让模型知道？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>抛异常并关闭 app-server</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span>回 <code>success:false</code> 加文本</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>忽略失败，继续这一轮</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>把错误只写到 stderr</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="turn/completed 才代表这一轮结束；item/completed 只是某个条目结束，后面可能还有更多工具调用或文本。">
+          <p class="quiz-q"><span class="qnum">03</span><span>哪条通知表示整个 turn 结束？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>item/completed</code> 通知</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>turn/start</code> 的响应</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span><code>turn/completed</code> 通知</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>最后一条 delta 到达</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="工具先声明，模型才可能调用。改 runTool 只是改执行；不改 dynamicTools，模型根本看不见这个新工具。">
+          <p class="quiz-q"><span class="qnum">04</span><span>想让模型调用一个新工具，先改哪里？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>runTool</code> 的分支</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>main</code> 里的 prompt</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>request</code> 的超时</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span><code>dynamicTools</code> 的声明</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <p class="quiz-score" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">05</span>改一改：给笔记加一个 mood</h2>
+
+      <p>
+        现在轮到你改代码。目标：让工具多一个 <code>mood</code> 字段，取值为
+        <code>calm</code> 或 <code>urgent</code>，并且要求模型必须传。做完后重跑，你应该在
+        <code>arguments</code> 里看到它。
+      </p>
+
+      <ol class="transfer">
+        <li>
+          <b>改 schema：把它变成必填</b>
+          <span>在 <code>NOTES_ADD_TOOL.inputSchema.properties</code> 里加 <code>mood</code>，并把 <code>required</code> 改成 <code>["text","mood"]</code>。</span>
+        </li>
+        <li>
+          <b>改执行：校验并保存</b>
+          <span>在 <code>runTool</code> 里只接受 <code>calm</code> / <code>urgent</code>；其它值返回 <code>{ok:false, code:'invalid_arguments'}</code>。</span>
+        </li>
+        <li>
+          <b>改 prompt：明确要求</b>
+          <span>把 <code>PROMPT</code> 改成「添加一条 mood 为 calm 的笔记……」，重跑。</span>
+        </li>
+        <li>
+          <b>看反馈</b>
+          <span>如果模型漏传，它会收到 <code>invalid_arguments</code> 并重试；如果它改对了，<code>arguments</code> 里会出现 <code>mood</code>。</span>
+        </li>
+      </ol>
+
+      <details>
+        <summary>展开：参考改动（先自己写，再看）</summary>
+        <div class="code-wrap">
+          <div class="code-cap"><span>schema</span><span>session.mjs</span></div>
+          <pre><code>mood: {
+  type: 'string',
+  enum: ['calm', 'urgent'],
+  description: 'How the note feels. Required.',
+},
+// ...
+required: ['text', 'mood'],</code></pre>
+        </div>
+        <div class="code-wrap">
+          <div class="code-cap"><span>runTool</span><span>session.mjs</span></div>
+          <pre><code>const mood = args?.mood;
+
+if (mood !== 'calm' &amp;&amp; mood !== 'urgent') {
+  return {
+    ok: false,
+    code: 'invalid_arguments',
+    message: 'mood 必须是 calm 或 urgent',
+  };
+}
+
+const note = {
+  id: `note_${notes.length + 1}`,
+  text,
+  mood,
+  createdAt: new Date().toISOString(),
+};
+notes.push(note);</code></pre>
+        </div>
+        <div class="code-wrap">
+          <div class="code-cap"><span>prompt</span><span>session.mjs</span></div>
+          <pre><code>请调用 notes_add，添加一条 mood 为 calm、
+内容为“第二次运行”的笔记，然后告诉我总数。</code></pre>
+        </div>
+      </details>
+
+      <div class="callout callout--practice">
+        <span class="callout-label">这一步的反馈从哪来</span>
+        <p>
+          不是靠肉眼猜，而是靠模型的行为：它要么按 schema 传参，要么收到
+          <code>invalid_arguments</code> 后重试。你要观察的是 <code>arguments</code> 和
+          <code>item/completed</code> 的 status，而不是最终那句漂亮话。
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">06</span>迁移：只保留骨架，换掉工具</h2>
+
+      <p>
+        这个 lab 里，和「笔记」绑定的只有四处：<code>NOTES_ADD_TOOL</code>、
+        <code>runTool</code>、<code>notes</code> 数组、<code>PROMPT</code>。
+        其余部分——进程、JSONL、id 对齐、deferred、结果翻译——原样搬到你的项目。
+      </p>
+
+      <ul>
+        <li><b>第一个工具选什么？</b>选一个「读」或一个最小的「写」，不要一上来做完整 CRUD。</li>
+        <li><b>它返回什么？</b>新状态 + 新版本号；失败时返回 <code>code</code> 与 <code>message</code>。</li>
+        <li><b>哪个动作不可逆？</b>先不做，等课程 04 的确认通道；lab 阶段只做可撤销的写入。</li>
+      </ul>
+
+      <p class="small">
+        课程 03 会把 <code>notes_add</code> 放大成一套工具集：schema 怎么收紧、失败码怎么设计、
+        <code>expectedRevision</code> 怎么防覆盖、为什么工具要串行执行。
+      </p>
+    </section>
+
+    <aside class="source-card">
+      <h2>主源与文件</h2>
+      <dl>
+        <div class="source-row">
+          <dt>实验</dt>
+          <dd><a href="../labs/02-minimal-session/session.mjs"><code>labs/02-minimal-session/session.mjs</code></a> —— 约 430 行，含注释；直接改它。</dd>
+        </div>
+        <div class="source-row">
+          <dt>主源</dt>
+          <dd><a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md" target="_blank" rel="noopener">Codex app-server README</a> —— 协议字段与生命周期。</dd>
+        </div>
+        <div class="source-row">
+          <dt>对照</dt>
+          <dd><a href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts</a> —— 同一套骨架在生产里的样子：队列、超时、取消、崩溃恢复。</dd>
+        </div>
+      </dl>
+    </aside>
+
+  </article>
+
+  <footer class="lesson-foot">
+    <p class="small" style="margin-bottom:1.2rem">
+      <b>课程路线</b>　01 消息流 · 02 亲手跑通（本课） · 03 工具设计 · 04 浏览器桥 · 05 会话与故障 · 06 迁移演练
+    </p>
+
+    <div class="next-card">
+      <span class="next-num">03</span>
+      <div>
+        <h3>下一课：给模型装手</h3>
+        <p>
+          把 <code>notes_add</code> 放大成一套工具集：schema 的边界、失败码、<code>expectedRevision</code>、
+          串行队列，以及「哪些动作必须确认」。
+        </p>
+      </div>
+    </div>
+
+    <p class="ask-teacher">
+      <b>跑不通就把终端输出贴给我。</b>
+      我要看的是：你停在哪一步、最后一条 <code>←</code> 是什么、有没有
+      <code>item/tool/call</code>。这些比“报错了”更容易定位。
+    </p>
+
+    <div class="foot-links">
+      <a href="../reference/protocol-cheatsheet.html">协议速查卡</a>
+      <a href="../reference/glossary.html">术语表</a>
+      <a href="0001-from-exec-to-app-server.html">← 课程 01</a>
+      <a href="../index.html">课程首页</a>
+    </div>
+  </footer>
+
+</main>
+
+<script src="../assets/quiz.js" defer></script>
+</body>
+</html>

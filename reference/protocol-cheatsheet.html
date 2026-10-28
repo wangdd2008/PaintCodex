@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>速查 · Codex app-server 集成</title>
+<meta name="description" content="Codex app-server 集成的压缩参考：消息方向、最小会话、五道接缝、工具契约、失败码、超时与升级清单。">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="page page--wide">
+
+  <header class="ref-head">
+    <p class="kicker">
+      <span>参考 01</span>
+      <span class="sep">/</span>
+      <span class="course">把 Codex 变成引擎</span>
+    </p>
+    <h1>Codex app-server 集成速查</h1>
+    <p class="lede">
+      一页纸的协议与接缝。基线 <code>codex-cli 0.164.0</code>；字段以本机
+      <code>generate-json-schema</code> 为准，不以本文为准。
+    </p>
+    <p class="lesson-meta">
+      <span>配合课程 01 使用</span>
+      <span>可打印</span>
+      <span>2026-10-28</span>
+    </p>
+  </header>
+
+  <div class="ref-grid">
+
+    <section class="ref-section">
+      <h2><span class="num">01</span>生命周期</h2>
+      <p>
+        一个进程 → 多条 thread → 每条 thread 同时最多一个 turn → 一个 turn 内多次工具调用。
+      </p>
+      <pre><code>spawn app-server
+  → initialize
+  → thread/start | thread/resume
+  → turn/start
+      ├─ item/agentMessage/delta      (可多次)
+      ├─ item/tool/call → 你的结果     (可多次)
+      └─ item/started / item/completed
+  → turn/completed
+  → thread/delete（可选）</code></pre>
+      <p class="small">
+        <code>turn</code> 结束状态：<code>completed</code> / <code>failed</code> / <code>interrupted</code>。
+        <code>inProgress</code> 不是结束，忽略它继续等。
+      </p>
+    </section>
+
+    <section class="ref-section">
+      <h2><span class="num">02</span>谁在说话</h2>
+      <div class="table-wrap">
+      <table class="ref-table ref-table--messages">
+        <thead>
+          <tr><th>形状</th><th>方向</th><th>例子</th><th>答</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>{id, method, params}</code></td>
+            <td><code>C → S</code></td>
+            <td><code>initialize</code>, <code>thread/start</code>, <code>turn/start</code></td>
+            <td>是</td>
+          </tr>
+          <tr>
+            <td><code>{id, result}</code> / <code>{id, error}</code></td>
+            <td><code>S → C</code></td>
+            <td><code>thread/start</code> 的返回</td>
+            <td>—</td>
+          </tr>
+          <tr>
+            <td><code>{id, method, params}</code></td>
+            <td><code>S → C</code></td>
+            <td><code>item/tool/call</code></td>
+            <td><b>必须</b></td>
+          </tr>
+          <tr>
+            <td><code>{method, params}</code></td>
+            <td><code>S → C</code></td>
+            <td><code>item/agentMessage/delta</code>, <code>turn/completed</code></td>
+            <td>否</td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+      <p class="small" style="margin-top:.6rem">
+        C = 客户端（宿主），S = app-server。本协议按行分隔 JSON，不带 <code>jsonrpc</code> 字段；
+        <code>id</code> 可以是数字或字符串。有 <code>method</code> + <code>id</code> 是请求，
+        有 <code>method</code> 无 <code>id</code> 是通知，只有 <code>id</code> 是响应。
+      </p>
+    </section>
+
+    <section class="ref-section span-2">
+      <h2><span class="num">03</span>最小会话（JSONL）</h2>
+      <div class="code-wrap">
+        <div class="code-cap"><span><code>→</code> 客户端发往 app-server</span><span><code>←</code> app-server 发回客户端</span></div>
+        <pre><code><span class="c"># 1. 握手：experimentalApi 是 dynamicTools 的前置开关</span>
+→ {"id":1,"method":"initialize","params":{
+     "clientInfo":{"name":"myapp","version":"0.1.0"},
+     "capabilities":{"experimentalApi":true}}}
+← {"id":1,"result":{"userAgent":"...","platformFamily":"..."}}
+
+<span class="c"># 2. 建线程：工具只在这里声明，随线程持久化</span>
+→ {"id":2,"method":"thread/start","params":{
+     "cwd":"/path/to/workspace",
+     "sandbox":"read-only",
+     "approvalPolicy":"never",
+     "ephemeral":false,
+     "dynamicTools":[{
+       "type":"function",
+       "name":"app_get_state",
+       "description":"Read the current document.",
+       "inputSchema":{"type":"object","properties":{},"additionalProperties":false}
+     }]}}
+← {"id":2,"result":{"thread":{"id":"th_..."}}}
+
+<span class="c"># 3. 开始一轮</span>
+→ {"id":3,"method":"turn/start","params":{
+     "threadId":"th_...",
+     "input":[{"type":"text","text":"..."}]}}
+← {"id":3,"result":{"turn":{"id":"tu_..."}}}
+
+<span class="c"># 4. 文本流（通知，无 id）</span>
+← {"method":"item/agentMessage/delta","params":{
+     "threadId":"th_...","turnId":"tu_...",
+     "itemId":"msg_1","delta":"我先读一下。"}}
+
+<span class="c"># 5. 模型要用手（反向请求，有 id；不回答就永远等）</span>
+<span class="c">#    id 由 app-server 分配，首轮常见 0；和客户端请求的 1、2、3 是两个命名空间</span>
+← {"method":"item/tool/call","id":0,"params":{
+     "threadId":"th_...","turnId":"tu_...",
+     "callId":"call_1","namespace":null,
+     "tool":"app_get_state","arguments":{}}}
+
+<span class="c"># 6. 宿主回答（原样回传同一个 id；首轮常见 0）</span>
+→ {"id":0,"result":{
+     "success":true,
+     "contentItems":[{"type":"inputText","text":"{\"ok\":true}"}]}}
+
+<span class="c"># 7. 结束</span>
+← {"method":"turn/completed","params":{
+     "threadId":"th_...",
+     "turn":{"id":"tu_...","status":"completed"}}}</code></pre>
+      </div>
+    </section>
+
+    <section class="ref-section">
+      <h2><span class="num">04</span>五道接缝</h2>
+      <div class="table-wrap">
+      <table class="ref-table">
+        <thead><tr><th>层</th><th>文件</th><th>坏了的表现</th></tr></thead>
+        <tbody>
+          <tr><td>入口桥</td><td><code>api/routes.ai.ts</code></td><td>断线后模型还在跑；帧丢失</td></tr>
+          <tr><td>轮次编排</td><td><code>runtime/codex-runtime.ts</code></td><td>“已有进行中轮次”；thread 找不到</td></tr>
+          <tr><td>传输</td><td>同文件 · <code>handleLine</code></td><td>请求超时；响应错配</td></tr>
+          <tr><td>工具</td><td><code>runtime/tools.ts</code></td><td>模型乱选工具；参数校验失败</td></tr>
+          <tr><td>领域</td><td><code>command-dispatcher.ts</code></td><td>revision 冲突；actor 归属错</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="ref-section">
+      <h2><span class="num">05</span>工具结果契约</h2>
+      <pre><code>{
+  "success": true | false,
+  "contentItems": [
+    {"type":"inputText",  "text":"..."},
+    {"type":"inputImage",
+     "imageUrl":"data:image/png;base64,..."}
+  ]
+}</code></pre>
+      <ul>
+        <li>失败也是结果：<code>success:false</code> + 可读 JSON，不抛异常给协议层。</li>
+        <li>图片走 <code>inputImage</code>；文本里删掉 <code>imageUrl</code>，否则 base64 会被重复计费。</li>
+        <li>工具名 = 模型权限。没声明的工具，它调不到。</li>
+      </ul>
+    </section>
+
+    <section class="ref-section span-2">
+      <h2><span class="num">06</span>失败码（PaintCodex）</h2>
+      <div class="table-wrap">
+      <table class="ref-table">
+        <thead><tr><th>code</th><th>触发</th><th>模型该怎么做</th></tr></thead>
+        <tbody>
+          <tr><td><code>revision_conflict</code></td><td><code>expectedRevision</code> 不匹配，附 <code>currentRevision</code></td><td>重读上下文，再决定是否重写</td></tr>
+          <tr><td><code>invalid_arguments</code></td><td>参数类型 / 形状不合法</td><td>修正参数后重试</td></tr>
+          <tr><td><code>invalid_svg</code></td><td>SVG 含脚本、事件、外链或 viewBox 不符</td><td>重写一个安全、独立的 SVG</td></tr>
+          <tr><td><code>layer_not_found</code> / <code>canvas_not_found</code></td><td>id 不存在或不属于当前画布</td><td>重新读上下文，不要猜 id</td></tr>
+          <tr><td><code>top_action_is_user</code></td><td>撤销栈顶是用户动作</td><td>转告用户自己撤销，不代劳</td></tr>
+          <tr><td><code>nothing_to_undo</code></td><td>撤销栈已空</td><td>说明没有可撤销的操作</td></tr>
+          <tr><td><code>user_declined</code></td><td>确认被拒、超时、断线或中断</td><td>停止该动作，说明原因</td></tr>
+          <tr><td><code>render_unavailable</code> / <code>export_unavailable</code></td><td>没有连接中的浏览器</td><td>告知用户先打开画布</td></tr>
+          <tr><td><code>tool_timeout</code></td><td>工具执行超 30s（人在等待的时间不计）</td><td>缩小动作，或改成分步</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="ref-section">
+      <h2><span class="num">07</span>超时与取消</h2>
+      <ul>
+        <li><b>请求</b> 30s：<code>initialize</code> / <code>thread/*</code> / <code>turn/start</code>。</li>
+        <li><b>工具</b> 30s；确认、渲染、导出等人机往返暂停计时。</li>
+        <li><b>确认</b> 60s 无答复按拒绝处理；SSE 断开或 turn 中断立即结算。</li>
+        <li><b>SSE 关闭</b> → <code>AbortSignal</code> → <code>turn/interrupt</code> + 取消挂起确认。</li>
+        <li><b>进程崩溃</b> → 所有 pending 请求失败、内存 thread 映射清空；下一次对话懒重启。</li>
+      </ul>
+    </section>
+
+    <section class="ref-section">
+      <h2><span class="num">08</span>升级检查清单</h2>
+      <ol>
+        <li><code>codex --version</code>，确认不低于 <code>0.164.0</code>。</li>
+        <li><code>pnpm --filter @paintcodex/daemon codex:protocol-schema</code> 重新生成（输出到 gitignore 目录）。</li>
+        <li>与 <code>runtime/protocol.ts</code> 逐字段比对，先改协议类型。</li>
+        <li>跑 <code>pnpm -r test</code>，重点看 fake runtime 与工具回归。</li>
+        <li>手工冒烟：画一笔 → 让 AI 改 → 删除并确认 → 导出 PNG。</li>
+        <li>最后才抬 <code>MINIMUM_CODEX_VERSION</code>。</li>
+      </ol>
+    </section>
+
+    <section class="ref-section span-2">
+      <h2><span class="num">09</span>把领域换掉时，保留什么</h2>
+      <div class="ref-grid" style="margin-top:.4rem">
+        <div>
+          <p><b>保留：</b>进程 / 线程 / 轮次的状态机；反向工具请求；失败即结果；串行队列；版本闸门；SSE 取消语义。</p>
+        </div>
+        <div>
+          <p><b>替换：</b>工具名与 JSON Schema；<code>PromptContext</code>；领域写入用的 dispatcher；哪些动作需要确认；工具结果里的业务字段。</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <footer class="lesson-foot">
+    <div class="foot-links">
+      <a href="../lessons/0001-from-exec-to-app-server.html">← 课程 01</a>
+      <a href="../lessons/0002-run-your-first-session.html">课程 02 →</a>
+      <a href="glossary.html">术语表</a>
+      <a href="../docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md">ADR-0009</a>
+      <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md" target="_blank" rel="noopener">app-server README ↗</a>
+    </div>
+  </footer>
+
+</main>
+</body>
+</html>

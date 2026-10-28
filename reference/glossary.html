@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>术语表 · Codex 集成</title>
+<meta name="description" content="Codex app-server 集成课程的统一术语：协议、运行时、领域与故障。">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="page">
+
+  <header class="ref-head">
+    <p class="kicker">
+      <span>参考 02</span>
+      <span class="sep">/</span>
+      <span class="course">把 Codex 变成引擎</span>
+    </p>
+    <h1>术语表</h1>
+    <p class="lede">
+      课程与参考卡里反复出现的词，统一在这里定义。英文名保留，方便你去上游文档里搜。
+    </p>
+    <p class="lesson-meta">
+      <span>25 条</span>
+      <span>随课程增补</span>
+      <span>基线 codex-cli 0.164.0</span>
+    </p>
+  </header>
+
+  <article class="lesson">
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">A</span>协议与运行时</h2>
+
+      <dl class="glossary">
+        <div class="gloss-item">
+          <dt id="app-server">app-server<span class="en">codex app-server</span></dt>
+          <dd>
+            Codex CLI 的子命令，启动一个长驻进程，用按行分隔的 JSON 消息与宿主通信。
+            它负责模型连接、thread 与 turn；宿主负责执行工具。协议目前带 <code>[experimental]</code> 标记。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="jsonl">JSONL 传输<span class="en">line-delimited JSON</span></dt>
+          <dd>
+            一行一个 JSON 对象，stdin 写、stdout 读。没有长度前缀，也不能把一条消息拆成多行再拼。
+            stderr 是日志，不是协议。本协议的消息不带 <code>jsonrpc</code> 字段。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="initialize">握手<span class="en">initialize</span></dt>
+          <dd>
+            进程启动后的第一个请求：报上 <code>clientInfo</code>，并声明 <code>capabilities.experimentalApi</code>。
+            后者是使用 <code>dynamicTools</code> 的前置开关；缺了它，<code>thread/start</code> 会被拒。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="thread">线程<span class="en">thread</span></dt>
+          <dd>
+            一段持久对话，也是模型侧的记忆容器。工具在 <code>thread/start</code> 时声明，随线程持久化。
+            PaintCodex 一条画布一条 thread；删除 thread 就丢掉指代记忆，但不影响画布数据。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="turn">轮次<span class="en">turn</span></dt>
+          <dd>
+            一条用户消息引发的工作，可包含多次工具调用。同一 thread 同时最多一个活动 turn。
+            结束状态是 <code>completed</code>、<code>failed</code> 或 <code>interrupted</code>。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="item">条目<span class="en">item</span></dt>
+          <dd>
+            轮次内的事件单位：助手消息、dynamic tool 调用、命令执行等。
+            通过 <code>item/started</code> / <code>item/completed</code> 观察；条目也有自己的 <code>id</code>。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="notification">通知<span class="en">notification</span></dt>
+          <dd>
+            服务端单向发出、没有 <code>id</code>、不需要回答的消息，例如
+            <code>item/agentMessage/delta</code> 与 <code>turn/completed</code>。
+            有 <code>method</code> 但没有 <code>id</code>，就是通知。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="server-request">反向请求<span class="en">server request</span></dt>
+          <dd>
+            app-server 发给宿主的请求，带 <code>id</code>，必须回答。当前主要就是
+            <code>item/tool/call</code>。这个 <code>id</code> 由 app-server 分配（首轮常见
+            <code>0</code>），与客户端请求的 <code>1</code>、<code>2</code>、<code>3</code>
+            是两个命名空间；响应时原样回传。不回答，模型会一直等；答错，它会基于错的事实继续。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="dynamic-tool">动态工具<span class="en">dynamic tool</span></dt>
+          <dd>
+            宿主在 <code>thread/start</code> 时声明给模型的函数：<code>name</code>、
+            <code>description</code>、<code>inputSchema</code>。模型只能调用声明过的工具；
+            声明之外，它没有别的权限。
+            <span class="avoid">避免：插件、技能、MCP 工具（它们不是同一个机制）</span>
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="tool-call">工具调用<span class="en">tool call</span></dt>
+          <dd>
+            模型请求执行一个工具，携带 <code>tool</code>、<code>arguments</code> 与
+            <code>callId</code>。<code>callId</code> 把这次调用与后续
+            <code>item/completed</code> 里的条目对应起来。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="tool-result">工具结果<span class="en">tool result</span></dt>
+          <dd>
+            宿主对工具调用的回答：<code>success</code> 加 <code>contentItems</code>。
+            失败也是结果：<code>success:false</code> 加一段模型可读的 JSON。
+            <span class="avoid">避免：异常、报错弹窗（模型看不见 UI）</span>
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="content-items">内容项<span class="en">contentItems</span></dt>
+          <dd>
+            工具结果的内容数组：<code>inputText</code>（文本）、<code>inputImage</code>（图片 URL，通常是
+            data URL）、<code>inputAudio</code>。图片必须走 <code>inputImage</code>，不要塞进文本。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="resume">恢复线程<span class="en">thread/resume</span></dt>
+          <dd>
+            用持久化的 thread id 从磁盘恢复对话。<code>ephemeral:false</code> 是前提；
+            PaintCodex 把 id 存在 <code>canvases.codexThreadId</code>，daemon 重启后先 resume，
+            失败则新建并提示“会话已重置”。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="interrupt">中断<span class="en">turn/interrupt</span></dt>
+          <dd>
+            请求停止某条 thread 上正在跑的 turn。宿主不必等 <code>turn/completed</code> 才释放等待：
+            它会先取消挂起的确认与浏览器往返，再发中断请求。
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">B</span>宿主与领域</h2>
+
+      <dl class="glossary">
+        <div class="gloss-item">
+          <dt id="runtime">运行时<span class="en">Codex Runtime</span></dt>
+          <dd>
+            daemon 里唯一说 Codex 协议的组件：进程启停、JSON-RPC 收发、thread/turn 状态、事件映射、
+            版本闸门。它不知道“画布”是什么，只知道工具名与结果。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="dispatcher">命令分发器<span class="en">CommandDispatcher</span></dt>
+          <dd>
+            所有画布变更的唯一入口：<code>dispatch(canvasId, { actor, expectedRevision, action })</code>。
+            人类与 AI 走同一个状态机，区别只在 <code>actor</code>。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="actor">执行者<span class="en">actor</span></dt>
+          <dd>
+            <code>user</code> 或 <code>agent</code>。REST 写入永远是 <code>user</code>，
+            请求体里自带别的 actor 会被拒；<code>agent</code> 只出现在进程内工具执行器里。
+            “同权”不等于“代权”：AI 只能撤销自己造成的那一步。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="revision">版本号<span class="en">revision</span></dt>
+          <dd>
+            画布状态的整数版本，每次变更 +1，用于乐观并发控制。它是“写到哪个版本”，不是撤销历史。
+            <span class="avoid">避免：版本、快照编号</span>
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="expected-revision">期望版本<span class="en">expectedRevision</span></dt>
+          <dd>
+            写操作携带的“我上次看到的 revision”。不匹配就返回 <code>revision_conflict</code> 与
+            <code>currentRevision</code>，让模型重读；不传则退化为“用刚读到的版本写”。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="snapshot">快照<span class="en">snapshot</span></dt>
+          <dd>
+            某一时刻完整的 <code>CanvasDocument</code>，用于 Undo/Redo，保留最近 20 个。
+            撤销恢复快照并抬 revision，但不再追加新快照。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="sse">SSE<span class="en">Server-Sent Events</span></dt>
+          <dd>
+            daemon 到浏览器的单向流。画布同步只发“变了”的信号，客户端再取完整快照；
+            AI 对话流则逐帧发 <code>delta</code>、<code>tool</code>、<code>confirm</code>、<code>done</code> 等。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="confirmation-channel">确认通道<span class="en">confirmation channel</span></dt>
+          <dd>
+            daemon 自有的“危险动作先问人”机制：SSE 发 <code>confirm</code>，浏览器
+            <code>POST /paint/ai/confirm</code> 回答，挂起的工具继续或返回 <code>user_declined</code>。
+            60 秒无答复视为拒绝。它不是 Codex 的 approval policy。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="thread-store">线程存储<span class="en">thread store</span></dt>
+          <dd>
+            canvasId → threadId 的持久映射。daemon 重启后靠它找回对话；
+            没有它，thread 只活在内存里，进程一退记忆就没了。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="version-gate">版本闸门<span class="en">version gate</span></dt>
+          <dd>
+            daemon 启动时跑 <code>codex --version</code>，低于 <code>0.164.0</code> 就不注册 AI 路由，
+            由 <code>/health</code> 给出可操作的原因。它挡的是“第一次对话才炸”，不是安全边界。
+          </dd>
+        </div>
+
+        <div class="gloss-item">
+          <dt id="lazy-restart">懒重启<span class="en">lazy restart</span></dt>
+          <dd>
+            app-server 崩溃后，当前 turn 失败、内存映射清空，但不在崩溃回调里立刻拉起；
+            下一次 <code>startTurn</code> 才重新 spawn 与 <code>initialize</code>。
+            代价是崩溃后的下一句话才恢复，收益是不会形成重启风暴。
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <aside class="source-card">
+      <h2>用词约定</h2>
+      <dl>
+        <div class="source-row">
+          <dt>统一</dt>
+          <dd>课程里说“线程”就是 thread，“轮次”就是 turn，“条目”就是 item；不混用“会话”“请求”“事件”。</dd>
+        </div>
+        <div class="source-row">
+          <dt>保留英文</dt>
+          <dd>协议字段、方法名、状态值保留英文原文，方便直接搜上游 README 与 issue。</dd>
+        </div>
+        <div class="source-row">
+          <dt>避免</dt>
+          <dd>“AI 自己操作画布”——准确说法是“模型请求工具，宿主执行后改画布”。</dd>
+        </div>
+      </dl>
+    </aside>
+
+  </article>
+
+  <footer class="lesson-foot">
+    <div class="foot-links">
+      <a href="../lessons/0001-from-exec-to-app-server.html">课程 01</a>
+      <a href="../lessons/0002-run-your-first-session.html">课程 02</a>
+      <a href="protocol-cheatsheet.html">协议速查卡</a>
+      <a href="../MISSION.md">课程使命</a>
+    </div>
+  </footer>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>01 · 一条消息的旅程：从 codex exec 到 app-server</title>
+<meta name="description" content="用一条真实消息流，拆开 PaintCodex 的 Codex 集成：进程、线程、轮次、条目，以及五道接缝。">
+<link rel="stylesheet" href="../assets/course.css">
+</head>
+<body>
+<main class="page">
+
+  <header class="lesson-head">
+    <p class="kicker">
+      <span>课程 01</span>
+      <span class="sep">/</span>
+      <span class="course">把 Codex 变成引擎</span>
+    </p>
+    <h1>一条消息的旅程：从 <span class="mono">codex exec</span> 到 <span class="mono">app-server</span></h1>
+    <p class="lede">
+      你已经会用 Codex CLI：给一段话，拿回一段文本。PaintCodex 的 AI 却能读画布、改图层、发现冲突后重读。
+      差别不在提示词，而在<strong>谁替模型执行动作，结果又怎么回到模型</strong>。
+    </p>
+    <p class="lesson-meta">
+      <span>约 12 分钟</span>
+      <span>1 条交互消息流</span>
+      <span>4 道检索题</span>
+      <span>基线 codex-cli 0.164.0</span>
+    </p>
+
+    <div class="objectives">
+      <h2>本课结束时，你能</h2>
+      <ul>
+        <li>用自己的话说清 进程 / 线程 / 轮次 / 条目 四者的关系；</li>
+        <li>在五道接缝里，指出任意一条消息由谁处理、坏了会怎样；</li>
+        <li>判断一条消息是请求、响应还是通知，以及它该不该带 <code>id</code>。</li>
+      </ul>
+    </div>
+  </header>
+
+  <article class="lesson">
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">01</span>先换一个心智模型</h2>
+
+      <p>
+        <code>codex exec</code> 的模型是「一次调用 = 一次问答」：进程起来，读提示词，输出文本，进程结束。
+        它很适合批处理，但模型在里面<strong>没有手</strong>——它只能说话，不能读你的状态，也看不到自己上一句造成了什么。
+      </p>
+
+      <p>
+        <code>app-server</code> 的模型是「一个长驻进程 = 多条线程；一条线程 = 多轮；一轮 = 多次工具调用」。
+        模型仍然不能直接改你的数据；它只能请求宿主执行一个<strong>在建立线程时就声明好的工具</strong>。
+        宿主执行完，把结果作为一条消息送回模型，模型再决定下一步。
+      </p>
+
+      <p>
+        <strong>那为什么不继续用 <code>exec</code>？</strong>
+        因为它的交互是单向的：模型只能输出文本，宿主只能在事后解析。SDK 把这条路线包得更顺手，
+        但仍然没有「服务端反向请求客户端执行函数」这一层。自建 function calling 直连模型 API 也能做到，
+        代价是丢掉本地 Codex 的会话、沙箱与模型接入。三条路的差别不在提示词，而在谁能发起工具调用：
+      </p>
+
+      <ul>
+        <li><b><code>codex exec</code> / SDK</b>：一次性运行，输出事件流；模型不能回调你进程内的函数，适合「让 Codex 在仓库里干活」。</li>
+        <li><b>自建 function calling</b>：直连模型 API，工具回路全部自己写；适合云端产品，但要自己补会话、沙箱、取消与重试。</li>
+        <li><b><code>app-server</code> + dynamic tools</b>：长驻进程、thread/turn、反向工具请求；代价是 experimental 协议与一套要自己维护的状态机。</li>
+      </ul>
+
+      <div class="callout callout--insight">
+        <span class="callout-label">一句话</span>
+        <p>
+          模型没有手。手是宿主进程在 <code>thread/start</code> 时声明的 dynamic tools；
+          每个工具都在宿主进程内执行，结果再回到模型。集成工作的大半，就是在维护这条回路。
+        </p>
+      </div>
+
+      <dl class="terms">
+        <div class="term">
+          <dt>进程 <span class="term-en">process</span></dt>
+          <dd>长驻的 <code>codex app-server</code> 子进程。一个 daemon 一个，承载协议与模型连接；崩了，下一次对话时再懒启动。</dd>
+        </div>
+        <div class="term">
+          <dt>线程 <span class="term-en">thread</span></dt>
+          <dd>一段持久对话，一条画布一条。它携带记忆，让「刚才那个圆」在下一句话里仍然指代得清楚。</dd>
+        </div>
+        <div class="term">
+          <dt>轮次 <span class="term-en">turn</span></dt>
+          <dd>一条用户消息引发的工作。可以包含多次工具调用，直到 <code>completed</code>、<code>failed</code> 或 <code>interrupted</code>。</dd>
+        </div>
+        <div class="term">
+          <dt>条目 <span class="term-en">item</span></dt>
+          <dd>轮次里的事件单位：一条助手消息、一次工具调用、一次命令执行。用 <code>item/started</code> 与 <code>item/completed</code> 观察。</dd>
+        </div>
+      </dl>
+
+      <p class="sidenote">
+        thread 不是 UI 里的「会话列表」，而是模型侧的上下文容器。删掉 thread，指代关系就没了；
+        但画布数据仍在你的数据库里——这两件事必须分开想。
+      </p>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">02</span>五道接缝</h2>
+
+      <p>
+        读 PaintCodex 的 AI 层，别从文件树开始，从「消息经过谁」开始。整条链路只有五道接缝，
+        每道接缝的职责都能用一句话说清；换一个领域，前四道几乎原样保留。
+      </p>
+
+      <div class="seam-map">
+        <div class="seam">
+          <span class="seam-num">01</span>
+          <div>
+            <p class="seam-title">入口桥：把 HTTP 变成一条流</p>
+            <p class="seam-desc">接管响应，写 SSE 头；把浏览器断开绑成 <code>AbortSignal</code>；逐帧转发 daemon 事件。</p>
+          </div>
+          <a class="seam-file" href="../apps/daemon/src/api/routes.ai.ts">api/routes.ai.ts</a>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">02</span>
+          <div>
+            <p class="seam-title">轮次编排：保证进程与线程存在</p>
+            <p class="seam-desc">按需拉起 app-server、解析或新建 thread、登记 active turn；返回一个由 <code>turn/completed</code> 结算的 Promise。</p>
+          </div>
+          <a class="seam-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">runtime/codex-runtime.ts</a>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">03</span>
+          <div>
+            <p class="seam-title">传输：按行 JSON，用 id 对齐</p>
+            <p class="seam-desc">stdin 写请求，stdout 逐行解析；有 <code>method</code> 有 <code>id</code> 是反向请求，有 <code>method</code> 无 <code>id</code> 是通知，只有 <code>id</code> 是响应。</p>
+          </div>
+          <a class="seam-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">同文件 · handleLine</a>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">04</span>
+          <div>
+            <p class="seam-title">工具：把能力声明给模型</p>
+            <p class="seam-desc">声明 JSON Schema、校验参数、执行、把成功与失败都变成模型可读的结果；工具名就是模型的全部权限。</p>
+          </div>
+          <a class="seam-file" href="../apps/daemon/src/paint/agent/runtime/tools.ts">runtime/tools.ts</a>
+        </div>
+
+        <div class="seam">
+          <span class="seam-num">05</span>
+          <div>
+            <p class="seam-title">领域：和人类同一条写路径</p>
+            <p class="seam-desc">工具最终调用 <code>dispatcher.dispatch({ actor: 'agent', expectedRevision, action })</code>；人类写入走同一个方法，只是 actor 不同。</p>
+          </div>
+          <a class="seam-file" href="../apps/daemon/src/paint/command-dispatcher.ts">command-dispatcher.ts</a>
+        </div>
+      </div>
+
+      <div class="callout callout--warning">
+        <span class="callout-label">可迁移的部分</span>
+        <p>
+          这五层里只有第 5 层懂「画布」。把第 5 层换成「表单」「工单」「数据库记录」，
+          前四层可以原样复用——这正是本课值得花时间的地方。
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">03</span>跟着一条消息走</h2>
+
+      <p>
+        下面是一条真实形状的消息流，从用户按下发送开始，到 <code>turn/completed</code> 结束。
+        点“下一行”逐步看；<code>→</code> 表示 daemon 发给 app-server，<code>←</code> 表示 app-server 发回 daemon。
+        省略号只是省掉了与本步无关的字段。
+      </p>
+
+      <div class="stepper" data-stepper tabindex="0" aria-label="一条 AI 轮次的消息流">
+        <div class="stepper-head">
+          <p class="stepper-title">一条 AI 轮次的消息流</p>
+          <span class="stepper-count" data-count>01 / 10</span>
+        </div>
+        <div class="stepper-dots" aria-label="跳到某一步"></div>
+
+        <div class="stepper-stage">
+
+          <section class="step" data-title="浏览器发起对话">
+            <div class="step-top">
+              <span class="dir-chip dir--sse">浏览器 → daemon · HTTP</span>
+              <span class="step-kicker">step 01</span>
+            </div>
+            <h3>一个请求，拥有整轮</h3>
+            <pre><code>POST /paint/ai/chat
+{ "canvasId": "cv_7f3a", "message": "把那轮红日改成蓝色" }
+
+← 200 text/event-stream
+</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>浏览器不需要知道 Codex 的存在。一个 HTTP 请求拥有整轮；连接断开就中断 turn，
+              不会留下一个还在替已关闭页面干活的模型。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/api/routes.ai.ts">routes.ai.ts · POST /paint/ai/chat</a>
+          </section>
+
+          <section class="step" data-title="拼最小上下文">
+            <div class="step-top">
+              <span class="dir-chip dir--local">daemon · 本地组装</span>
+              <span class="step-kicker">step 02</span>
+            </div>
+            <h3>只给身份、尺寸、版本、摘要</h3>
+            <pre><code>You are the PaintCodex painting assistant.
+...
+Canvas id: "cv_7f3a".
+Canvas size: 1920x1080.
+Canvas revision: 7.
+Layer count: 3.
+Layer names: 背景, 红日, 云.
+
+User message: 把那轮红日改成蓝色</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>细节（图层 id、几何、SVG）不塞进提示词。推入的快照从生成那刻起就会过期，
+              而且随图层数膨胀；需要时让模型用 <code>canvas_get_context</code> 现场拉。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/prompt.ts">prompt.ts · buildAiChatPrompt</a>
+          </section>
+
+          <section class="step" data-title="启动并握手">
+            <div class="step-top">
+              <span class="dir-chip dir--c2s">daemon → app-server · 请求</span>
+              <span class="step-kicker">step 03</span>
+            </div>
+            <h3><code>initialize</code>：打开实验能力</h3>
+            <pre><code>→ {"id":1,"method":"initialize","params":{
+     "clientInfo":{"name":"paintcodex","version":"0.1.0"},
+     "capabilities":{"experimentalApi":true}}}
+
+← {"id":1,"result":{"userAgent":"...","platformFamily":"..."}}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b><code>experimentalApi</code> 是声明 dynamic tools 的前置开关，缺了它
+              <code>thread/start</code> 会被拒。进程是懒启动的：daemon 启动时只跑 <code>codex --version</code> 闸门，
+              第一次对话才 spawn。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · ensureReady</a>
+          </section>
+
+          <section class="step" data-title="建线程并声明工具">
+            <div class="step-top">
+              <span class="dir-chip dir--c2s">daemon → app-server · 请求</span>
+              <span class="step-kicker">step 04</span>
+            </div>
+            <h3><code>thread/start</code>：把画布交给模型</h3>
+            <pre><code>→ {"id":2,"method":"thread/start","params":{
+     "cwd":"...",
+     "sandbox":"read-only",
+     "approvalPolicy":"never",
+     "ephemeral":false,
+     "dynamicTools":[
+       {"type":"function","name":"canvas_get_context",
+        "description":"...","inputSchema":{...}}
+     ]}}
+
+← {"id":2,"result":{"thread":{"id":"th_9c1e"}}}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>工具在建立线程时声明一次，随线程持久化；模型能做的，恰好就是这张表里的。
+              <code>read-only</code> 不是不信任模型，而是它不需要 shell：唯一的写入口就是你的工具。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · threadParams</a>
+          </section>
+
+          <section class="step" data-title="开始一轮">
+            <div class="step-top">
+              <span class="dir-chip dir--c2s">daemon → app-server · 请求</span>
+              <span class="step-kicker">step 05</span>
+            </div>
+            <h3><code>turn/start</code>：一条消息，一轮工作</h3>
+            <pre><code>→ {"id":3,"method":"turn/start","params":{
+     "threadId":"th_9c1e",
+     "input":[{"type":"text","text":"...完整提示词..."}]}}
+
+← {"id":3,"result":{"turn":{"id":"tu_4b2a"}}}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>runtime 把这个 turn 登记进 <code>activeTurns</code>。之后每一条事件都带
+              <code>threadId</code>，靠它找回对应的回调与取消信号。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · startTurn</a>
+          </section>
+
+          <section class="step" data-title="文本流式返回">
+            <div class="step-top">
+              <span class="dir-chip dir--notify">app-server → daemon · 通知</span>
+              <span class="step-kicker">step 06</span>
+            </div>
+            <h3><code>item/agentMessage/delta</code>：话是一点点说的</h3>
+            <pre><code>← {"method":"item/agentMessage/delta","params":{
+     "threadId":"th_9c1e","turnId":"tu_4b2a",
+     "itemId":"msg_1","delta":"我先看一下画布。"}}
+
+daemon → SSE  {"delta":"我先看一下画布。"}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>文本只是事件流的一种。它用来降低等待焦虑，<b>不用来判定 turn 结束</b>；
+              模型可能说完一句又去调工具。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · handleNotification</a>
+          </section>
+
+          <section class="step" data-title="模型请求执行工具">
+            <div class="step-top">
+              <span class="dir-chip dir--s2c">app-server → daemon · 反向请求</span>
+              <span class="step-kicker">step 07</span>
+            </div>
+            <h3><code>item/tool/call</code>：这就是「手」</h3>
+            <pre><code>← {"id":"srv_1","method":"item/tool/call","params":{
+     "threadId":"th_9c1e","turnId":"tu_4b2a",
+     "callId":"call_1","namespace":null,
+     "tool":"canvas_get_context",
+     "arguments":{"canvasId":"cv_7f3a"}}}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>方向反过来了：服务端请客户端执行。这个请求必须被回答——不回答，
+              模型会永远等下去；回答错了，它会基于错的事实继续画。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/tools.ts">tools.ts · declarations</a>
+          </section>
+
+          <section class="step" data-title="在进程内执行">
+            <div class="step-top">
+              <span class="dir-chip dir--local">daemon · 本地执行</span>
+              <span class="step-kicker">step 08</span>
+            </div>
+            <h3>校验 → 读状态 / 走 dispatcher</h3>
+            <pre><code>tools.execute("canvas_get_context", args, ctx)
+  └─ service.getCanvas("cv_7f3a")
+     → { ok: true,
+         canvas: { id, revision: 7, ... },
+         layers: [{ id: "ly_1", name: "红日", ... }] }</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>工具就在 daemon 进程里，没有跨进程序列化。写类工具不会自己改数据库，
+              而是调用 <code>dispatcher.dispatch()</code>，和人类写入走同一条状态机。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/tools.ts">tools.ts · dispatchTool</a>
+          </section>
+
+          <section class="step" data-title="把结果送回模型">
+            <div class="step-top">
+              <span class="dir-chip dir--c2s">daemon → app-server · 响应</span>
+              <span class="step-kicker">step 09</span>
+            </div>
+            <h3>成功和失败，都是结果</h3>
+            <pre><code>→ {"id":"srv_1","result":{
+     "success":true,
+     "contentItems":[
+       {"type":"inputText","text":"{\"ok\":true,\"layers\":[...]}"}
+     ]}}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>失败会变成 <code>{"success":false}</code> 加一段可读 JSON，例如
+              <code>revision_conflict</code> 附带 <code>currentRevision</code>。模型因此能看见自己错了，
+              重读再试；反过来，静默重试会让它永远学不会。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · buildToolResponse</a>
+          </section>
+
+          <section class="step" data-title="轮次结束">
+            <div class="step-top">
+              <span class="dir-chip dir--notify">app-server → daemon · 通知</span>
+              <span class="step-kicker">step 10</span>
+            </div>
+            <h3><code>turn/completed</code>：结算 Promise</h3>
+            <pre><code>← {"method":"item/completed","params":{
+     ..., "item":{"type":"dynamicToolCall","id":"call_1",
+                  "tool":"canvas_get_context","success":true}}}
+
+← {"method":"turn/completed","params":{
+     "threadId":"th_9c1e",
+     "turn":{"id":"tu_4b2a","status":"completed"}}}
+
+daemon → SSE  {"done":true}</code></pre>
+            <p class="step-why">
+              <b>为什么：</b>工具 UI 帧与 turn 生命周期是两条线：前者让用户看到「动了什么」，
+              后者才让 <code>startTurn</code> 的 Promise 结算。状态也可能是 <code>failed</code> 或
+              <code>interrupted</code>，调用方要分别处理。
+            </p>
+            <a class="step-file" href="../apps/daemon/src/paint/agent/runtime/codex-runtime.ts">codex-runtime.ts · turn/completed</a>
+          </section>
+
+        </div>
+
+        <div class="stepper-nav">
+          <button type="button" data-prev>← 上一行</button>
+          <span class="stepper-hint">点击圆点跳转 · 聚焦后可用 ← →</span>
+          <button type="button" data-next>下一行 →</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">04</span>三个判断，迁移时照抄</h2>
+
+      <p>
+        这条链路里真正需要动脑的，不是 JSON 怎么拼，而是三个取舍。它们在 PaintCodex 里都有明确的
+        反面教材；换成你的领域，结论仍然成立。
+      </p>
+
+      <h3>上下文：拉，不推</h3>
+      <p>
+        提示词只放「身份 + 版本 + 摘要」。细节通过一个只读的 <code>*_get_context</code> 工具现场拉。
+        推送的快照会过期，而且随对象规模膨胀；拉取永远新鲜，代价只是多一次工具调用。
+      </p>
+
+      <h3>失败：结果，不是异常</h3>
+      <p>
+        工具失败返回 <code>{ ok: false, code, message }</code>，由宿主翻成 <code>success: false</code> 送回模型。
+        不要替模型重试、不要静默吞掉；一个看不见自己失败的执行器，不可能自纠。
+      </p>
+
+      <h3>并发：单写者，版本校验</h3>
+      <p>
+        同一线程的工具调用串行执行；写操作带 <code>expectedRevision</code>，不匹配就返回
+        <code>revision_conflict</code>，让模型重读。两个写并发不是「更快」，是互相覆盖。
+      </p>
+
+      <div class="callout callout--practice">
+        <span class="callout-label">先记住这一条</span>
+        <p>
+          工具越少，模型越不容易选错。一个读工具 + 少量写工具，通常比「把 API 全暴露」更可靠。
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">05</span>检验一下</h2>
+
+      <p>先回答，再看解释。答错的题，用自己的话讲一遍再往下走。</p>
+
+      <div class="quiz-set" data-quiz-set>
+
+        <div class="quiz" data-quiz
+             data-explain="它有 id，并且在等一个 result；只是方向与普通 HTTP 相反：服务端请客户端执行。">
+          <p class="quiz-q"><span class="qnum">01</span><span><code>item/tool/call</code> 属于哪种消息？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>客户端发给服务端的请求</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span>服务端发给客户端的请求</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>服务端单向下发的通知</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>客户端单向下发的通知</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="前两层只搬运消息；tools 校验完参数后调用 dispatcher，后者才和人类写入共用同一条状态机。">
+          <p class="quiz-q"><span class="qnum">02</span><span>画布写入真正发生在哪一层？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>routes.ai.ts</code> 的 SSE 帧</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>codex-runtime.ts</code> 的写行</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span><code>CommandDispatcher.dispatch</code></span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span><code>tools.ts</code> 的参数校验</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="文本 delta 只是过程；turn 的生命周期由 turn/completed 通知表达，status 可能是 completed、failed 或 interrupted。">
+          <p class="quiz-q"><span class="qnum">03</span><span>什么让 <code>startTurn</code> 的 Promise 结算？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span><code>turn/completed</code> 通知</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>最后一条 delta 到达</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>SSE 发出 <code>done</code> 帧</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>HTTP 响应流关闭</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <div class="quiz" data-quiz
+             data-explain="把失败作为结果送回模型，它才有机会重读、改参数、换工具。静默重试只会让它误以为一切顺利。">
+          <p class="quiz-q"><span class="qnum">04</span><span>哪个选择让模型能纠正自己的错误？</span></p>
+          <div class="quiz-options">
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>daemon 静默重试冲突写入</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>提示词预塞全部图层内容</span></button>
+            <button type="button" class="quiz-option" data-correct="false"><span class="mark" aria-hidden="true"></span><span>每轮结束重建全新线程</span></button>
+            <button type="button" class="quiz-option" data-correct="true"><span class="mark" aria-hidden="true"></span><span>把失败作为工具结果返回</span></button>
+          </div>
+          <p class="quiz-feedback" aria-live="polite"></p>
+        </div>
+
+        <p class="quiz-score" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2 class="section-title"><span class="num">06</span>迁移到你的项目</h2>
+
+      <p>
+        在写下第一行集成代码之前，先回答三个问题。它们决定工具集，而工具集决定模型能做成什么。
+        下一课我们会用你的答案设计一个最小工具集。
+      </p>
+
+      <ol class="transfer">
+        <li>
+          <b>你的领域对象是什么？</b>
+          <span>给它一个 id、一个 revision、一份摘要。提示词只需要这三样；细节用一个只读工具现场拉。</span>
+        </li>
+        <li>
+          <b>用户语言里的动词，哪些必须成为工具？</b>
+          <span>读一个，写按动词拆；每个写工具都返回新的 revision。别把内部 API 全暴露，工具越少越可靠。</span>
+        </li>
+        <li>
+          <b>哪个动作不可逆？</b>
+          <span>删除、发送、付款、覆盖发布走确认；可撤销的新建与改写直接做。确认属于你的工具层，不属于 Codex 的审批策略。</span>
+        </li>
+      </ol>
+
+      <p class="small">
+        这三问的答案写进你的笔记；下一课开场我会先问它们。
+      </p>
+    </section>
+
+    <aside class="source-card">
+      <h2>主源与核对</h2>
+      <dl>
+        <div class="source-row">
+          <dt>主源</dt>
+          <dd>
+            <a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md" target="_blank" rel="noopener">Codex app-server README</a>
+            —— 协议的官方说明。读的时候对照本机版本，别把 main 当 0.164.0。
+          </dd>
+        </div>
+        <div class="source-row">
+          <dt>本地</dt>
+          <dd>
+            <a href="../docs/adr/0009-ai-drives-canvas-through-codex-dynamic-tools.md">ADR-0009</a> 解释了为什么放弃 marker 文本协议；
+            <a href="../.scratch/codex-native-tools/spec.md">codex-native-tools spec</a> 是同一件事的验收视角。
+          </dd>
+        </div>
+        <div class="source-row">
+          <dt>核对</dt>
+          <dd>
+            升级 codex 后运行 <code>pnpm --filter @paintcodex/daemon codex:protocol-schema</code>，
+            与 <code>apps/daemon/src/paint/agent/runtime/protocol.ts</code> 手工比对；两份类型不一致，先别改业务代码。
+          </dd>
+        </div>
+      </dl>
+    </aside>
+
+  </article>
+
+  <footer class="lesson-foot">
+    <p class="small" style="margin-bottom:1.2rem">
+      <b>课程路线</b>　01 消息流（本课） · <a href="0002-run-your-first-session.html">02 亲手跑通</a> · 03 工具设计 · 04 浏览器桥 · 05 会话与故障 · 06 迁移演练
+    </p>
+
+    <div class="next-card">
+      <span class="next-num">02</span>
+      <div>
+        <h3><a href="0002-run-your-first-session.html">下一课：亲手跑通一次会话</a></h3>
+        <p>
+          用一个可运行的 Node 脚本拉起 <code>app-server</code>，建线程、声明一个工具、回答一次
+          <code>item/tool/call</code>，再给它加字段。不碰 PaintCodex 的业务代码。
+        </p>
+      </div>
+    </div>
+
+    <p class="ask-teacher">
+      <b>我是你的老师，不是文档。</b>
+      哪一步没跟上，或者想把它套到你自己的项目上，直接回到对话里问。贴报错、贴你收到的 JSON 行、
+      贴你期待的帧，都比“没看懂”更容易让我帮到你。
+    </p>
+
+    <div class="foot-links">
+      <a href="../reference/protocol-cheatsheet.html">协议速查卡</a>
+      <a href="../reference/glossary.html">术语表</a>
+      <a href="../MISSION.md">课程使命</a>
+      <a href="../RESOURCES.md">资源清单</a>
+    </div>
+  </footer>
+
+</main>
+
+<script src="../assets/stepper.js" defer></script>
+<script src="../assets/quiz.js" defer></script>
+</body>
+</html>
