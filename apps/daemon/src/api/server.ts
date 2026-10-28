@@ -35,6 +35,7 @@ import {
   CanvasRepository,
   LayerRepository,
   SnapshotRepository,
+  ThumbnailRepository,
 } from '../paint/repository.js';
 import { PaintService } from '../paint/service.js';
 import { openDatabase } from '../storage/database.js';
@@ -78,6 +79,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
   const events = new PaintEvents();
   const observability = createObservability(db);
   const canvases = new CanvasRepository(db);
+  const thumbnails = new ThumbnailRepository(db);
   const service = new PaintService(
     canvases,
     new LayerRepository(db),
@@ -179,7 +181,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       ? { available: true, version: codexVersion.version }
       : { available: false, reason: codexVersion.reason },
   }));
-  registerPaintRoutes(app, service);
+  registerPaintRoutes(app, service, runtime, thumbnails);
   registerEventRoutes(app, service, events);
 
   if (runtime) {

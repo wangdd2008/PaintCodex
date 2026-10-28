@@ -3,6 +3,7 @@ import { MAX_CANVAS_NAME_LENGTH } from '@paintcodex/protocol';
 import type {
   Actor,
   ApplyActionRequest,
+  CanvasListSort,
   CreateCanvasRequest,
   CreateLayerInput,
   HistoryRequest,
@@ -12,6 +13,7 @@ import type {
   UpdateLayerPatch,
 } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
+import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
 import {
   CanvasNotFoundError,
   LayerNotFoundError,
@@ -19,7 +21,12 @@ import {
   NothingToUndoError,
   RevisionConflictError,
 } from '../paint/errors.js';
+import { ThumbnailRepository } from '../paint/repository.js';
 import { MAX_CANVAS_DIMENSION, type PaintService } from '../paint/service.js';
+
+/** 缩略图只接受浏览器渲染出的 PNG data URL；解码后体积上限 256 KB（spec §4）。 */
+const THUMBNAIL_DATA_URL_PREFIX = 'data:image/png;base64,';
+const MAX_THUMBNAIL_BYTES = 256 * 1024;
 
 type LayerCreateBody = CreateLayerInput & {
   expectedRevision?: number;
@@ -45,7 +52,12 @@ function restActorError(value: unknown): string | null {
     : 'actor 由服务端决定，REST 写入恒为 user';
 }
 
-export function registerPaintRoutes(app: FastifyInstance, service: PaintService): void {
+export function registerPaintRoutes(
+  app: FastifyInstance,
+  service: PaintService,
+  runtime: CodexRuntime | null,
+  thumbnails: ThumbnailRepository,
+): void {
   const dispatcher = new CommandDispatcher(service);
 
   app.post<{ Body: CreateCanvasRequest }>('/paint/canvas', async (request, reply) => {
@@ -61,6 +73,21 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
     return reply.code(201).send(dispatcher.createCanvas(body, 'user'));
   });
 
+  app.get<{ Querystring: { limit?: string; offset?: string; sort?: string } }>(
+    '/paint/canvas',
+    async (request, reply) => {
+      const query = parseCanvasListQuery(request.query as Record<string, unknown>);
+
+      if (!query.ok) {
+        return reply.code(400).send({
+          error: { code: 'invalid_query', message: query.message },
+        });
+      }
+
+      return service.listCanvases(query.value);
+    },
+  );
+
   app.get<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
     const canvas = service.getCanvas(request.params.id);
 
@@ -71,6 +98,34 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
     }
 
     return canvas;
+  });
+
+  app.delete<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
+    const deleted = service.deleteCanvas(request.params.id);
+
+    if (!deleted) {
+      return reply.code(404).send({
+        error: { code: 'canvas_not_found', message: '画布不存在' },
+      });
+    }
+
+    // 事务已提交：Codex thread 清理是 best-effort。失败不回滚删除——留下的孤儿
+    // thread 只是磁盘垃圾，记一条 warn 即可。
+    if (runtime) {
+      try {
+        await runtime.deleteThread(request.params.id);
+      } catch (error) {
+        app.observability.log({
+          category: 'codex-runtime',
+          level: 'warn',
+          message: 'thread_delete_failed',
+          error,
+          canvasId: request.params.id,
+        });
+      }
+    }
+
+    return reply.code(204).send();
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateCanvasRequest }>(
@@ -89,6 +144,72 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       } catch (error) {
         return sendPaintError(reply, error);
       }
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: { imageUrl?: unknown; revision?: unknown } }>(
+    '/paint/canvas/:id/thumbnail',
+    async (request, reply) => {
+      const parsed = parseThumbnailBody(request.body);
+
+      if (!parsed.ok) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图数据不合法' } });
+      }
+
+      const canvas = service.getCanvas(request.params.id);
+
+      if (!canvas) {
+        return reply
+          .code(404)
+          .send({ error: { code: 'canvas_not_found', message: '画布不存在' } });
+      }
+
+      const bytes = Buffer.from(parsed.base64, 'base64');
+
+      if (bytes.length > MAX_THUMBNAIL_BYTES) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图超过 256 KB' } });
+      }
+
+      const dimensions = pngDimensions(bytes);
+
+      if (!dimensions) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图不是合法 PNG' } });
+      }
+
+      thumbnails.upsert({
+        canvasId: canvas.id,
+        revision: parsed.revision,
+        width: dimensions.width,
+        height: dimensions.height,
+        bytes,
+        updatedAt: Date.now(),
+      });
+
+      return reply.code(204).send();
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/paint/canvas/:id/thumbnail',
+    async (request, reply) => {
+      const record = thumbnails.find(request.params.id);
+
+      if (!record) {
+        return reply
+          .code(404)
+          .send({ error: { code: 'thumbnail_not_found', message: '缩略图不存在' } });
+      }
+
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Cache-Control', 'no-store')
+        .send(record.bytes);
     },
   );
 
@@ -514,4 +635,118 @@ function isValidDimension(value: unknown): value is number {
     value >= 1 &&
     value <= MAX_CANVAS_DIMENSION
   );
+}
+
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 100;
+
+type ParsedListQuery =
+  | { ok: true; value: { limit: number; offset: number; sort: CanvasListSort } }
+  | { ok: false; message: string };
+
+/**
+ * Validates the collection query for the canvas library. `sort` is whitelisted
+ * (`updated` by default); `limit` defaults to 50 and is capped at 100; `offset`
+ * starts at 0. Anything out of range or non-integer is a client error, not an
+ * empty result.
+ */
+function parseCanvasListQuery(query: Record<string, unknown>): ParsedListQuery {
+  const sortRaw = query.sort;
+  let sort: CanvasListSort = 'updated';
+
+  if (sortRaw !== undefined) {
+    if (sortRaw !== 'updated' && sortRaw !== 'created') {
+      return { ok: false, message: 'sort 只接受 updated 或 created' };
+    }
+    sort = sortRaw;
+  }
+
+  const limitRaw = query.limit;
+  let limit = DEFAULT_LIST_LIMIT;
+
+  if (limitRaw !== undefined) {
+    const parsed = toNonNegativeInteger(limitRaw);
+
+    if (parsed === null || parsed < 1 || parsed > MAX_LIST_LIMIT) {
+      return {
+        ok: false,
+        message: `limit 必须是 1 到 ${MAX_LIST_LIMIT} 之间的整数`,
+      };
+    }
+    limit = parsed;
+  }
+
+  const offsetRaw = query.offset;
+  let offset = 0;
+
+  if (offsetRaw !== undefined) {
+    const parsed = toNonNegativeInteger(offsetRaw);
+
+    if (parsed === null) {
+      return { ok: false, message: 'offset 必须是大于等于 0 的整数' };
+    }
+    offset = parsed;
+  }
+
+  return { ok: true, value: { limit, offset, sort } };
+}
+
+function toNonNegativeInteger(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+/**
+ * 校验 PUT /thumbnail 的 body：必须是 `{ imageUrl: 'data:image/png;base64,...',
+ * revision: 整数 }`。体积上限在解码后再判（base64 前缀本身不构成大小证据）。
+ */
+function parseThumbnailBody(body: unknown):
+  | { ok: true; base64: string; revision: number }
+  | { ok: false } {
+  if (!body || typeof body !== 'object') {
+    return { ok: false };
+  }
+
+  const candidate = body as { imageUrl?: unknown; revision?: unknown };
+
+  if (
+    typeof candidate.imageUrl !== 'string' ||
+    !candidate.imageUrl.startsWith(THUMBNAIL_DATA_URL_PREFIX)
+  ) {
+    return { ok: false };
+  }
+
+  if (
+    typeof candidate.revision !== 'number' ||
+    !Number.isInteger(candidate.revision)
+  ) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    base64: candidate.imageUrl.slice(THUMBNAIL_DATA_URL_PREFIX.length),
+    revision: candidate.revision,
+  };
+}
+
+/**
+ * 从 PNG IHDR 读取真实宽高。签名占 8 字节，其后是 IHDR chunk：
+ * 长度(4) + 'IHDR'(4) + width(4 BE) + height(4 BE)，即 offset 16 起。
+ * 不够长或宽高非正说明不是合法 PNG。
+ */
+function pngDimensions(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 24) {
+    return null;
+  }
+
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+
+  return width > 0 && height > 0 ? { width, height } : null;
 }
