@@ -194,24 +194,32 @@ button {
   outline-offset: 2px;
 }
 
+/* 视口：占满画布区的可用空间，overflow:hidden 裁掉视口外的内容。
+   不再锁 16:9、不再 max-width：文档在视口内靠 viewportTransform 居中。 */
 .canvas-viewport {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 10px;
   width: 100%;
-  max-width: 1100px;
+  height: 100%;
+  min-height: 0;
 }
 
 .canvas-frame {
   position: relative;
+  flex: 1;
   width: 100%;
-  aspect-ratio: 16 / 9;
+  min-height: 0;
   border: 1px solid #34363f;
   border-radius: 4px;
   box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
   overflow: hidden;
   background: #ffffff;
+  touch-action: none;
+}
+
+/* 空格/中键拖拽平移时给整层一个抓手光标；样式由组件按状态切换 class。 */
+.canvas-frame--panning {
+  cursor: grabbing;
 }
 
 /* AI 的「看这里」：只描边不拦截指针，时长由组件的常量内联给出。 */
@@ -238,15 +246,54 @@ button {
   }
 }
 
-.canvas-frame .canvas-container {
-  width: 100% !important;
-  height: 100% !important;
-}
-
+/* Fabric 画布尺寸 = 容器像素尺寸（由 setDimensions 设置），不再用 CSS 强制拉伸。 */
+.canvas-frame .canvas-container,
 .canvas-frame canvas {
   display: block;
-  width: 100% !important;
-  height: 100% !important;
+}
+
+/* 视口右下角悬浮控件：适应窗口 / 100% / − / +。 */
+.canvas-zoom-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #34363f;
+  border-radius: 8px;
+  background: rgb(23 24 28 / 88%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
+}
+
+.canvas-zoom-controls button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #d8dae2;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.canvas-zoom-controls button:hover {
+  background: #2f313a;
+}
+
+.canvas-zoom-controls button:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: 1px;
+}
+
+.canvas-zoom-controls__divider {
+  width: 1px;
+  height: 16px;
+  background: #34363f;
 }
 
 /* Canvas-level error banner: one mutation failure, one line, retry or dismiss. */

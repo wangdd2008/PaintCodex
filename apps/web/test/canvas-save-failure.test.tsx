@@ -30,6 +30,10 @@ vi.mock('fabric', () => {
     add = vi.fn();
     requestRenderAll = vi.fn();
     discardActiveObject = vi.fn();
+    setDimensions = vi.fn();
+    setViewportTransform = vi.fn();
+    zoomToPoint = vi.fn();
+    relativePan = vi.fn();
 
     constructor() {
       canvasInstances.push(this as unknown as FakeCanvas);
