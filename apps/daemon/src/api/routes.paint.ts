@@ -19,7 +19,12 @@ import {
   NothingToUndoError,
   RevisionConflictError,
 } from '../paint/errors.js';
+import { ThumbnailRepository } from '../paint/repository.js';
 import { MAX_CANVAS_DIMENSION, type PaintService } from '../paint/service.js';
+
+/** 缩略图只接受浏览器渲染出的 PNG data URL；解码后体积上限 256 KB（spec §4）。 */
+const THUMBNAIL_DATA_URL_PREFIX = 'data:image/png;base64,';
+const MAX_THUMBNAIL_BYTES = 256 * 1024;
 
 type LayerCreateBody = CreateLayerInput & {
   expectedRevision?: number;
@@ -45,7 +50,11 @@ function restActorError(value: unknown): string | null {
     : 'actor 由服务端决定，REST 写入恒为 user';
 }
 
-export function registerPaintRoutes(app: FastifyInstance, service: PaintService): void {
+export function registerPaintRoutes(
+  app: FastifyInstance,
+  service: PaintService,
+  thumbnails: ThumbnailRepository,
+): void {
   const dispatcher = new CommandDispatcher(service);
 
   app.post<{ Body: CreateCanvasRequest }>('/paint/canvas', async (request, reply) => {
@@ -89,6 +98,72 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
       } catch (error) {
         return sendPaintError(reply, error);
       }
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: { imageUrl?: unknown; revision?: unknown } }>(
+    '/paint/canvas/:id/thumbnail',
+    async (request, reply) => {
+      const parsed = parseThumbnailBody(request.body);
+
+      if (!parsed.ok) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图数据不合法' } });
+      }
+
+      const canvas = service.getCanvas(request.params.id);
+
+      if (!canvas) {
+        return reply
+          .code(404)
+          .send({ error: { code: 'canvas_not_found', message: '画布不存在' } });
+      }
+
+      const bytes = Buffer.from(parsed.base64, 'base64');
+
+      if (bytes.length > MAX_THUMBNAIL_BYTES) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图超过 256 KB' } });
+      }
+
+      const dimensions = pngDimensions(bytes);
+
+      if (!dimensions) {
+        return reply
+          .code(400)
+          .send({ error: { code: 'invalid_thumbnail', message: '缩略图不是合法 PNG' } });
+      }
+
+      thumbnails.upsert({
+        canvasId: canvas.id,
+        revision: parsed.revision,
+        width: dimensions.width,
+        height: dimensions.height,
+        bytes,
+        updatedAt: Date.now(),
+      });
+
+      return reply.code(204).send();
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/paint/canvas/:id/thumbnail',
+    async (request, reply) => {
+      const record = thumbnails.find(request.params.id);
+
+      if (!record) {
+        return reply
+          .code(404)
+          .send({ error: { code: 'thumbnail_not_found', message: '缩略图不存在' } });
+      }
+
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Cache-Control', 'no-store')
+        .send(record.bytes);
     },
   );
 
@@ -514,4 +589,54 @@ function isValidDimension(value: unknown): value is number {
     value >= 1 &&
     value <= MAX_CANVAS_DIMENSION
   );
+}
+
+/**
+ * 校验 PUT /thumbnail 的 body：必须是 `{ imageUrl: 'data:image/png;base64,...',
+ * revision: 整数 }`。体积上限在解码后再判（base64 前缀本身不构成大小证据）。
+ */
+function parseThumbnailBody(body: unknown):
+  | { ok: true; base64: string; revision: number }
+  | { ok: false } {
+  if (!body || typeof body !== 'object') {
+    return { ok: false };
+  }
+
+  const candidate = body as { imageUrl?: unknown; revision?: unknown };
+
+  if (
+    typeof candidate.imageUrl !== 'string' ||
+    !candidate.imageUrl.startsWith(THUMBNAIL_DATA_URL_PREFIX)
+  ) {
+    return { ok: false };
+  }
+
+  if (
+    typeof candidate.revision !== 'number' ||
+    !Number.isInteger(candidate.revision)
+  ) {
+    return { ok: false };
+  }
+
+  return {
+    ok: true,
+    base64: candidate.imageUrl.slice(THUMBNAIL_DATA_URL_PREFIX.length),
+    revision: candidate.revision,
+  };
+}
+
+/**
+ * 从 PNG IHDR 读取真实宽高。签名占 8 字节，其后是 IHDR chunk：
+ * 长度(4) + 'IHDR'(4) + width(4 BE) + height(4 BE)，即 offset 16 起。
+ * 不够长或宽高非正说明不是合法 PNG。
+ */
+function pngDimensions(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 24) {
+    return null;
+  }
+
+  const width = buf.readUInt32BE(16);
+  const height = buf.readUInt32BE(20);
+
+  return width > 0 && height > 0 ? { width, height } : null;
 }
