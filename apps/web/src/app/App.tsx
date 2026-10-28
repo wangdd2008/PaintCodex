@@ -9,6 +9,7 @@ import { AiChatPanel } from '../features/ai-chat/AiChatPanel';
 import { CanvasNameEditor } from '../features/canvas/CanvasNameEditor';
 import { CanvasStage } from '../features/canvas/CanvasStage';
 import { NewCanvasConfirm } from '../features/canvas/NewCanvasConfirm';
+import { CanvasLibraryPage } from '../features/canvas-library/CanvasLibraryPage';
 import { LayerPanel } from '../features/layer-panel/LayerPanel';
 import { MonitorPage } from '../features/monitor/MonitorPage';
 import {
@@ -32,7 +33,12 @@ import { displayCanvasName } from '../services/naming';
 import { canvasPngFilename, downloadPng } from '../services/png-export';
 import { useToolStore } from '../services/tool-store';
 import { useViewportStore } from '../services/viewport-store';
-import { buildViewUrl, readViewFromSearch, type AppView } from './view-route';
+import {
+  buildCanvasUrl,
+  buildViewUrl,
+  readViewFromSearch,
+  type AppView,
+} from './view-route';
 
 export function App() {
   const canvas = useCanvasStore((state) => state.canvas);
@@ -68,6 +74,11 @@ export function App() {
   const dragMoved = useRef(false);
 
   useEffect(() => {
+    // 直接深链进画布库时不自动加载后台画布：库不订阅 SSE（spec Out of Scope）。
+    if (readViewFromSearch(window.location.search) === 'canvases') {
+      return;
+    }
+
     const canvasId = readRememberedCanvasId();
 
     if (canvasId) {
@@ -106,14 +117,47 @@ export function App() {
   }, [canvasId, refreshCanvas]);
 
   useEffect(() => {
-    function handlePopState() {
-      setView(readViewFromSearch(window.location.search));
+    async function handlePopState() {
+      const nextView = readViewFromSearch(window.location.search);
+      setView(nextView);
+
+      if (nextView !== 'canvas') {
+        return;
+      }
+
+      const id = new URLSearchParams(window.location.search).get('canvasId');
+
+      // 画布视图却没有 id（或 id 指向的文档已被删）：回库，不留在空白工作区。
+      if (!id) {
+        window.history.replaceState(
+          {},
+          '',
+          buildViewUrl(window.location.href, 'canvases'),
+        );
+        setView('canvases');
+        return;
+      }
+
+      if (id === useCanvasStore.getState().canvas?.id) {
+        return;
+      }
+
+      await loadCanvas(id);
+
+      if (useCanvasStore.getState().status === 'error') {
+        window.history.replaceState(
+          {},
+          '',
+          buildViewUrl(window.location.href, 'canvases'),
+        );
+        setView('canvases');
+      }
     }
 
     window.addEventListener('popstate', handlePopState);
 
     return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
+  }, [loadCanvas]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -192,6 +236,25 @@ export function App() {
       buildViewUrl(window.location.href, next),
     );
     setView(next);
+  }
+
+  // 从库点卡片：历史上多一条画布记录，后退正好落回库（ADR-0010 §5）。
+  function openFromLibrary(id: string) {
+    window.history.pushState({}, '', buildCanvasUrl(window.location.href, id));
+    setView('canvas');
+    void loadCanvas(id);
+  }
+
+  // 从库新建：replaceState 把库那条历史换成新画布，不留「建之前的空页」。
+  async function createFromLibrary() {
+    await createNewCanvas();
+
+    const id = useCanvasStore.getState().canvas?.id;
+
+    if (id) {
+      window.history.replaceState({}, '', buildCanvasUrl(window.location.href, id));
+      setView('canvas');
+    }
   }
 
   // 把宽度写到 documentElement 的 --chat-width：收起时列宽回 0，记住的值保留。
@@ -345,7 +408,11 @@ export function App() {
   const menuMessage = error ?? exportError;
 
   return (
-    <div className={view === 'monitor' ? 'app-shell app-shell--monitor' : 'app-shell'}>
+    <div
+      className={
+        view === 'canvas' ? 'app-shell' : 'app-shell app-shell--monitor'
+      }
+    >
       <header className="menu-bar">
         <span className="brand">PaintCodex</span>
         {view === 'canvas' && canvas ? <CanvasNameEditor /> : null}
@@ -406,6 +473,23 @@ export function App() {
             </button>
           </>
         ) : null}
+        {view !== 'canvases' ? (
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => navigate('canvases')}
+          >
+            画布库
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => void createFromLibrary()}
+          >
+            新建画布
+          </button>
+        )}
         <button
           type="button"
           className="menu-button"
@@ -422,7 +506,7 @@ export function App() {
       */}
       <div
         className={[
-          view === 'monitor' ? 'workspace app-hidden' : 'workspace',
+          view === 'canvas' ? 'workspace' : 'workspace app-hidden',
           resizing ? 'workspace--resizing' : '',
           layersCollapsed ? 'workspace--layers-collapsed' : '',
         ]
@@ -521,6 +605,13 @@ export function App() {
         <main className="monitor-area">
           <MonitorPage />
         </main>
+      ) : null}
+
+      {view === 'canvases' ? (
+        <CanvasLibraryPage
+          onOpenCanvas={openFromLibrary}
+          onCreateCanvas={() => void createFromLibrary()}
+        />
       ) : null}
 
       {view === 'canvas' ? (
