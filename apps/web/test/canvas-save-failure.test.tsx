@@ -34,6 +34,8 @@ vi.mock('fabric', () => {
     setViewportTransform = vi.fn();
     zoomToPoint = vi.fn();
     relativePan = vi.fn();
+    // 缩略图调度器在真实定时器里调用；双不需要真渲染。
+    toDataURL = vi.fn(() => 'data:image/png;base64,');
 
     constructor() {
       canvasInstances.push(this as unknown as FakeCanvas);
