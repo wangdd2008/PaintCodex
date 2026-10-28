@@ -1,10 +1,12 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import type {
   CanvasSelectFrame,
+  LogComponent,
   LogLevel,
   StreamPayload,
 } from '@paintcodex/protocol';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
+import { LOG_DIRECTIONS } from '../../../observability/log-direction.js';
 import type {
   AgentMessageDeltaNotification,
   DynamicToolCallParams,
@@ -332,6 +334,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       durationMs?: number;
       canvasId?: string | null;
       trace?: TraceContext;
+      /** 消息方向；内部事件（进程错误、调试等）不传，保持 NULL。 */
+      source?: LogComponent;
+      target?: LogComponent;
     } = {},
   ) => {
     options.logger?.log({
@@ -345,6 +350,8 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
       actor: 'agent',
       traceId: details.trace?.traceId ?? null,
       parentId: details.trace?.spanId ?? null,
+      source: details.source ?? null,
+      target: details.target ?? null,
     });
   };
 
@@ -621,6 +628,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         },
         canvasId: active.canvasId,
         trace: active.trace,
+        // codex 把完成结果交回 daemon
+        source: LOG_DIRECTIONS.turnComplete.source,
+        target: LOG_DIRECTIONS.turnComplete.target,
       });
       settle(active, () =>
         active.resolve({
@@ -1249,6 +1259,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         log('info', 'thread_resume', {
           payload: { threadId, sandbox: 'read-only', toolCount: tools.declarations.length },
           canvasId,
+          // daemon 让 codex 恢复一个既有会话
+          source: LOG_DIRECTIONS.threadResume.source,
+          target: LOG_DIRECTIONS.threadResume.target,
         });
         return threadId;
       } catch (error) {
@@ -1272,6 +1285,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
         ephemeral: threadStore === undefined,
       },
       canvasId,
+      // daemon 让 codex 建立一个新会话
+      source: LOG_DIRECTIONS.threadStart.source,
+      target: LOG_DIRECTIONS.threadStart.target,
     });
 
     if (stored !== null) {
@@ -1463,6 +1479,9 @@ export function createCodexRuntime(options: CodexRuntimeOptions = {}): CodexRunt
             },
             canvasId: input.canvasId,
             trace: input.trace,
+            // daemon 把用户提问发给 codex 执行
+            source: LOG_DIRECTIONS.turnStart.source,
+            target: LOG_DIRECTIONS.turnStart.target,
           });
         }
       } catch (error) {

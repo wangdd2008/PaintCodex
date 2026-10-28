@@ -176,6 +176,9 @@ describe('canvas action instrumentation', () => {
       canvasId: canvas.id,
       revision: 0,
       actor: 'user',
+      // 画布落库：daemon → sqlite
+      source: 'daemon',
+      target: 'sqlite',
       payload: { name: 'Logged', width: 640, height: 480 },
     });
 
@@ -196,6 +199,8 @@ describe('canvas action instrumentation', () => {
       canvasId: canvas.id,
       revision: 1,
       actor: 'user',
+      source: 'daemon',
+      target: 'sqlite',
       payload: { layerId, layerType: 'vector' },
     });
 
@@ -275,12 +280,16 @@ describe('canvas action instrumentation', () => {
       canvasId: canvas.id,
       revision: 2,
       actor: 'user',
+      source: 'daemon',
+      target: 'sqlite',
       payload: { layerId },
     });
     expect(deleteLog).toMatchObject({
       canvasId: canvas.id,
       revision: 3,
       actor: 'user',
+      source: 'daemon',
+      target: 'sqlite',
       payload: { layerId },
     });
 
@@ -315,12 +324,16 @@ describe('canvas action instrumentation', () => {
       canvasId: canvas.id,
       revision: 3,
       actor: 'user',
+      source: 'daemon',
+      target: 'sqlite',
       payload: { restoredRevision: 1 },
     });
     expect(redoLog).toMatchObject({
       canvasId: canvas.id,
       revision: 4,
       actor: 'user',
+      source: 'daemon',
+      target: 'sqlite',
       payload: { restoredRevision: 2 },
     });
 
@@ -342,6 +355,9 @@ describe('SSE instrumentation', () => {
     expect(subscribed).toMatchObject({
       level: 'info',
       canvasId: canvas.id,
+      // 浏览器订阅 daemon 的事件流
+      source: 'browser',
+      target: 'daemon',
       payload: { canvasId: canvas.id },
     });
 
@@ -363,6 +379,9 @@ describe('SSE instrumentation', () => {
     expect(published).toMatchObject({
       level: 'info',
       canvasId: canvas.id,
+      // daemon 把画布变更推给浏览器
+      source: 'daemon',
+      target: 'browser',
       payload: { event: 'snapshot_changed', revision: 1 },
     });
 
@@ -372,6 +391,9 @@ describe('SSE instrumentation', () => {
     expect(disconnected).toMatchObject({
       level: 'info',
       canvasId: canvas.id,
+      // 浏览器断开了到 daemon 的长连接
+      source: 'browser',
+      target: 'daemon',
     });
     expect(logs(app, 'sse').filter((log) => log.message === 'sse_ping')).toHaveLength(
       0,

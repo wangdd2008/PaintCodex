@@ -179,6 +179,9 @@ describe('AI chat instrumentation', () => {
       level: 'info',
       actor: 'agent',
       canvasId,
+      // 模型通过工具向 daemon 请求一次画布操作
+      source: 'codex',
+      target: 'daemon',
       payload: {
         tool: 'canvas_create_layer',
         ok: true,

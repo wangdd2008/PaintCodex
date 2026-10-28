@@ -36,6 +36,9 @@ describe('HTTP instrumentation', () => {
 
     expect(log.category).toBe('http');
     expect(log.message).toBe('http_request');
+    // 一次 HTTP 往来：浏览器发起请求到达 daemon
+    expect(log.source).toBe('browser');
+    expect(log.target).toBe('daemon');
     expect(log.payload).toEqual({
       method: 'GET',
       path: '/health',

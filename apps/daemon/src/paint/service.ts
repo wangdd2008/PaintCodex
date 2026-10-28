@@ -16,6 +16,7 @@ import {
   RevisionConflictError,
 } from './errors.js';
 import type { ObservabilityLogger } from '../observability/logger.js';
+import { LOG_DIRECTIONS } from '../observability/log-direction.js';
 import type { PaintEvents } from './events.js';
 import {
   CanvasRepository,
@@ -398,6 +399,9 @@ export class PaintService {
       category: 'canvas-action',
       level: 'info',
       ...input,
+      // 画布落库：daemon 把状态写入 SQLite（create/update/delete/undo/redo/rename 皆是）
+      source: LOG_DIRECTIONS.canvasPersist.source,
+      target: LOG_DIRECTIONS.canvasPersist.target,
     });
   }
 
