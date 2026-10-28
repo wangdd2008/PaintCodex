@@ -36,11 +36,12 @@ function ruleBody(css: string, selector: string): string {
 }
 
 describe('图层布局 CSS 契约', () => {
-  it('图层面板限高 300px，列表自己滚动', () => {
+  it('图层面板最高半区（360px），列表自己滚动', () => {
     const panel = ruleBody(rawLayerPanelCss, '.layer-panel');
     expect(panel).toMatch(/display:\s*flex/);
     expect(panel).toMatch(/flex-direction:\s*column/);
-    expect(panel).toMatch(/max-height:\s*300px/);
+    expect(panel).toMatch(/max-height:\s*min\(360px,\s*50%\)/);
+    expect(panel).not.toMatch(/max-height:\s*300px/);
 
     const list = ruleBody(rawLayerPanelCss, '.layer-list');
     expect(list).toMatch(/overflow-y:\s*(auto|scroll)/);

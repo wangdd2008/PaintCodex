@@ -64,6 +64,11 @@ vi.mock('fabric', () => {
 
     requestRenderAll() {}
 
+    setDimensions() {}
+    setViewportTransform() {}
+    zoomToPoint() {}
+    relativePan() {}
+
     dispose() {
       return Promise.resolve();
     }

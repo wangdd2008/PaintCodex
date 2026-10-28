@@ -64,6 +64,11 @@ const fabricDouble = vi.hoisted(() => {
 
     requestRenderAll(): void {}
 
+    setDimensions() {}
+    setViewportTransform() {}
+    zoomToPoint() {}
+    relativePan() {}
+
     async dispose(): Promise<void> {}
   }
 
