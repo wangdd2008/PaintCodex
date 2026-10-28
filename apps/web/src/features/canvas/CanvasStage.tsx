@@ -894,7 +894,9 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
         const fabric = fabricRef.current;
         const doc = useCanvasStore.getState().canvas;
 
-        if (!fabric || !doc) {
+        // fabric 在测试里常是缺 toDataURL 的桩对象；缺能力时返回 null 跳过本轮缩略图，
+        // 由调度器的 `!imageUrl` 分支静默忽略，避免未处理的 rejection。
+        if (!fabric || !doc || typeof fabric.toDataURL !== 'function') {
           return null;
         }
 
