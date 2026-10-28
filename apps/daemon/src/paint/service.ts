@@ -127,6 +127,14 @@ export class PaintService {
   }
 
   /**
+   * 硬删除一张画布（级联由 schema 的外键保证）。返回 false 表示画布不存在。
+   * Codex thread 的清理由路由在事务提交之后调用 `runtime.deleteThread` 完成。
+   */
+  deleteCanvas(id: string): boolean {
+    return this.canvases.delete(id);
+  }
+
+  /**
    * Renaming is an identity change, not a document mutation: it keeps the
    * revision, the undo stack, and any in-flight stroke's `expectedRevision`
    * untouched, and returns the same shape `GET /paint/canvas/:id` returns.

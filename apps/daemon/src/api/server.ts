@@ -174,7 +174,7 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       ? { available: true, version: codexVersion.version }
       : { available: false, reason: codexVersion.reason },
   }));
-  registerPaintRoutes(app, service);
+  registerPaintRoutes(app, service, runtime);
   registerEventRoutes(app, service, events);
 
   if (runtime) {

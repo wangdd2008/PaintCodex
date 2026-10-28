@@ -12,6 +12,7 @@ import type {
   UpdateLayerPatch,
 } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
+import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
 import {
   CanvasNotFoundError,
   LayerNotFoundError,
@@ -45,7 +46,11 @@ function restActorError(value: unknown): string | null {
     : 'actor 由服务端决定，REST 写入恒为 user';
 }
 
-export function registerPaintRoutes(app: FastifyInstance, service: PaintService): void {
+export function registerPaintRoutes(
+  app: FastifyInstance,
+  service: PaintService,
+  runtime: CodexRuntime | null,
+): void {
   const dispatcher = new CommandDispatcher(service);
 
   app.post<{ Body: CreateCanvasRequest }>('/paint/canvas', async (request, reply) => {
@@ -71,6 +76,34 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
     }
 
     return canvas;
+  });
+
+  app.delete<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
+    const deleted = service.deleteCanvas(request.params.id);
+
+    if (!deleted) {
+      return reply.code(404).send({
+        error: { code: 'canvas_not_found', message: '画布不存在' },
+      });
+    }
+
+    // 事务已提交：Codex thread 清理是 best-effort。失败不回滚删除——留下的孤儿
+    // thread 只是磁盘垃圾，记一条 warn 即可。
+    if (runtime) {
+      try {
+        await runtime.deleteThread(request.params.id);
+      } catch (error) {
+        app.observability.log({
+          category: 'codex-runtime',
+          level: 'warn',
+          message: 'thread_delete_failed',
+          error,
+          canvasId: request.params.id,
+        });
+      }
+    }
+
+    return reply.code(204).send();
   });
 
   app.patch<{ Params: { id: string }; Body: UpdateCanvasRequest }>(

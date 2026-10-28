@@ -132,6 +132,23 @@ export class CanvasRepository {
       .prepare(`UPDATE canvases SET codexThreadId = ? WHERE id = ?`)
       .run(threadId, id);
   }
+
+  /**
+   * 硬删除一张画布。`layers` / `snapshots` / `canvas_thumbnails` 由外键
+   * `ON DELETE CASCADE` 连带清理（`PRAGMA foreign_keys = ON` 在 openDatabase 打开）。
+   * 返回 false 表示画布本来就不存在。
+   */
+  delete(id: string): boolean {
+    const remove = this.db.transaction((canvasId: string) => {
+      const info = this.db
+        .prepare(`DELETE FROM canvases WHERE id = ?`)
+        .run(canvasId);
+
+      return info.changes > 0;
+    });
+
+    return remove(id);
+  }
 }
 
 export class LayerRepository {
