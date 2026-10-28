@@ -61,6 +61,16 @@ function migrate(db: DatabaseConnection): void {
 
     CREATE INDEX IF NOT EXISTS snapshots_canvas_revision ON snapshots(canvasId, revision);
 
+    CREATE TABLE IF NOT EXISTS canvas_thumbnails (
+      canvasId  TEXT PRIMARY KEY,
+      revision  INTEGER NOT NULL,
+      width     INTEGER NOT NULL,
+      height    INTEGER NOT NULL,
+      bytes     BLOB NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS agent_logs (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       trace_id      TEXT,
