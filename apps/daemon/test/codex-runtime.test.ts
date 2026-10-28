@@ -245,8 +245,39 @@ describe('Codex runtime handshake and turns', () => {
 
     expect(threadStart).toMatchObject({
       level: 'info',
+      // daemon 让 codex 建立一个新会话
+      source: 'daemon',
+      target: 'codex',
       payload: { sandbox: 'read-only', toolCount: 1 },
     });
+
+    const turnStart = harnessed
+      .runtimeLogs()
+      .find((record) => record.message === 'turn_start');
+
+    expect(turnStart).toMatchObject({
+      // daemon 把用户提问发给 codex 执行
+      source: 'daemon',
+      target: 'codex',
+    });
+
+    const turnComplete = harnessed
+      .runtimeLogs()
+      .find((record) => record.message === 'turn_complete');
+
+    expect(turnComplete).toMatchObject({
+      // codex 把完成结果交回 daemon
+      source: 'codex',
+      target: 'daemon',
+    });
+
+    // 内部生命周期事件不是消息：方向保持 NULL（语义是「内部」，不是「未知」）
+    const runtimeSpawn = harnessed
+      .runtimeLogs()
+      .find((record) => record.message === 'runtime_spawn');
+    expect(runtimeSpawn?.source).toBeNull();
+    expect(runtimeSpawn?.target).toBeNull();
+
     expect(harnessed.runtime.getThreadId('canvas-1')).toBe(THREAD_ID);
   });
 

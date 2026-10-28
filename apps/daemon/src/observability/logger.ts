@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
-import type { Actor, AgentLog, LogCategory, LogLevel } from '@paintcodex/protocol';
+import type {
+  Actor,
+  AgentLog,
+  LogCategory,
+  LogComponent,
+  LogLevel,
+} from '@paintcodex/protocol';
 import type { ObservabilityEvents } from './events.js';
 import type { AgentLogRepository } from './repository.js';
 import type { NewAgentLogRecord } from './types.js';
@@ -18,6 +24,10 @@ export interface SpanStart {
   canvasId?: string | null;
   revision?: number | null;
   actor?: Actor | null;
+  /** 消息方向的发出方；消息型 span 在 finish 时原样落库。 */
+  source?: LogComponent | null;
+  /** 消息方向的接收方；消息型 span 在 finish 时原样落库。 */
+  target?: LogComponent | null;
 }
 
 export interface LoggerLogInput {
@@ -34,6 +44,8 @@ export interface LoggerLogInput {
   spanId?: string | null;
   parentId?: string | null;
   timestamp?: number;
+  source?: LogComponent | null;
+  target?: LogComponent | null;
 }
 
 export interface TraceContext {
@@ -92,6 +104,8 @@ export class ObservabilityLogger {
       canvasId: input.canvasId ?? null,
       revision: input.revision ?? null,
       actor: input.actor ?? null,
+      source: input.source ?? null,
+      target: input.target ?? null,
     };
 
     const log = this.repository.insert(record);
@@ -175,12 +189,16 @@ export class ObservabilitySpan implements TraceContext {
     canvasId: string | null;
     revision: number | null;
     actor: Actor | null;
+    source: LogComponent | null;
+    target: LogComponent | null;
   } {
     return {
       payload: this.start.payload,
       canvasId: this.start.canvasId ?? null,
       revision: this.start.revision ?? null,
       actor: this.start.actor ?? null,
+      source: this.start.source ?? null,
+      target: this.start.target ?? null,
     };
   }
 }

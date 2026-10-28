@@ -45,6 +45,7 @@ import {
   setRequestSpan,
   type ObservabilityLogger,
 } from '../observability/index.js';
+import { LOG_DIRECTIONS } from '../observability/log-direction.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -134,6 +135,10 @@ export function buildServer(options: ServerOptions = {}): FastifyInstance {
       category: 'http',
       message: 'http_request',
       payload: { method: request.method, path: request.url },
+      // 一次 HTTP 往来：浏览器发起请求到达 daemon。该 span 的唯一记录在
+      // onResponse 时回溯写入开始时间，方向随发起方定为 browser→daemon。
+      source: LOG_DIRECTIONS.httpStart.source,
+      target: LOG_DIRECTIONS.httpStart.target,
     });
 
     setRequestSpan(request, span);

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PaintEvents } from '../paint/events.js';
 import type { PaintService } from '../paint/service.js';
+import { LOG_DIRECTIONS } from '../observability/log-direction.js';
 
 export function registerEventRoutes(
   app: FastifyInstance,
@@ -36,6 +37,9 @@ export function registerEventRoutes(
           message: 'sse_publish',
           canvasId: canvas.id,
           payload: { event: event.type, revision: event.revision },
+          // daemon 把画布变更推给浏览器
+          source: LOG_DIRECTIONS.ssePublish.source,
+          target: LOG_DIRECTIONS.ssePublish.target,
         });
       });
 
@@ -49,6 +53,9 @@ export function registerEventRoutes(
         message: 'sse_subscribe',
         canvasId: canvas.id,
         payload: { canvasId: canvas.id },
+        // 浏览器订阅 daemon 的事件流
+        source: LOG_DIRECTIONS.sseSubscribe.source,
+        target: LOG_DIRECTIONS.sseSubscribe.target,
       });
       stream.write(': connected\n\n');
 
@@ -64,6 +71,9 @@ export function registerEventRoutes(
             level: 'info',
             message: 'sse_disconnect',
             canvasId: canvas.id,
+            // 浏览器断开了到 daemon 的长连接
+            source: LOG_DIRECTIONS.sseDisconnect.source,
+            target: LOG_DIRECTIONS.sseDisconnect.target,
           });
         } catch {
           // The stream is already gone; losing this record must not crash the daemon.
