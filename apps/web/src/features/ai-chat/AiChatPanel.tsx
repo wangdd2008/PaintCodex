@@ -5,19 +5,15 @@ import { exportActiveCanvasPng } from '../../services/canvas-engine';
 import { useCanvasStore, type CanvasStatus } from '../../services/canvas-store';
 import { displayCanvasName } from '../../services/naming';
 import { canvasPngFilename, dataUrlToBlob, downloadPng } from '../../services/png-export';
+import { useChatStore } from './chat-store';
+import type {
+  ChatConfirmation,
+  ChatLayerConfirmation,
+  ChatMessage,
+  ChatToolLine,
+} from './chat-message';
 import { describeChatFailure, type ChatFailure } from './chat-error';
 import './ai-chat.css';
-
-/** 这次回复落地的 AI 图层，以及撤销守卫要比较的 revision。 */
-interface ChatLayerConfirmation {
-  id: string;
-  name: string;
-  canvasId: string | null;
-  /** AI 图层生成后产生的 revision；只有当前 revision 与它相等时才允许撤销。 */
-  expectedRevision: number;
-  /** 用户已撤销这一步，避免撤销入口再次出现。 */
-  undone?: boolean;
-}
 
 /** 撤销入口的三种状态：可撤销、已有后续操作、不适用。 */
 type LayerUndoState = 'available' | 'stale' | 'hidden';
@@ -48,26 +44,6 @@ function layerUndoState(
   return 'hidden';
 }
 
-interface ChatToolLine {
-  id: string;
-  name: string;
-  status: 'running' | 'ok' | 'failed';
-  /** Failure code from the daemon; localized before it reaches the screen. */
-  code?: string;
-}
-
-/** 挂起中的危险操作：确认条在答复前一直是气泡的一部分。 */
-interface ChatConfirmation {
-  id: string;
-  title: string;
-  detail: string;
-  /** daemon 给这条确认的 CTA 文案；缺省沿用删除文案。 */
-  approveLabel?: string;
-  status: 'pending' | 'submitting' | 'approved' | 'declined' | 'expired';
-  /** 提交失败的原因；确认条保持可重试。 */
-  error?: string;
-}
-
 /** 60 秒内不答复即视为拒绝，和 daemon 的硬超时一致。 */
 const CONFIRM_TIMEOUT_MS = 60_000;
 
@@ -77,28 +53,6 @@ const CONFIRM_STATUS_TEXT: Partial<Record<ChatConfirmation['status'], string>> =
   declined: '已取消',
   expired: '确认已超时',
 };
-
-interface ChatMessage {
-  id: number;
-  role: 'user' | 'assistant';
-  content: string;
-  /** Set on the pending reply when the user cancels it. */
-  cancelled?: boolean;
-  /** 首个 delta 已到达：等待文案切换为「正在生成…」。 */
-  generating?: boolean;
-  /** done 时结算的固定用时；运行结束后继续保留。 */
-  durationSeconds?: number;
-  /** 从 `layerCreated` 帧消费到的落地确认。 */
-  layer?: ChatLayerConfirmation;
-  /** 这一轮里的写类工具调用，渲染为气泡内的动作行。 */
-  tools?: ChatToolLine[];
-  /** 这一轮里挂起的确认条，按到达顺序排列。 */
-  confirmations?: ChatConfirmation[];
-  /** 这一轮失败了：气泡必须留下「未完成」，不能是空白。 */
-  incomplete?: boolean;
-  /** 非致命提示（例如会话已重置）：气泡内一行说明，回复继续。 */
-  notice?: string;
-}
 
 /**
  * 读操作折叠：AI 每轮都会先读画布，行行都显示只会淹没真正的写动作。
@@ -326,7 +280,6 @@ function readRegion(value: unknown): CanvasRegion | null {
 
 export function AiChatPanel() {
   const [open, setOpen] = useState(true);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [lastInput, setLastInput] = useState<string | null>(null);
   const [inFlight, setInFlight] = useState(false);
@@ -336,6 +289,10 @@ export function AiChatPanel() {
   const status = useCanvasStore((state) => state.status);
   const currentCanvasId = useCanvasStore((state) => state.canvas?.id ?? null);
   const currentRevision = useCanvasStore((state) => state.canvas?.revision ?? null);
+  // 渲染的永远是当前画布的桶；无画布时是空序列（空态，不出历史）。
+  const transcriptRecord = useChatStore((state) => state.transcripts);
+  const messages =
+    currentCanvasId === null ? [] : transcriptRecord[currentCanvasId] ?? [];
   const blockedReason = composerBlockedReason(canvas !== null, status);
 
   const nextId = useRef(0);
@@ -351,6 +308,27 @@ export function AiChatPanel() {
   const confirmTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   /** 已发出答复的 requestId：连点不能发两次。 */
   const answering = useRef(new Set<string>());
+
+  /**
+   * 所有写消息都落到「发起时那张画布」的桶：请求在飞时写 runCanvasId，
+   * 其余写当前画布。桶的键已经表达归属，消息本身不存 canvasId（spec §6）。
+   */
+  const updateMessages = (updater: (previous: ChatMessage[]) => ChatMessage[]) => {
+    const target = runCanvasId.current ?? currentCanvasId;
+    if (target === null) {
+      return;
+    }
+    useChatStore.getState().updateTranscript(target, updater);
+  };
+
+  useEffect(() => {
+    // 切走画布即中断在飞请求：run() 的 catch 会把「已取消」写回发起时那张
+    // 画布的桶，界面此时已切到新桶；旧桶的错误条也不带进新画布。
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    setError(null);
+  }, [currentCanvasId]);
 
   useEffect(() => {
     const timers = confirmTimers.current;
@@ -392,7 +370,7 @@ export function AiChatPanel() {
   }, [messages, inFlight, error]);
 
   const updateLastAssistant = (update: (message: ChatMessage) => ChatMessage) => {
-    setMessages((previous) => {
+    updateMessages((previous) => {
       const last = previous[previous.length - 1];
       if (!last || last.role !== 'assistant') {
         return previous;
@@ -413,7 +391,7 @@ export function AiChatPanel() {
     id: string,
     update: (confirmation: ChatConfirmation) => ChatConfirmation,
   ) => {
-    setMessages((previous) =>
+    updateMessages((previous) =>
       previous.map((message) => {
         if (!message.confirmations?.some((item) => item.id === id)) {
           return message;
@@ -500,7 +478,7 @@ export function AiChatPanel() {
   };
 
   const markAssistantCancelled = (assistantId: number) => {
-    setMessages((previous) =>
+    updateMessages((previous) =>
       previous.map((message) =>
         message.id === assistantId
           ? {
@@ -521,7 +499,7 @@ export function AiChatPanel() {
 
   /** 失败气泡必须明确标「未完成」，空白气泡看不出这一轮失败了。 */
   const markAssistantIncomplete = (assistantId: number) => {
-    setMessages((previous) =>
+    updateMessages((previous) =>
       previous.map((message) =>
         message.id === assistantId
           ? { ...message, incomplete: true, generating: false }
@@ -532,7 +510,7 @@ export function AiChatPanel() {
 
   /** 重试前清空同一个气泡：不追加消息，也不保留上一次失败的半截回复。 */
   const resetAssistant = (assistantId: number) => {
-    setMessages((previous) =>
+    updateMessages((previous) =>
       previous.map((message) =>
         message.id === assistantId
           ? { id: message.id, role: 'assistant', content: '' }
@@ -874,7 +852,7 @@ export function AiChatPanel() {
       role: 'assistant',
       content: '',
     };
-    setMessages((previous) => [...previous, userMessage, assistantMessage]);
+    updateMessages((previous) => [...previous, userMessage, assistantMessage]);
 
     await run(message, assistantMessage.id);
   };
@@ -948,7 +926,7 @@ export function AiChatPanel() {
       after?.layers.some((item) => item.id === layer.id) ?? true;
 
     if (!layerStillThere) {
-      setMessages((previous) =>
+      updateMessages((previous) =>
         previous.map((item) =>
           item.id === messageId && item.layer
             ? { ...item, layer: { ...item.layer, undone: true } }
