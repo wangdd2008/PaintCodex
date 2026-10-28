@@ -48,6 +48,37 @@ export interface CanvasHistoryState {
   canRedo: boolean;
 }
 
+/** List ordering for `GET /paint/canvas`; defaults to `updated`. */
+export type CanvasListSort = 'updated' | 'created';
+
+/**
+ * One row of the canvas library list: the document's identity plus the cheap
+ * aggregates the gallery card needs (layer count, thumbnail marker). It never
+ * carries thumbnail bytes — only whether a thumbnail exists and at which
+ * revision the browser last uploaded it.
+ */
+export interface CanvasSummary {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  backgroundColor: string;
+  layerCount: number;
+  revision: number;
+  hasThumbnail: boolean;
+  thumbnailRevision: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** One page of the canvas library. `total` is the count before pagination. */
+export interface CanvasListPage {
+  items: CanvasSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
 export interface CanvasState extends Canvas {
   layers: Layer[];
 }

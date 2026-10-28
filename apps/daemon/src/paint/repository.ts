@@ -1,6 +1,8 @@
 import type {
   Actor,
   Canvas,
+  CanvasListSort,
+  CanvasSummary,
   Layer,
   LayerContent,
   LayerMetadata,
@@ -72,8 +74,42 @@ const CANVAS_COLUMNS =
 const SNAPSHOT_COLUMNS =
   'id, canvasId, revision, state, actor, action, timestamp';
 
+interface CanvasSummaryRow {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  backgroundColor: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+  layerCount: number;
+  /** Null when the canvas has no thumbnail row; drives `hasThumbnail`. */
+  thumbnailId: string | null;
+  thumbnailRevision: number | null;
+}
+
+export interface CanvasListQuery {
+  limit: number;
+  offset: number;
+  sort: CanvasListSort;
+}
+
 export class CanvasRepository {
-  constructor(private readonly db: DatabaseConnection) {}
+  constructor(private readonly db: DatabaseConnection) {
+    // 缩略图表由票 03 正式落地；本列表接口先以幂等建表兜底，使其与建表顺序无关。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS canvas_thumbnails (
+        canvasId  TEXT PRIMARY KEY,
+        revision  INTEGER NOT NULL,
+        width     INTEGER NOT NULL,
+        height    INTEGER NOT NULL,
+        bytes     BLOB NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+      )
+    `);
+  }
 
   create(record: NewCanvasRecord): CanvasRecord {
     this.db
@@ -94,6 +130,53 @@ export class CanvasRepository {
       .get(id);
 
     return row ?? null;
+  }
+
+  /** Total canvas count, independent of pagination — the library's `total`. */
+  count(): number {
+    const row = this.db.prepare<[], { total: number }>(`SELECT COUNT(*) AS total FROM canvases`).get();
+
+    return row?.total ?? 0;
+  }
+
+  /**
+   * One page of the canvas library. `layerCount` is a correlated subquery (the
+   * `layers_canvas_zindex` index covers it) so the list stays a single query
+   * instead of N+1; the thumbnail marker comes from a LEFT JOIN and never pulls
+   * the thumbnail blob into the list row.
+   */
+  list(query: CanvasListQuery): CanvasSummary[] {
+    // `sort` is a whitelisted union, so the ORDER BY column is interpolated, not bound.
+    const orderBy = query.sort === 'created' ? 'c.createdAt' : 'c.updatedAt';
+
+    const rows = this.db
+      .prepare<[number, number], CanvasSummaryRow>(
+        `SELECT
+           c.id, c.name, c.width, c.height, c.backgroundColor, c.revision,
+           c.createdAt, c.updatedAt,
+           (SELECT COUNT(*) FROM layers WHERE layers.canvasId = c.id) AS layerCount,
+           t.canvasId AS thumbnailId,
+           t.revision AS thumbnailRevision
+         FROM canvases c
+         LEFT JOIN canvas_thumbnails t ON t.canvasId = c.id
+         ORDER BY ${orderBy} DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(query.limit, query.offset);
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      width: row.width,
+      height: row.height,
+      backgroundColor: row.backgroundColor,
+      layerCount: row.layerCount,
+      revision: row.revision,
+      hasThumbnail: row.thumbnailId !== null,
+      thumbnailRevision: row.thumbnailRevision,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
   }
 
   /**

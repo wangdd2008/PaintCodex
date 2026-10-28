@@ -3,6 +3,7 @@ import { MAX_CANVAS_NAME_LENGTH } from '@paintcodex/protocol';
 import type {
   Actor,
   ApplyActionRequest,
+  CanvasListSort,
   CreateCanvasRequest,
   CreateLayerInput,
   HistoryRequest,
@@ -60,6 +61,21 @@ export function registerPaintRoutes(app: FastifyInstance, service: PaintService)
 
     return reply.code(201).send(dispatcher.createCanvas(body, 'user'));
   });
+
+  app.get<{ Querystring: { limit?: string; offset?: string; sort?: string } }>(
+    '/paint/canvas',
+    async (request, reply) => {
+      const query = parseCanvasListQuery(request.query as Record<string, unknown>);
+
+      if (!query.ok) {
+        return reply.code(400).send({
+          error: { code: 'invalid_query', message: query.message },
+        });
+      }
+
+      return service.listCanvases(query.value);
+    },
+  );
 
   app.get<{ Params: { id: string } }>('/paint/canvas/:id', async (request, reply) => {
     const canvas = service.getCanvas(request.params.id);
@@ -514,4 +530,68 @@ function isValidDimension(value: unknown): value is number {
     value >= 1 &&
     value <= MAX_CANVAS_DIMENSION
   );
+}
+
+const DEFAULT_LIST_LIMIT = 50;
+const MAX_LIST_LIMIT = 100;
+
+type ParsedListQuery =
+  | { ok: true; value: { limit: number; offset: number; sort: CanvasListSort } }
+  | { ok: false; message: string };
+
+/**
+ * Validates the collection query for the canvas library. `sort` is whitelisted
+ * (`updated` by default); `limit` defaults to 50 and is capped at 100; `offset`
+ * starts at 0. Anything out of range or non-integer is a client error, not an
+ * empty result.
+ */
+function parseCanvasListQuery(query: Record<string, unknown>): ParsedListQuery {
+  const sortRaw = query.sort;
+  let sort: CanvasListSort = 'updated';
+
+  if (sortRaw !== undefined) {
+    if (sortRaw !== 'updated' && sortRaw !== 'created') {
+      return { ok: false, message: 'sort 只接受 updated 或 created' };
+    }
+    sort = sortRaw;
+  }
+
+  const limitRaw = query.limit;
+  let limit = DEFAULT_LIST_LIMIT;
+
+  if (limitRaw !== undefined) {
+    const parsed = toNonNegativeInteger(limitRaw);
+
+    if (parsed === null || parsed < 1 || parsed > MAX_LIST_LIMIT) {
+      return {
+        ok: false,
+        message: `limit 必须是 1 到 ${MAX_LIST_LIMIT} 之间的整数`,
+      };
+    }
+    limit = parsed;
+  }
+
+  const offsetRaw = query.offset;
+  let offset = 0;
+
+  if (offsetRaw !== undefined) {
+    const parsed = toNonNegativeInteger(offsetRaw);
+
+    if (parsed === null) {
+      return { ok: false, message: 'offset 必须是大于等于 0 的整数' };
+    }
+    offset = parsed;
+  }
+
+  return { ok: true, value: { limit, offset, sort } };
+}
+
+function toNonNegativeInteger(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^\d+$/.test(value)) {
+    return null;
+  }
+
+  const parsed = Number(value);
+
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
