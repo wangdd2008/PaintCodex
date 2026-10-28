@@ -3,6 +3,8 @@
   background: #17181c;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   font-size: 14px;
+  /* 对话列宽度（票 ②01）：范围 320–640，运行时由 App 内联覆盖。 */
+  --chat-width: 380px;
 }
 
 * {
@@ -92,24 +94,153 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: 56px minmax(0, 1fr) 300px;
+  grid-template-columns: 56px minmax(0, 1fr) 240px var(--chat-width, 380px);
   min-height: 0;
 }
 
+/* 图层列折叠时第三列收成一条纵向把手（票 ②01）。 */
+.workspace--layers-collapsed {
+  grid-template-columns: 56px minmax(0, 1fr) 28px var(--chat-width, 380px);
+}
+
+/*
+ * 桌面端：.side-panel 只是一个逻辑分组，display:contents 让它的两个子列
+ * 直接成为 .workspace 的网格项（240px 图层列 + var(--chat-width) 对话列）。
+ * ≤1100px 媒体查询里把它改回 flex 纵向堆叠（抽屉形态，票 ②03 接手窄屏）。
+ */
 .side-panel {
+  display: contents;
+  min-height: 0;
+  /* display:contents 时这条不产生盒子；≤1100px 媒体查询里恢复为 flex 面板后生效。 */
+  overflow: hidden;
+}
+
+.layer-column {
+  position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 侧栏本身不滚动：图层面板与 AI 面板各自消化溢出。 */
-  overflow: hidden;
+  min-width: 0;
   border-left: 1px solid #2c2d33;
   background: #1b1c21;
 }
 
-/* AI 面板保底高度，图层增长时优先让图层列表滚动而不是压扁对话。 */
-.side-panel > .ai-chat {
+/* LayerPanel 填满图层列剩余宽度；折叠时把手占满整列。 */
+.layer-column > .layer-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: #1b1c21;
+  overflow: hidden;
+}
+
+/* 对话列收起：列宽由 --chat-width:0 决定，内容直接裁掉。 */
+.chat-column--collapsed {
+  display: none;
+}
+
+/* AI 面板保底高度：图层增长时优先让图层列表滚动而不是压扁对话。 */
+.chat-column .ai-chat {
   flex: 1;
   min-height: 240px;
+}
+
+/* 列头窄条：放折叠按钮。 */
+.column-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex: none;
+  height: 28px;
+  padding: 0 6px;
+  border-bottom: 1px solid #2c2d33;
+}
+
+.column-collapse-button {
+  border: 0;
+  background: transparent;
+  color: #747785;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.column-collapse-button:hover {
+  color: #e8e8ea;
+  background: #26272e;
+}
+
+/* 图层列折叠后的纵向把手。 */
+.layer-collapse-handle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #1b1c21;
+  color: #747785;
+  cursor: pointer;
+  padding: 8px 0;
+}
+
+.layer-collapse-handle:hover {
+  color: #e8e8ea;
+  background: #26272e;
+}
+
+.layer-collapse-handle__label {
+  writing-mode: vertical-rl;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+}
+
+/* 两列之间 6px 拖拽条（票 ②01）：贴在图层列右缘，纵向贯穿整列。 */
+.chat-resizer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.chat-resizer:hover,
+.chat-resizer:focus-visible {
+  background: #3a3c45;
+}
+
+.chat-resizer:focus-visible {
+  outline: 2px solid #8fb2ff;
+  outline-offset: -2px;
+}
+
+/* 拖动期间：禁文本选择，画布不收指针事件。 */
+.workspace--resizing,
+.workspace--resizing * {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.workspace--resizing {
+  cursor: col-resize;
+}
+
+.workspace--resizing .canvas-area,
+.workspace--resizing .canvas-area * {
+  pointer-events: none;
 }
 
 .canvas-area {
@@ -508,6 +639,20 @@ button {
 
   .workspace .tool-button {
     padding: 10px 2px;
+  }
+
+  /* 桌面端 display:contents 的侧栏在这里变回纵向堆叠的单一面板。 */
+  .side-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 1px solid #2c2d33;
+    background: #1b1c21;
+  }
+
+  .chat-column {
+    flex: 1;
+    min-height: 0;
   }
 }
 

@@ -1,6 +1,8 @@
 import type {
   Actor,
   Canvas,
+  CanvasListSort,
+  CanvasSummary,
   Layer,
   LayerContent,
   LayerMetadata,
@@ -72,8 +74,42 @@ const CANVAS_COLUMNS =
 const SNAPSHOT_COLUMNS =
   'id, canvasId, revision, state, actor, action, timestamp';
 
+interface CanvasSummaryRow {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  backgroundColor: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+  layerCount: number;
+  /** Null when the canvas has no thumbnail row; drives `hasThumbnail`. */
+  thumbnailId: string | null;
+  thumbnailRevision: number | null;
+}
+
+export interface CanvasListQuery {
+  limit: number;
+  offset: number;
+  sort: CanvasListSort;
+}
+
 export class CanvasRepository {
-  constructor(private readonly db: DatabaseConnection) {}
+  constructor(private readonly db: DatabaseConnection) {
+    // 缩略图表由票 03 正式落地；本列表接口先以幂等建表兜底，使其与建表顺序无关。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS canvas_thumbnails (
+        canvasId  TEXT PRIMARY KEY,
+        revision  INTEGER NOT NULL,
+        width     INTEGER NOT NULL,
+        height    INTEGER NOT NULL,
+        bytes     BLOB NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+      )
+    `);
+  }
 
   create(record: NewCanvasRecord): CanvasRecord {
     this.db
@@ -94,6 +130,53 @@ export class CanvasRepository {
       .get(id);
 
     return row ?? null;
+  }
+
+  /** Total canvas count, independent of pagination — the library's `total`. */
+  count(): number {
+    const row = this.db.prepare<[], { total: number }>(`SELECT COUNT(*) AS total FROM canvases`).get();
+
+    return row?.total ?? 0;
+  }
+
+  /**
+   * One page of the canvas library. `layerCount` is a correlated subquery (the
+   * `layers_canvas_zindex` index covers it) so the list stays a single query
+   * instead of N+1; the thumbnail marker comes from a LEFT JOIN and never pulls
+   * the thumbnail blob into the list row.
+   */
+  list(query: CanvasListQuery): CanvasSummary[] {
+    // `sort` is a whitelisted union, so the ORDER BY column is interpolated, not bound.
+    const orderBy = query.sort === 'created' ? 'c.createdAt' : 'c.updatedAt';
+
+    const rows = this.db
+      .prepare<[number, number], CanvasSummaryRow>(
+        `SELECT
+           c.id, c.name, c.width, c.height, c.backgroundColor, c.revision,
+           c.createdAt, c.updatedAt,
+           (SELECT COUNT(*) FROM layers WHERE layers.canvasId = c.id) AS layerCount,
+           t.canvasId AS thumbnailId,
+           t.revision AS thumbnailRevision
+         FROM canvases c
+         LEFT JOIN canvas_thumbnails t ON t.canvasId = c.id
+         ORDER BY ${orderBy} DESC
+         LIMIT ? OFFSET ?`,
+      )
+      .all(query.limit, query.offset);
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      width: row.width,
+      height: row.height,
+      backgroundColor: row.backgroundColor,
+      layerCount: row.layerCount,
+      revision: row.revision,
+      hasThumbnail: row.thumbnailId !== null,
+      thumbnailRevision: row.thumbnailRevision,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
   }
 
   /**
@@ -131,6 +214,23 @@ export class CanvasRepository {
     this.db
       .prepare(`UPDATE canvases SET codexThreadId = ? WHERE id = ?`)
       .run(threadId, id);
+  }
+
+  /**
+   * 硬删除一张画布。`layers` / `snapshots` / `canvas_thumbnails` 由外键
+   * `ON DELETE CASCADE` 连带清理（`PRAGMA foreign_keys = ON` 在 openDatabase 打开）。
+   * 返回 false 表示画布本来就不存在。
+   */
+  delete(id: string): boolean {
+    const remove = this.db.transaction((canvasId: string) => {
+      const info = this.db
+        .prepare(`DELETE FROM canvases WHERE id = ?`)
+        .run(canvasId);
+
+      return info.changes > 0;
+    });
+
+    return remove(id);
   }
 }
 
@@ -343,6 +443,51 @@ export class SnapshotRepository {
         .prepare(`DELETE FROM snapshots WHERE canvasId = ? AND revision < ?`)
         .run(canvasId, oldest);
     }
+  }
+}
+
+/**
+ * 缩略图一行：画布被浏览器打开时由前端渲染并上传。`bytes` 是解码后的
+ * PNG 二进制，单独存表以避免列表查询拖着 blob（spec §4）。
+ */
+export interface ThumbnailRecord {
+  canvasId: string;
+  revision: number;
+  width: number;
+  height: number;
+  bytes: Buffer;
+  updatedAt: number;
+}
+
+export class ThumbnailRepository {
+  constructor(private readonly db: DatabaseConnection) {}
+
+  /** Upsert：同一画布只保留最新一次上传的缩略图。 */
+  upsert(record: ThumbnailRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO canvas_thumbnails (canvasId, revision, width, height, bytes, updatedAt)
+         VALUES (@canvasId, @revision, @width, @height, @bytes, @updatedAt)
+         ON CONFLICT(canvasId) DO UPDATE SET
+           revision = excluded.revision,
+           width    = excluded.width,
+           height   = excluded.height,
+           bytes    = excluded.bytes,
+           updatedAt = excluded.updatedAt`,
+      )
+      .run(record);
+  }
+
+  find(canvasId: string): ThumbnailRecord | null {
+    const row = this.db
+      .prepare<[string], ThumbnailRecord>(
+        `SELECT canvasId, revision, width, height, bytes, updatedAt
+         FROM canvas_thumbnails
+         WHERE canvasId = ?`,
+      )
+      .get(canvasId);
+
+    return row ?? null;
   }
 }
 
