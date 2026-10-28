@@ -73,6 +73,42 @@ export function docToScreen(
   };
 }
 
+/** 文档空间矩形（左上角 + 宽高，单位：文档像素）。 */
+export interface DocRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 屏幕空间矩形（左上角 + 宽高，单位：CSS/屏幕像素）。 */
+export interface ScreenRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 文档矩形 → 屏幕矩形（②05）。AI 高亮 / 选中定位把整个文档空间矩形经
+ * 视口变换映射到屏幕：左上角与右下角分别过 docToScreen，宽高取两者之差。
+ * 等比缩放下宽高随 scale 放大；叠加层的 3px 边框是 DOM 的固定 CSS，不跟随。
+ */
+export function docRectToScreen(
+  rect: DocRect,
+  vpt: readonly [number, number, number, number, number, number],
+): ScreenRect {
+  const topLeft = docToScreen(rect.left, rect.top, vpt);
+  const bottomRight = docToScreen(rect.left + rect.width, rect.top + rect.height, vpt);
+
+  return {
+    left: topLeft.x,
+    top: topLeft.y,
+    width: bottomRight.x - topLeft.x,
+    height: bottomRight.y - topLeft.y,
+  };
+}
+
 /**
  * 构造「适应窗口」的视口变换矩阵：内容等比缩放后居中放进容器。
  * 返回 [scale, 0, 0, scale, offsetX, offsetY]，可直接喂给
