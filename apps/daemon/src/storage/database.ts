@@ -75,7 +75,9 @@ function migrate(db: DatabaseConnection): void {
       error         TEXT,
       canvas_id     TEXT,
       revision      INTEGER,
-      actor         TEXT
+      actor         TEXT,
+      source        TEXT,
+      target        TEXT
     );
 
     CREATE INDEX IF NOT EXISTS agent_logs_timestamp ON agent_logs(timestamp DESC);
@@ -107,4 +109,27 @@ function migrate(db: DatabaseConnection): void {
   if (!canvasColumns.some((column) => column.name === 'codexThreadId')) {
     db.exec('ALTER TABLE canvases ADD COLUMN codexThreadId TEXT');
   }
+
+  // 日志方向（monitor-readability ③01）：新增两个可空列。旧库没有这两列时
+  // 补上，再只回填能安全推导方向的两类历史记录。其余保持 NULL——
+  // `codex-runtime` 里请求与响应同分类，单凭 category 推方向会猜错，
+  // 而错误的箭头比没有箭头更坏。
+  const logColumns = db
+    .prepare<[], { name: string }>('PRAGMA table_info(agent_logs)')
+    .all();
+
+  if (!logColumns.some((column) => column.name === 'source')) {
+    db.exec('ALTER TABLE agent_logs ADD COLUMN source TEXT');
+  }
+
+  if (!logColumns.some((column) => column.name === 'target')) {
+    db.exec('ALTER TABLE agent_logs ADD COLUMN target TEXT');
+  }
+
+  db.exec(`
+    UPDATE agent_logs SET source = 'browser', target = 'daemon'
+      WHERE category = 'http' AND source IS NULL;
+    UPDATE agent_logs SET source = 'daemon', target = 'browser'
+      WHERE category = 'sse' AND source IS NULL;
+  `);
 }

@@ -14,6 +14,7 @@ import {
 } from '../../errors.js';
 import type { PaintService } from '../../service.js';
 import type { ObservabilityLogger, TraceContext } from '../../../observability/logger.js';
+import { LOG_DIRECTIONS } from '../../../observability/log-direction.js';
 import type {
   ConfirmationOutcome,
   ConfirmationRequest,
@@ -331,6 +332,9 @@ export function createCanvasToolSet(options: CanvasToolSetOptions): CanvasToolSe
         traceId: context.trace?.traceId ?? null,
         parentId: context.trace?.spanId ?? null,
         durationMs: now() - startedAt,
+        // 模型通过工具向 daemon 请求一次画布操作：codex → daemon
+        source: LOG_DIRECTIONS.toolCall.source,
+        target: LOG_DIRECTIONS.toolCall.target,
         payload: {
           tool,
           ok: result.ok,

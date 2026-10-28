@@ -751,6 +751,38 @@ button {
     visibility: visible;
   }
 
+  /*
+   * 票 03：抽屉内部纵向两段。图层段在上、最高 min(360px, 50%)（可折叠），
+   * 对话段在下 flex: 1。两列叠成纵向两段后横向拖宽条没有意义，隐藏；
+   * 滚动只发生在图层列表与消息列表内部，抽屉本身不滚（overflow:hidden 继承自上面）。
+   */
+  .side-panel .layer-column {
+    flex: none;
+    max-height: min(360px, 50%);
+    overflow: hidden;
+  }
+
+  .side-panel .chat-column {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .side-panel .chat-resizer {
+    display: none;
+  }
+
+  .side-panel .ai-chat__body {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .side-panel .ai-chat__messages {
+    flex: 1;
+    max-height: none;
+    min-height: 0;
+  }
+
   .canvas-area {
     padding: 16px;
   }

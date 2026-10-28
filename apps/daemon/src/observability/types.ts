@@ -1,4 +1,9 @@
-import type { Actor, LogCategory, LogLevel } from '@paintcodex/protocol';
+import type {
+  Actor,
+  LogCategory,
+  LogComponent,
+  LogLevel,
+} from '@paintcodex/protocol';
 
 export interface NewAgentLogRecord {
   traceId?: string | null;
@@ -14,6 +19,10 @@ export interface NewAgentLogRecord {
   canvasId?: string | null;
   revision?: number | null;
   actor?: Actor | null;
+  /** 消息的发出方；内部事件留空（undefined → NULL）。 */
+  source?: LogComponent | null;
+  /** 消息的接收方；内部事件留空（undefined → NULL）。 */
+  target?: LogComponent | null;
 }
 
 export interface AgentLogQuery {

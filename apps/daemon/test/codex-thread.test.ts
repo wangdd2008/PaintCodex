@@ -162,6 +162,9 @@ describe('Codex thread persistence', () => {
       harnessed.logs().find((record) => record.message === 'thread_resume'),
     ).toMatchObject({
       level: 'info',
+      // daemon 让 codex 恢复一个既有会话
+      source: 'daemon',
+      target: 'codex',
       payload: { threadId: 'thread-remembered' },
     });
     expect(

@@ -115,6 +115,31 @@ describe('窄屏 CSS 契约', () => {
     // 画布列 = 视口 - 48px 工具条；不留内边距才能保证 390px 下 ≥340px。
     expect(ruleBody(block, '.canvas-area')).toMatch(/padding:\s*0/);
   });
+
+  it('≤860px：抽屉内部纵向两段——图层段在上限高可折叠，对话段在下 flex:1，拖宽条隐藏', () => {
+    const block = mediaBlock(rawAppCss, '860px');
+
+    // 图层段在上：不撑高、最高 min(360px, 50%)，超出由图层列表内部滚动。
+    const layerCol = ruleBody(block, '.side-panel .layer-column');
+    expect(layerCol).toMatch(/flex:\s*none|flex:\s*0 0 auto/);
+    expect(layerCol).toMatch(/max-height:\s*min\(360px,\s*50%\)/);
+    expect(layerCol).toMatch(/overflow:\s*hidden/);
+
+    // 对话段在下：吃满抽屉剩余高度，自己不溢出。
+    const chatCol = ruleBody(block, '.side-panel .chat-column');
+    expect(chatCol).toMatch(/flex:\s*1/);
+    expect(chatCol).toMatch(/min-height:\s*0/);
+    expect(chatCol).toMatch(/overflow:\s*hidden/);
+
+    // 两列叠成纵向两段后，横向拖宽条没有意义——隐藏。
+    expect(ruleBody(block, '.side-panel .chat-resizer')).toMatch(/display:\s*none/);
+
+    // 消息区在对话段里吃满剩余高度并自己滚动，抽屉本身不滚。
+    expect(ruleBody(block, '.side-panel .ai-chat__body')).toMatch(/flex:\s*1/);
+    const messages = ruleBody(block, '.side-panel .ai-chat__messages');
+    expect(messages).toMatch(/flex:\s*1/);
+    expect(messages).not.toMatch(/max-height:\s*280px/);
+  });
 });
 
 function sidePanel(): HTMLElement {
@@ -158,5 +183,11 @@ describe('侧栏抽屉开关', () => {
 
     expect(sidePanel().classList.contains('side-panel--open')).toBe(false);
     expect(document.activeElement).toBe(toggle);
+  });
+
+  it('不新增第二个抽屉按钮：全页只有一个「图层」抽屉开关，打开的就是两段抽屉', () => {
+    render(createElement(App));
+
+    expect(document.querySelectorAll('.drawer-toggle')).toHaveLength(1);
   });
 });
