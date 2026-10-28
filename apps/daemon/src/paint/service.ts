@@ -15,7 +15,7 @@ import {
   NothingToUndoError,
   RevisionConflictError,
 } from './errors.js';
-import type { ObservabilityLogger } from '../observability/logger.js';
+import type { ObservabilityLogger, TraceContext } from '../observability/logger.js';
 import { LOG_DIRECTIONS } from '../observability/log-direction.js';
 import type { PaintEvents } from './events.js';
 import {
@@ -85,6 +85,7 @@ export class PaintService {
   createCanvas(
     input: CreateCanvasRequest = {},
     actor: Actor = 'user',
+    trace?: TraceContext,
   ): CanvasDocument {
     const now = Date.now();
     const canvas = this.canvases.create({
@@ -112,13 +113,16 @@ export class PaintService {
       'canvas_create',
       document,
     );
-    this.logCanvasAction({
-      message: 'canvas_create',
-      canvasId: canvas.id,
-      revision: 0,
-      actor,
-      payload: { name: canvas.name, width: canvas.width, height: canvas.height },
-    });
+    this.logCanvasAction(
+      {
+        message: 'canvas_create',
+        canvasId: canvas.id,
+        revision: 0,
+        actor,
+        payload: { name: canvas.name, width: canvas.width, height: canvas.height },
+      },
+      trace,
+    );
 
     return document;
   }
@@ -155,20 +159,28 @@ export class PaintService {
    * revision, the undo stack, and any in-flight stroke's `expectedRevision`
    * untouched, and returns the same shape `GET /paint/canvas/:id` returns.
    */
-  renameCanvas(canvasId: string, name: string, actor: Actor = 'user'): CanvasDocument {
+  renameCanvas(
+    canvasId: string,
+    name: string,
+    actor: Actor = 'user',
+    trace?: TraceContext,
+  ): CanvasDocument {
     const renamed = this.canvases.rename(canvasId, name.trim());
 
     if (!renamed) {
       throw new CanvasNotFoundError();
     }
 
-    this.logCanvasAction({
-      message: 'canvas_rename',
-      canvasId,
-      revision: renamed.revision,
-      actor,
-      payload: { name: renamed.name },
-    });
+    this.logCanvasAction(
+      {
+        message: 'canvas_rename',
+        canvasId,
+        revision: renamed.revision,
+        actor,
+        payload: { name: renamed.name },
+      },
+      trace,
+    );
 
     return this.toDocument(renamed);
   }
@@ -212,7 +224,11 @@ export class PaintService {
     };
   }
 
-  applyAction(canvasId: string, request: ApplyActionRequest): CanvasDocument {
+  applyAction(
+    canvasId: string,
+    request: ApplyActionRequest,
+    trace?: TraceContext,
+  ): CanvasDocument {
     const canvas = this.canvases.findById(canvasId);
 
     if (!canvas) {
@@ -289,17 +305,20 @@ export class PaintService {
       request.action.type,
       updated,
     );
-    this.events.publishSnapshot(canvasId, bumped.revision);
-    this.logCanvasAction({
-      message: ACTION_LOG_MESSAGES[request.action.type],
-      canvasId,
-      revision: bumped.revision,
-      actor: request.actor,
-      payload:
-        request.action.type === 'canvas_create_layer'
-          ? { layerId: createdLayerId, layerType: request.action.layer.type }
-          : { layerId: request.action.layerId },
-    });
+    this.events.publishSnapshot(canvasId, bumped.revision, trace);
+    this.logCanvasAction(
+      {
+        message: ACTION_LOG_MESSAGES[request.action.type],
+        canvasId,
+        revision: bumped.revision,
+        actor: request.actor,
+        payload:
+          request.action.type === 'canvas_create_layer'
+            ? { layerId: createdLayerId, layerType: request.action.layer.type }
+            : { layerId: request.action.layerId },
+      },
+      trace,
+    );
 
     return updated;
   }
@@ -308,6 +327,7 @@ export class PaintService {
     canvasId: string,
     expectedRevision?: number,
     actor: Actor = 'user',
+    trace?: TraceContext,
   ): CanvasDocument {
     const canvas = this.canvases.findById(canvasId);
 
@@ -334,14 +354,17 @@ export class PaintService {
     }
 
     const updated = this.getCanvas(canvasId)!;
-    this.events.publishSnapshot(canvasId, bumped.revision);
-    this.logCanvasAction({
-      message: 'undo',
-      canvasId,
-      revision: bumped.revision,
-      actor,
-      payload: { restoredRevision: target.revision },
-    });
+    this.events.publishSnapshot(canvasId, bumped.revision, trace);
+    this.logCanvasAction(
+      {
+        message: 'undo',
+        canvasId,
+        revision: bumped.revision,
+        actor,
+        payload: { restoredRevision: target.revision },
+      },
+      trace,
+    );
 
     return updated;
   }
@@ -350,6 +373,7 @@ export class PaintService {
     canvasId: string,
     expectedRevision?: number,
     actor: Actor = 'user',
+    trace?: TraceContext,
   ): CanvasDocument {
     const canvas = this.canvases.findById(canvasId);
 
@@ -376,29 +400,39 @@ export class PaintService {
     }
 
     const updated = this.getCanvas(canvasId)!;
-    this.events.publishSnapshot(canvasId, bumped.revision);
-    this.logCanvasAction({
-      message: 'redo',
-      canvasId,
-      revision: bumped.revision,
-      actor,
-      payload: { restoredRevision: target.revision },
-    });
+    this.events.publishSnapshot(canvasId, bumped.revision, trace);
+    this.logCanvasAction(
+      {
+        message: 'redo',
+        canvasId,
+        revision: bumped.revision,
+        actor,
+        payload: { restoredRevision: target.revision },
+      },
+      trace,
+    );
 
     return updated;
   }
 
-  private logCanvasAction(input: {
-    message: string;
-    canvasId: string;
-    revision: number;
-    actor: Actor;
-    payload: unknown;
-  }): void {
+  private logCanvasAction(
+    input: {
+      message: string;
+      canvasId: string;
+      revision: number;
+      actor: Actor;
+      payload: unknown;
+    },
+    trace?: TraceContext,
+  ): void {
     this.observability?.log({
       category: 'canvas-action',
       level: 'info',
       ...input,
+      // 画布落库记录归属到发起这次写入的追踪（AI 工具的 turn span 或 REST 的
+      // HTTP span）；无 trace 的调用方（后台任务、测试）保持 NULL。
+      traceId: trace?.traceId ?? null,
+      parentId: trace?.spanId ?? null,
       // 画布落库：daemon 把状态写入 SQLite（create/update/delete/undo/redo/rename 皆是）
       source: LOG_DIRECTIONS.canvasPersist.source,
       target: LOG_DIRECTIONS.canvasPersist.target,
