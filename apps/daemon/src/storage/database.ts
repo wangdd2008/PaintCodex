@@ -61,16 +61,6 @@ function migrate(db: DatabaseConnection): void {
 
     CREATE INDEX IF NOT EXISTS snapshots_canvas_revision ON snapshots(canvasId, revision);
 
-    CREATE TABLE IF NOT EXISTS canvas_thumbnails (
-      canvasId  TEXT PRIMARY KEY,
-      revision  INTEGER NOT NULL,
-      width     INTEGER NOT NULL,
-      height    INTEGER NOT NULL,
-      bytes     BLOB NOT NULL,
-      updatedAt INTEGER NOT NULL,
-      FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
-    );
-
     CREATE TABLE IF NOT EXISTS agent_logs (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
       trace_id      TEXT,
@@ -92,6 +82,18 @@ function migrate(db: DatabaseConnection): void {
     CREATE INDEX IF NOT EXISTS agent_logs_trace ON agent_logs(trace_id, timestamp);
     CREATE INDEX IF NOT EXISTS agent_logs_category_timestamp
       ON agent_logs(category, timestamp DESC);
+
+    -- 缩略图独立成表：避免列表查询拖着二进制（spec §4）。
+    -- 浏览器渲染后上传，daemon 不渲染；级联随画布删除清理。
+    CREATE TABLE IF NOT EXISTS canvas_thumbnails (
+      canvasId  TEXT PRIMARY KEY,
+      revision  INTEGER NOT NULL,
+      width     INTEGER NOT NULL,
+      height    INTEGER NOT NULL,
+      bytes     BLOB NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
+    );
   `);
 
   const canvasColumns = db

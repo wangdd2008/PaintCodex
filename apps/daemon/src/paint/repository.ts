@@ -446,6 +446,51 @@ export class SnapshotRepository {
   }
 }
 
+/**
+ * 缩略图一行：画布被浏览器打开时由前端渲染并上传。`bytes` 是解码后的
+ * PNG 二进制，单独存表以避免列表查询拖着 blob（spec §4）。
+ */
+export interface ThumbnailRecord {
+  canvasId: string;
+  revision: number;
+  width: number;
+  height: number;
+  bytes: Buffer;
+  updatedAt: number;
+}
+
+export class ThumbnailRepository {
+  constructor(private readonly db: DatabaseConnection) {}
+
+  /** Upsert：同一画布只保留最新一次上传的缩略图。 */
+  upsert(record: ThumbnailRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO canvas_thumbnails (canvasId, revision, width, height, bytes, updatedAt)
+         VALUES (@canvasId, @revision, @width, @height, @bytes, @updatedAt)
+         ON CONFLICT(canvasId) DO UPDATE SET
+           revision = excluded.revision,
+           width    = excluded.width,
+           height   = excluded.height,
+           bytes    = excluded.bytes,
+           updatedAt = excluded.updatedAt`,
+      )
+      .run(record);
+  }
+
+  find(canvasId: string): ThumbnailRecord | null {
+    const row = this.db
+      .prepare<[string], ThumbnailRecord>(
+        `SELECT canvasId, revision, width, height, bytes, updatedAt
+         FROM canvas_thumbnails
+         WHERE canvasId = ?`,
+      )
+      .get(canvasId);
+
+    return row ?? null;
+  }
+}
+
 function toLayer(row: LayerRow): Layer {
   return {
     ...row,
