@@ -348,6 +348,37 @@ export interface MonitorCategoryStats {
   errorCount: number;
 }
 
+/**
+ * 一行一个追踪的摘要（monitor-readability ③03）：把一次请求或一次对话
+ * 在窗口内聚合成一行，供列表视图使用。`startedAt`/`endedAt` 是窗口内
+ * MIN(timestamp) 与 MAX(timestamp + durationMs)；`components` 去重后按
+ * 组件在本追踪中首次出现的先后排序。
+ */
+export interface TraceSummary {
+  traceId: string;
+  startedAt: number;
+  endedAt: number;
+  spanCount: number;
+  errorCount: number;
+  components: LogComponent[];
+  /** 根 span 的 message；无父记录时取窗口内最早一条。 */
+  rootMessage: string;
+  /** 根 http span 的 payload.path；本追踪没有 http span 时为 null。 */
+  requestPath: string | null;
+  canvasId: string | null;
+  actor: Actor | null;
+}
+
+/**
+ * `GET /monitor/traces` 的一页。信封只回 `items`/`total`/`windowMs`：
+ * `limit`/`offset` 是分页入参，不是结果字段。
+ */
+export interface TraceSummaryPage {
+  items: TraceSummary[];
+  total: number;
+  windowMs: number;
+}
+
 export interface MonitorStats {
   windowMs: number;
   totalLogs: number;

@@ -7,6 +7,7 @@ import type {
   AgentTrace,
   AgentTraceNode,
   MonitorStats,
+  TraceSummaryPage,
 } from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import type { NewAgentLogRecord } from '../src/observability/types.js';
@@ -532,6 +533,80 @@ describe('GET /monitor/traces/:traceId', () => {
     expect(response.json()).toEqual({
       error: { code: 'trace_not_found', message: '追踪不存在' },
     });
+  });
+});
+
+describe('GET /monitor/traces', () => {
+  it('returns one summary row per trace, newest first', async () => {
+    const app = createApp();
+    const now = Date.now();
+
+    seed(app, { traceId: 'trace-1', spanId: 'root', timestamp: now - 60_000, category: 'ai-chat', message: 'ai_chat', actor: 'user' });
+    seed(app, { traceId: 'trace-1', spanId: 'child', parentId: 'root', timestamp: now - 59_000, level: 'error', category: 'canvas-tool', message: 'tool_call' });
+    seed(app, { traceId: 'trace-2', spanId: 'root', timestamp: now - 10_000, category: 'http', message: 'http_request', payload: { method: 'GET', path: '/paint/canvas' } });
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/traces' });
+
+    expect(response.statusCode).toBe(200);
+
+    const page = response.json() as TraceSummaryPage;
+
+    expect(page.windowMs).toBe(900_000);
+    expect(page.total).toBe(2);
+    expect(page.items.map((item) => item.traceId)).toEqual(['trace-2', 'trace-1']);
+
+    const t1 = page.items.find((item) => item.traceId === 'trace-1');
+    expect(t1).toMatchObject({ spanCount: 2, errorCount: 1, rootMessage: 'ai_chat' });
+
+    const t2 = page.items.find((item) => item.traceId === 'trace-2');
+    expect(t2).toMatchObject({ spanCount: 1, requestPath: '/paint/canvas' });
+  });
+
+  it('returns 200 with an empty items array when the window has no traces', async () => {
+    const app = createApp();
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/traces' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ items: [], total: 0, windowMs: 900_000 });
+  });
+
+  it('only returns failing traces when hasError=true', async () => {
+    const app = createApp();
+    const now = Date.now();
+
+    seed(app, { traceId: 'good', spanId: 'r', timestamp: now, category: 'ai-chat', message: 'ai_chat' });
+    seed(app, { traceId: 'bad', spanId: 'r', timestamp: now, category: 'ai-chat', message: 'ai_chat' });
+    seed(app, { traceId: 'bad', spanId: 'c', parentId: 'r', timestamp: now, level: 'error', category: 'ai-chat', message: 'chat_completed' });
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/traces?hasError=true' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ total: 1, items: [{ traceId: 'bad', errorCount: 1 }] });
+  });
+
+  it('accepts canvasId to drill down from a canvas page', async () => {
+    const app = createApp();
+    const now = Date.now();
+
+    seed(app, { traceId: 'mine', spanId: 'r', timestamp: now, category: 'ai-chat', message: 'ai_chat', canvasId: 'canvas-a' });
+    seed(app, { traceId: 'theirs', spanId: 'r', timestamp: now, category: 'ai-chat', message: 'ai_chat', canvasId: 'canvas-b' });
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/traces?canvasId=canvas-a' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ total: 1, items: [{ traceId: 'mine', canvasId: 'canvas-a' }] });
+  });
+
+  it('returns 400 invalid_query for out-of-range windowMs or limit', async () => {
+    const app = createApp();
+
+    for (const value of ['windowMs=0', 'windowMs=-1', 'windowMs=86400001', 'windowMs=abc', 'windowMs=1.5', 'limit=0', 'limit=101', 'limit=abc']) {
+      const response = await app.inject({ method: 'GET', url: `/monitor/traces?${value}` });
+
+      expect(response.statusCode, value).toBe(400);
+      expect(response.json(), value).toMatchObject({ error: { code: 'invalid_query' } });
+    }
   });
 });
 

@@ -8,12 +8,15 @@ import type {
 } from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import type { Observability } from '../observability/index.js';
-import type { AgentLogQuery } from '../observability/types.js';
+import type { AgentLogQuery, TraceSummaryOptions } from '../observability/types.js';
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 300_000;
 const MAX_WINDOW_MS = 86_400_000;
+/** 追踪摘要：默认窗口 15 分钟；单页最多 100 个追踪。 */
+const TRACE_DEFAULT_WINDOW_MS = 900_000;
+const TRACE_MAX_LIMIT = 100;
 const HEARTBEAT_MS = 15_000;
 
 type QueryValues = Record<string, unknown>;
@@ -39,6 +42,16 @@ export function registerMonitorRoutes(
     }
 
     return observability.repository.query(query.value);
+  });
+
+  app.get('/monitor/traces', async (request, reply) => {
+    const query = parseTracesQuery(asQuery(request.query));
+
+    if (!query.ok) {
+      return reply.code(400).send(invalidQuery(query.message));
+    }
+
+    return observability.repository.summarizeTraces(query.value);
   });
 
   app.get<{ Params: { traceId: string } }>(
@@ -292,6 +305,78 @@ function asQuery(value: unknown): QueryValues {
   return typeof value === 'object' && value !== null
     ? (value as QueryValues)
     : {};
+}
+
+/**
+ * `GET /monitor/traces` 的查询串。窗口是硬约束（ADR-0012），所以 windowMs
+ * 必须落在 1..MAX_WINDOW_MS；limit 单页最多 100。空窗口返回空数组而非 400。
+ */
+function parseTracesQuery(query: QueryValues): Parsed<TraceSummaryOptions> {
+  const windowMs = parseOptionalInteger(
+    query.windowMs,
+    'windowMs',
+    1,
+    MAX_WINDOW_MS,
+  );
+
+  if (!windowMs.ok) {
+    return windowMs;
+  }
+
+  const limit = parseOptionalInteger(query.limit, 'limit', 1, TRACE_MAX_LIMIT);
+
+  if (!limit.ok) {
+    return limit;
+  }
+
+  const offset = parseOptionalInteger(query.offset, 'offset', 0);
+
+  if (!offset.ok) {
+    return offset;
+  }
+
+  const canvasId = parseOptionalString(query.canvasId, 'canvasId');
+
+  if (!canvasId.ok) {
+    return canvasId;
+  }
+
+  const hasError = parseOptionalBoolean(query.hasError, 'hasError');
+
+  if (!hasError.ok) {
+    return hasError;
+  }
+
+  return {
+    ok: true,
+    value: {
+      windowMs: windowMs.value ?? TRACE_DEFAULT_WINDOW_MS,
+      limit: limit.value ?? DEFAULT_LIMIT,
+      offset: offset.value ?? 0,
+      canvasId: canvasId.value,
+      hasError: hasError.value,
+    },
+  };
+}
+
+/** 仅接受 `true`/`false` 字面量；缺省为 undefined（不过滤）。 */
+function parseOptionalBoolean(
+  value: unknown,
+  name: string,
+): Parsed<boolean | undefined> {
+  if (value === undefined) {
+    return { ok: true, value: undefined };
+  }
+
+  if (value === 'true') {
+    return { ok: true, value: true };
+  }
+
+  if (value === 'false') {
+    return { ok: true, value: false };
+  }
+
+  return { ok: false, message: `${name} 必须是 true 或 false` };
 }
 
 /**
