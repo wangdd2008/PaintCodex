@@ -1,6 +1,7 @@
 import type { AgentLog } from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import { useMemo, useState, type KeyboardEvent } from 'react';
+import { logMatchesChip, type TopologyChip } from './topology-filter';
 import {
   DEFAULT_LOG_SORT,
   filterLogs,
@@ -20,6 +21,7 @@ import {
 interface LogListProps {
   logs: readonly AgentLog[];
   filters: LogFilterState;
+  chip: TopologyChip | null;
   selectedTraceId: string | null;
   loading: boolean;
   onFiltersChange: (filters: LogFilterState) => void;
@@ -36,6 +38,7 @@ const RANGE_OPTIONS: readonly { value: LogRange; label: string }[] = [
 export function LogList({
   logs,
   filters,
+  chip,
   selectedTraceId,
   loading,
   onFiltersChange,
@@ -43,10 +46,14 @@ export function LogList({
 }: LogListProps) {
   const [sort, setSort] = useState<LogSort>(DEFAULT_LOG_SORT);
 
-  const visibleLogs = useMemo(
-    () => sortLogs(filterLogs(logs, filters), sort),
-    [logs, filters, sort],
-  );
+  // chip 来自拓扑图点击（票 ③06）：在分类过滤之后、排序之前叠加。
+  const visibleLogs = useMemo(() => {
+    const filtered = filterLogs(logs, filters);
+    const afterChip =
+      chip === null ? filtered : filtered.filter((log) => logMatchesChip(log, chip));
+
+    return sortLogs(afterChip, sort);
+  }, [logs, filters, chip, sort]);
 
   function toggleSort(field: LogSortField) {
     setSort((current) =>

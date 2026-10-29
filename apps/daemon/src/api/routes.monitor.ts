@@ -72,6 +72,27 @@ export function registerMonitorRoutes(
     },
   );
 
+  /**
+   * 拓扑快照：静态图由前端写死，这里只叠加窗口数字（票 ③06）。
+   * windowMs 校验口径与 stats/traces 一致：1..MAX_WINDOW_MS，默认 5 分钟。
+   */
+  app.get('/monitor/topology', async (request, reply) => {
+    const windowMs = parseOptionalInteger(
+      asQuery(request.query).windowMs,
+      'windowMs',
+      1,
+      MAX_WINDOW_MS,
+    );
+
+    if (!windowMs.ok) {
+      return reply.code(400).send(invalidQuery(windowMs.message));
+    }
+
+    return observability.repository.summarizeTopology({
+      windowMs: windowMs.value ?? DEFAULT_WINDOW_MS,
+    });
+  });
+
   app.get('/monitor/stats', async (request, reply) => {
     const windowMs = parseOptionalInteger(
       asQuery(request.query).windowMs,

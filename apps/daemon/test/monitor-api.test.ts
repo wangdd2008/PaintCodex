@@ -755,6 +755,63 @@ describe('GET /monitor/stats', () => {
   });
 });
 
+describe('GET /monitor/topology', () => {
+  it('returns the five nodes at zero and an empty edge list on an empty window', async () => {
+    const app = createApp();
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/topology' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      windowMs: 300_000,
+      nodes: [
+        { id: 'browser', count: 0, errorCount: 0 },
+        { id: 'daemon', count: 0, errorCount: 0 },
+        { id: 'codex', count: 0, errorCount: 0 },
+        { id: 'model', count: 0, errorCount: 0 },
+        { id: 'sqlite', count: 0, errorCount: 0 },
+      ],
+      edges: [],
+    });
+  });
+
+  it('aggregates directed channels with counts, errors and averaged durations', async () => {
+    const app = createApp();
+    const now = Date.now();
+
+    seed(app, { timestamp: now - 60_000, category: 'http', message: 'http_request', source: 'browser', target: 'daemon', durationMs: 100 });
+    seed(app, { timestamp: now - 61_000, level: 'error', category: 'http', message: 'http_request', source: 'browser', target: 'daemon', durationMs: 300 });
+    seed(app, { timestamp: now - 62_000, category: 'sse', message: 'sse_publish', source: 'daemon', target: 'browser', durationMs: 200 });
+
+    const response = await app.inject({ method: 'GET', url: '/monitor/topology?windowMs=300000' });
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.edges).toEqual([
+      { source: 'browser', target: 'daemon', count: 2, errorCount: 1, avgDurationMs: 200 },
+      { source: 'daemon', target: 'browser', count: 1, errorCount: 0, avgDurationMs: 200 },
+    ]);
+    expect(body.nodes.find((node: { id: string }) => node.id === 'browser'))
+      .toMatchObject({ count: 3, errorCount: 1 });
+  });
+
+  it('returns 400 invalid_query for an out-of-range or non-integer windowMs', async () => {
+    const app = createApp();
+
+    for (const value of ['0', '-1', '86400001', 'abc', '1.5']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/monitor/topology?windowMs=${value}`,
+      });
+
+      expect(response.statusCode, value).toBe(400);
+      expect(response.json(), value).toMatchObject({
+        error: { code: 'invalid_query' },
+      });
+    }
+  });
+});
+
 describe('GET /monitor/events', () => {
   it('streams published logs as event: log without logging its own stream', async () => {
     const app = createApp();

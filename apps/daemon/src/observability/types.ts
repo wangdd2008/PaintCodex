@@ -59,3 +59,11 @@ export interface TraceSummaryOptions {
   /** 为 true 时只返回 errorCount > 0 的追踪。 */
   hasError?: boolean;
 }
+
+/** 拓扑快照（monitor-readability ③06）的查询参数；窗口同样是硬约束。 */
+export interface TopologyOptions {
+  /** 窗口长度（毫秒），结束于 `now`。默认 300_000（5 分钟）。 */
+  windowMs?: number;
+  /** 注入当前时间，便于测试固定窗口。 */
+  now?: number;
+}

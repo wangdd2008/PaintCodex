@@ -6,15 +6,17 @@ import type {
   LogComponent,
   LogLevel,
   MonitorStats,
+  TopologySnapshot,
   TraceSummary,
   TraceSummaryPage,
 } from '@paintcodex/protocol';
-import { LOG_CATEGORIES } from '@paintcodex/protocol';
+import { LOG_CATEGORIES, LOG_COMPONENTS } from '@paintcodex/protocol';
 import type { DatabaseConnection } from '../storage/database.js';
 import type {
   AgentLogQuery,
   AgentLogStatsOptions,
   NewAgentLogRecord,
+  TopologyOptions,
   TraceSummaryOptions,
 } from './types.js';
 
@@ -23,6 +25,8 @@ const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 5 * 60_000;
 /** 追踪摘要默认窗口 15 分钟；上限 24 小时（路由层校验范围）。 */
 const DEFAULT_TRACE_WINDOW_MS = 15 * 60_000;
+/** 拓扑快照默认窗口 5 分钟；与统计卡片同口径（票 ③06）。 */
+const DEFAULT_TOPOLOGY_WINDOW_MS = 5 * 60_000;
 const DEFAULT_TRACE_LIMIT = 50;
 const MAX_TRACE_LIMIT = 100;
 /** Below this many non-aborted chats a success rate is shown as unknown. */
@@ -332,6 +336,91 @@ export class AgentLogRepository {
     }
 
     return aggregates.map((row) => byTrace.get(row.trace_id)!);
+  }
+
+  /**
+   * 拓扑快照（monitor-readability ③06）：窗口内按方向记录聚合出节点与有向通道。
+   *
+   * 节点计数 = source 或 target 为该组件的记录数（发出与接收都触碰它）；
+   * 通道计数 = 同一条 (source, target) 记录数。平均耗时只纳入
+   * `durationMs <= 10_000` 的记录——SSE 长连接会把均值拉到几分钟（ADR-0012）。
+   * nodes 恒为全部五个组件，无流量为 0，静态拓扑不因缺数据变形。
+   */
+  summarizeTopology(options: TopologyOptions = {}): TopologySnapshot {
+    const windowMs = Math.max(1, Math.trunc(options.windowMs ?? DEFAULT_TOPOLOGY_WINDOW_MS));
+    const since = (options.now ?? Date.now()) - windowMs;
+
+    const touched = new Map<LogComponent, { count: number; errorCount: number }>();
+
+    for (const component of LOG_COMPONENTS) {
+      touched.set(component, { count: 0, errorCount: 0 });
+    }
+
+    // 节点触碰拆成 source / target 两条 GROUP BY：避免一次 GROUP BY (source,target)
+    // 再 UNION 带来的重复行，且两条都走 source/target 索引前缀。
+    for (const column of ['source', 'target'] as const) {
+      const rows = this.db
+        .prepare(
+          `SELECT ${column} AS component,
+                  COUNT(*) AS count,
+                  SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count
+           FROM agent_logs
+           WHERE timestamp >= ? AND ${column} IS NOT NULL AND ${EXCLUDE_MONITOR_HTTP}
+           GROUP BY ${column}`,
+        )
+        .all(since) as Array<{
+        component: LogComponent;
+        count: number;
+        error_count: number;
+      }>;
+
+      for (const row of rows) {
+        const bucket = touched.get(row.component);
+
+        if (bucket) {
+          bucket.count += row.count;
+          bucket.errorCount += row.error_count;
+        }
+      }
+    }
+
+    const edgeRows = this.db
+      .prepare(
+        `SELECT source,
+                target,
+                COUNT(*) AS count,
+                SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) AS error_count,
+                AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms <= 10000
+                         THEN duration_ms END) AS avg_duration
+         FROM agent_logs
+         WHERE timestamp >= ? AND source IS NOT NULL AND target IS NOT NULL
+           AND ${EXCLUDE_MONITOR_HTTP}
+         GROUP BY source, target
+         ORDER BY source, target`,
+      )
+      .all(since) as Array<{
+      source: LogComponent;
+      target: LogComponent;
+      count: number;
+      error_count: number;
+      avg_duration: number | null;
+    }>;
+
+    return {
+      windowMs,
+      nodes: LOG_COMPONENTS.map((id) => ({
+        id,
+        count: touched.get(id)?.count ?? 0,
+        errorCount: touched.get(id)?.errorCount ?? 0,
+      })),
+      edges: edgeRows.map((row) => ({
+        source: row.source,
+        target: row.target,
+        count: row.count,
+        errorCount: row.error_count,
+        avgDurationMs: row.avg_duration === null ? null : round(row.avg_duration),
+      })),
+    };
   }
 
   stats(options: AgentLogStatsOptions = {}): MonitorStats {

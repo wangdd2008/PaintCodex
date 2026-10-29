@@ -1,12 +1,19 @@
-import type { AgentLog, MonitorStats } from '@paintcodex/protocol';
+import type {
+  AgentLog,
+  LogComponent,
+  MonitorStats,
+  TopologySnapshot,
+} from '@paintcodex/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { LogList } from './LogList';
 import { StatsPanel } from './StatsPanel';
+import { TopologyView } from './TopologyView';
 import { TraceView } from './TraceView';
 import {
   DEFAULT_STATS_WINDOW_MS,
   fetchLogs,
   fetchStats,
+  fetchTopology,
   subscribeToLogs,
 } from './monitor-api';
 import {
@@ -15,6 +22,11 @@ import {
   rangeToSince,
   type LogFilterState,
 } from './monitor-format';
+import {
+  chipLabel,
+  toggleTopologyChip,
+  type TopologyChip,
+} from './topology-filter';
 import './monitor.css';
 
 const LOG_FETCH_LIMIT = 200;
@@ -28,6 +40,8 @@ export function MonitorPage() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [filters, setFilters] = useState<LogFilterState>(DEFAULT_LOG_FILTERS);
   const [stats, setStats] = useState<MonitorStats | null>(null);
+  const [topology, setTopology] = useState<TopologySnapshot | null>(null);
+  const [chip, setChip] = useState<TopologyChip | null>(null);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [loadingLogs, setLoadingLogs] = useState(true);
@@ -61,6 +75,22 @@ export function MonitorPage() {
       }
     } finally {
       statsInFlight.current = false;
+    }
+  }, []);
+
+  /**
+   * 拓扑快照与统计卡片同窗口（5 分钟）。取数失败不影响页面其余部分：
+   * 图保持上一次快照，静态结构本来就不依赖当次取数。
+   */
+  const loadTopology = useCallback(async () => {
+    try {
+      const next = await fetchTopology(STATS_WINDOW_MS);
+
+      if (!disposed.current) {
+        setTopology(next);
+      }
+    } catch {
+      // 静默失败：图上一轮的数字仍在，下一周期会重试。
     }
   }, []);
 
@@ -128,10 +158,20 @@ export function MonitorPage() {
   }, [loadStats]);
 
   useEffect(() => {
+    void loadTopology();
+  }, [loadTopology]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => void loadStats(), STATS_REFRESH_MS);
 
     return () => window.clearInterval(timer);
   }, [loadStats]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void loadTopology(), STATS_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [loadTopology]);
 
   useEffect(() => {
     if (paused) {
@@ -158,6 +198,15 @@ export function MonitorPage() {
     setStatsError(null);
     void loadLogs(filters);
     void loadStats();
+  }
+
+  /** 拓扑点击：同一时刻只有一个 chip；重复点击即取消（票 ③06）。 */
+  function handleToggleNode(component: LogComponent) {
+    setChip((current) => toggleTopologyChip(current, { kind: 'component', component }));
+  }
+
+  function handleToggleChannel(channelId: string) {
+    setChip((current) => toggleTopologyChip(current, { kind: 'channel', channelId }));
   }
 
   const liveLabel = paused
@@ -207,11 +256,32 @@ export function MonitorPage() {
 
       <StatsPanel stats={stats} error={statsError} />
 
+      <TopologyView
+        snapshot={topology}
+        chip={chip}
+        onToggleNode={handleToggleNode}
+        onToggleChannel={handleToggleChannel}
+      />
+
+      {chip ? (
+        <div className="monitor-chipbar" role="status">
+          <span className="monitor-chip">{chipLabel(chip)}</span>
+          <button
+            type="button"
+            className="monitor-button monitor-button--ghost"
+            onClick={() => setChip(null)}
+          >
+            取消过滤
+          </button>
+        </div>
+      ) : null}
+
       <div className="monitor-grid">
         <div className="monitor-grid__logs">
           <LogList
             logs={logs}
             filters={filters}
+            chip={chip}
             selectedTraceId={selectedTraceId}
             loading={loadingLogs}
             onFiltersChange={setFilters}

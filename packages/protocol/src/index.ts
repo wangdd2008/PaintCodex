@@ -379,6 +379,39 @@ export interface TraceSummaryPage {
   windowMs: number;
 }
 
+/**
+ * `GET /monitor/topology` 的一个节点窗口统计（monitor-readability ③06）。
+ * nodes 恒为全部五个组件——静态拓扑不因窗口内无流量而变形（ADR-0012）；
+ * 无流量时数字为 0，`model` 恒 0 的语义由前端显示为「—」。
+ */
+export interface TopologyNodeStats {
+  id: LogComponent;
+  count: number;
+  errorCount: number;
+}
+
+/**
+ * 一条观测到的有向通道窗口统计。`avgDurationMs` 只计入
+ * `durationMs <= 10_000` 的记录（剔除 SSE 等长连接），没有合格记录时为 null。
+ */
+export interface TopologyEdgeStats {
+  source: LogComponent;
+  target: LogComponent;
+  count: number;
+  errorCount: number;
+  avgDurationMs: number | null;
+}
+
+/**
+ * 拓扑快照：静态结构由前端写死，这里只叠加窗口数字。edges 只含窗口内
+ * 实际出现过方向的记录；静态通道缺失的数字由前端补 0。
+ */
+export interface TopologySnapshot {
+  windowMs: number;
+  nodes: TopologyNodeStats[];
+  edges: TopologyEdgeStats[];
+}
+
 export interface MonitorStats {
   windowMs: number;
   totalLogs: number;
