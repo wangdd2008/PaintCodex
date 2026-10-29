@@ -538,6 +538,10 @@ describe('语义化文本中文化', () => {
           return jsonResponse({ items: [log], total: 1, limit: 200, offset: 0 });
         }
 
+        if (url.startsWith('/monitor/traces')) {
+          return jsonResponse({ items: [], total: 0, windowMs: 900_000 });
+        }
+
         if (url.startsWith('/monitor/stats')) {
           return jsonResponse(stats);
         }
@@ -548,8 +552,11 @@ describe('语义化文本中文化', () => {
 
     const { container } = render(<MonitorPage />);
 
-    expect(await screen.findByText('chat_completed')).toBeTruthy();
     expect(await screen.findByText('HTTP 错误率')).toBeTruthy();
+
+    // 默认视图是追踪列表；逐条文案在「原始日志」开关后。
+    fireEvent.click(screen.getByText('原始日志'));
+    expect(await screen.findByText('chat_completed')).toBeTruthy();
     // 级别徽标用中文，原始 enum 只留在筛选值里。
     expect(screen.getAllByText('错误').length).toBeGreaterThan(0);
     expect(screen.queryByText('info')).toBeNull();

@@ -90,6 +90,30 @@ describe('AgentLogRepository', () => {
     expect(repository.query({ traceId: 'missing' }).total).toBe(0);
   });
 
+  it('orders raw queries by insertion id DESC, not by span start time', () => {
+    const repository = createRepository();
+
+    // 长 span 的完成记录回溯写入开始时间（logger.finish 的语义），落库却更晚。
+    // 逐条列表按落库顺序（id DESC），不能被开始时间重新洗牌——否则会出现
+    // 「完成记录排在开始记录上面」（monitor-readability ③04）。
+    repository.insert({
+      timestamp: 2_000,
+      category: 'ai-chat',
+      message: 'point_event',
+    });
+    repository.insert({
+      timestamp: 1_000,
+      category: 'ai-chat',
+      message: 'turn_complete',
+      durationMs: 1_500,
+    });
+
+    expect(repository.query().items.map((item) => item.message)).toEqual([
+      'turn_complete',
+      'point_event',
+    ]);
+  });
+
   it('paginates newest first and reports the total', () => {
     const repository = createRepository();
 

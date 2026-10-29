@@ -5,12 +5,18 @@ import type {
   LogCategory,
   LogLevel,
   MonitorStats,
+  TraceSummaryPage,
 } from '@paintcodex/protocol';
 import { ApiError } from '../../services/api';
 
 export const DEFAULT_LOG_LIMIT = 50;
 
 export const DEFAULT_STATS_WINDOW_MS = 300_000;
+
+/** 追踪摘要默认窗口 15 分钟，与服务端 TRACE_DEFAULT_WINDOW_MS 对齐。 */
+export const DEFAULT_TRACE_WINDOW_MS = 900_000;
+
+export const DEFAULT_TRACE_LIMIT = 50;
 
 export type FilterValue<T extends string> = T | readonly T[] | null | undefined;
 
@@ -91,6 +97,50 @@ export function fetchLogs(
 
 export function fetchTrace(traceId: string, signal?: AbortSignal): Promise<AgentTrace> {
   return request<AgentTrace>(`/monitor/traces/${encodeURIComponent(traceId)}`, signal);
+}
+
+export interface TracesQueryFilter {
+  windowMs?: number;
+  limit?: number;
+  offset?: number;
+  canvasId?: string | null;
+  hasError?: boolean;
+}
+
+/**
+ * Serializes the aggregate-trace query.窗口是硬约束（GROUP BY 必须带窗口，
+ * 否则随 agent_logs 无界增长变慢），缺省 15 分钟由服务端兜底。
+ */
+export function buildTracesQuery(filter: TracesQueryFilter = {}): string {
+  const params: string[] = [];
+
+  if (isFinite(filter.windowMs)) {
+    params.push(`windowMs=${Math.trunc(filter.windowMs)}`);
+  } else {
+    params.push(`windowMs=${DEFAULT_TRACE_WINDOW_MS}`);
+  }
+
+  params.push(`limit=${normalizeInteger(filter.limit, DEFAULT_TRACE_LIMIT, 1)}`);
+  params.push(`offset=${normalizeInteger(filter.offset, 0, 0)}`);
+
+  if (filter.hasError !== undefined) {
+    params.push(`hasError=${filter.hasError ? 'true' : 'false'}`);
+  }
+
+  const canvasId = toIdentifier(filter.canvasId);
+
+  if (canvasId !== null) {
+    params.push(`canvasId=${encodeURIComponent(canvasId)}`);
+  }
+
+  return `?${params.join('&')}`;
+}
+
+export function fetchTraces(
+  filter: TracesQueryFilter = {},
+  signal?: AbortSignal,
+): Promise<TraceSummaryPage> {
+  return request<TraceSummaryPage>(`/monitor/traces${buildTracesQuery(filter)}`, signal);
 }
 
 export function fetchStats(
