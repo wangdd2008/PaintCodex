@@ -96,20 +96,9 @@ export interface CanvasListQuery {
 }
 
 export class CanvasRepository {
-  constructor(private readonly db: DatabaseConnection) {
-    // 缩略图表由票 03 正式落地；本列表接口先以幂等建表兜底，使其与建表顺序无关。
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS canvas_thumbnails (
-        canvasId  TEXT PRIMARY KEY,
-        revision  INTEGER NOT NULL,
-        width     INTEGER NOT NULL,
-        height    INTEGER NOT NULL,
-        bytes     BLOB NOT NULL,
-        updatedAt INTEGER NOT NULL,
-        FOREIGN KEY (canvasId) REFERENCES canvases(id) ON DELETE CASCADE
-      )
-    `);
-  }
+  // 建表由 storage/database.ts 的 migrate 统一负责（CREATE TABLE IF NOT EXISTS
+  // canvas_thumbnails），openDatabase 对新建/内存库都会执行；这里不再重复 DDL。
+  constructor(private readonly db: DatabaseConnection) {}
 
   create(record: NewCanvasRecord): CanvasRecord {
     this.db

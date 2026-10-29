@@ -8,14 +8,14 @@ import type {
   TopologySnapshot,
   TraceSummaryPage,
 } from '@paintcodex/protocol';
+import { DEFAULT_TRACE_WINDOW_MS } from '@paintcodex/protocol';
 import { ApiError } from '../../services/api';
+
+export { DEFAULT_TRACE_WINDOW_MS };
 
 export const DEFAULT_LOG_LIMIT = 50;
 
 export const DEFAULT_STATS_WINDOW_MS = 300_000;
-
-/** 追踪摘要默认窗口 15 分钟，与服务端 TRACE_DEFAULT_WINDOW_MS 对齐。 */
-export const DEFAULT_TRACE_WINDOW_MS = 900_000;
 
 export const DEFAULT_TRACE_LIMIT = 50;
 
@@ -109,8 +109,8 @@ export interface TracesQueryFilter {
 }
 
 /**
- * Serializes the aggregate-trace query.窗口是硬约束（GROUP BY 必须带窗口，
- * 否则随 agent_logs 无界增长变慢），缺省 15 分钟由服务端兜底。
+ * 序列化聚合追踪查询串。窗口是硬约束（GROUP BY 必须带窗口，否则随
+ * agent_logs 无界增长变慢），缺省 15 分钟由服务端兜底。
  */
 export function buildTracesQuery(filter: TracesQueryFilter = {}): string {
   const params: string[] = [];

@@ -2,10 +2,10 @@ import type { AgentLog, AgentTrace, AgentTraceNode } from '@paintcodex/protocol'
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../services/api';
 import { LogDetail } from './log-detail';
+import { formatDirection } from './log-format';
 import { SequenceDiagram } from './SequenceDiagram';
 import { fetchTrace } from './monitor-api';
 import {
-  formatDirection,
   formatDuration,
   formatLogLevel,
   formatTimestamp,
@@ -268,8 +268,11 @@ function TraceNodeRow({
         <span className="trace-node__message" title={log.message}>
           {log.message}
         </span>
-        <span className="trace-node__direction" title={formatDirection(log)}>
-          {formatDirection(log)}
+        <span
+          className="trace-node__direction"
+          title={formatDirection(log.source, log.target)}
+        >
+          {formatDirection(log.source, log.target)}
         </span>
         <span className="category-badge">{log.category}</span>
         <span className="trace-node__duration">{formatDuration(log.durationMs)}</span>

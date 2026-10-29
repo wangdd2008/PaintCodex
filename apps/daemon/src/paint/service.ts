@@ -134,8 +134,8 @@ export class PaintService {
   }
 
   /**
-   * One page of the canvas library: read-only collection semantics. `total` is
-   * the whole-library count, computed separately from the paged `items`.
+   * 画布库的一页：只读集合语义。`total` 是整库总数，与分页后的 `items`
+   * 分开统计。
    */
   listCanvases(query: CanvasListQuery): CanvasListPage {
     return {

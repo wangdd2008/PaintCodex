@@ -58,18 +58,13 @@ describe('日志方向映射表', () => {
     });
   });
 
-  it('画布落库：所有 canvas-action 都是 daemon→sqlite', () => {
-    for (const direction of [
-      LOG_DIRECTIONS.layerCreate,
-      LOG_DIRECTIONS.layerUpdate,
-      LOG_DIRECTIONS.layerDelete,
-      LOG_DIRECTIONS.undo,
-      LOG_DIRECTIONS.redo,
-      LOG_DIRECTIONS.canvasCreate,
-      LOG_DIRECTIONS.canvasRename,
-    ]) {
-      expect(direction).toEqual({ source: 'daemon', target: 'sqlite' });
-    }
+  it('画布落库（canvasPersist）：daemon→sqlite', () => {
+    // 埋点只登记统一方向 canvasPersist（create/update/delete/undo/redo/rename
+    // 共用）；曾为每种动作预登记的 7 条死键已删除，这里只断言实际在用的条目。
+    expect(LOG_DIRECTIONS.canvasPersist).toEqual({
+      source: 'daemon',
+      target: 'sqlite',
+    });
   });
 
   it('方向两端都来自组件词表', () => {

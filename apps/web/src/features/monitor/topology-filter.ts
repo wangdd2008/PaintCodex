@@ -25,10 +25,11 @@ export function toggleTopologyChip(
 }
 
 function sameChip(a: TopologyChip, b: TopologyChip): boolean {
-  return a.kind === b.kind && aValue(a) === aValue(b);
+  return a.kind === b.kind && chipKey(a) === chipKey(b);
 }
 
-function aValue(chip: TopologyChip): string {
+/** chip 的去重键：组件 chip 取组件 id，通道 chip 取通道 id。 */
+function chipKey(chip: TopologyChip): string {
   return chip.kind === 'component' ? chip.component : chip.channelId;
 }
 

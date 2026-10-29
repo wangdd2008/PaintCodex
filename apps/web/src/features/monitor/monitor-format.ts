@@ -1,10 +1,13 @@
 import type {
   AgentLog,
   LogCategory,
-  LogComponent,
   LogLevel,
   MonitorCategoryStats,
 } from '@paintcodex/protocol';
+
+// 组件标签与方向格式化的唯一实现位于 log-format.ts（同时服务追踪列表
+// 「组件路径」列与原始日志/层级树方向列）；这里 re-export 以兼容既有引用。
+export { COMPONENT_LABELS, formatDirection } from './log-format';
 
 export type LogRange = '5m' | '15m' | '1h' | 'all';
 
@@ -207,30 +210,6 @@ export function formatErrorBreakdown(
 
 export function shortenId(value: string, maxLength = 8): string {
   return value.length <= maxLength ? value : `${value.slice(0, maxLength)}…`;
-}
-
-/**
- * 组件的界面叫法（GLOSSARY「组件」）。时序图列头与层级树方向列共用，
- * 保证两处「谁发给谁」的写法一致。
- */
-export const COMPONENT_LABELS: Record<LogComponent, string> = {
-  browser: '浏览器',
-  daemon: 'Daemon',
-  codex: 'Codex',
-  model: '模型',
-  sqlite: 'SQLite',
-};
-
-/**
- * 层级树每行恒有的方向列：两端俱全写「源 → 目标」，否则写「内部」。
- * 无方向 ≠ 未知（ADR-0012）：它本来就不过任何通道。
- */
-export function formatDirection(log: AgentLog): string {
-  if (log.source !== null && log.target !== null) {
-    return `${COMPONENT_LABELS[log.source]} → ${COMPONENT_LABELS[log.target]}`;
-  }
-
-  return '内部';
 }
 
 function compareLogs(left: AgentLog, right: AgentLog, sort: LogSort): number {

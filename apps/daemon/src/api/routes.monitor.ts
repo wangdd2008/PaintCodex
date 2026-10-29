@@ -6,7 +6,11 @@ import type {
   LogCategory,
   LogLevel,
 } from '@paintcodex/protocol';
-import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
+import {
+  DEFAULT_TRACE_WINDOW_MS,
+  LOG_CATEGORIES,
+  LOG_LEVELS,
+} from '@paintcodex/protocol';
 import type { Observability } from '../observability/index.js';
 import type { AgentLogQuery, TraceSummaryOptions } from '../observability/types.js';
 
@@ -14,8 +18,7 @@ const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 300_000;
 const MAX_WINDOW_MS = 86_400_000;
-/** 追踪摘要：默认窗口 15 分钟；单页最多 100 个追踪。 */
-const TRACE_DEFAULT_WINDOW_MS = 900_000;
+/** 追踪摘要默认窗口取自 protocol（DEFAULT_TRACE_WINDOW_MS）；单页最多 100 个追踪。 */
 const TRACE_MAX_LIMIT = 100;
 const HEARTBEAT_MS = 15_000;
 
@@ -371,7 +374,7 @@ function parseTracesQuery(query: QueryValues): Parsed<TraceSummaryOptions> {
   return {
     ok: true,
     value: {
-      windowMs: windowMs.value ?? TRACE_DEFAULT_WINDOW_MS,
+      windowMs: windowMs.value ?? DEFAULT_TRACE_WINDOW_MS,
       limit: limit.value ?? DEFAULT_LIMIT,
       offset: offset.value ?? 0,
       canvasId: canvasId.value,

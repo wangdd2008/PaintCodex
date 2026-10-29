@@ -298,6 +298,13 @@ export const LOG_COMPONENTS = [
 export type LogComponent = (typeof LOG_COMPONENTS)[number];
 
 /**
+ * 追踪聚合摘要（`GET /monitor/traces`）的默认时间窗口：15 分钟。
+ * 服务端路由/仓库与前端查询串共用同一份，避免默认值三处漂移；
+ * 上限 24 小时由路由层另行校验。
+ */
+export const DEFAULT_TRACE_WINDOW_MS = 15 * 60_000;
+
+/**
  * One structured observability record. A record either describes a finished
  * span (`durationMs` set) or a point event emitted inside a span.
  */

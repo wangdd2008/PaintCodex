@@ -39,17 +39,11 @@ export const LOG_DIRECTIONS = {
   threadResume: { source: 'daemon', target: 'codex' },
   /** 工具调用（canvas-tool）：codex → daemon。 */
   toolCall: { source: 'codex', target: 'daemon' },
-  /** 画布落库：以下全部是 daemon → sqlite。 */
-  layerCreate: { source: 'daemon', target: 'sqlite' },
-  layerUpdate: { source: 'daemon', target: 'sqlite' },
-  layerDelete: { source: 'daemon', target: 'sqlite' },
-  undo: { source: 'daemon', target: 'sqlite' },
-  redo: { source: 'daemon', target: 'sqlite' },
-  canvasCreate: { source: 'daemon', target: 'sqlite' },
-  canvasRename: { source: 'daemon', target: 'sqlite' },
   /**
    * 画布落库的统一方向：service 的 canvas-action 埋点只认这一条，
    * create/update/delete/undo/redo/rename 都走 daemon → sqlite。
+   * （曾为每种动作预登记 layerCreate/undo 等 7 条平行配置，实际埋点全走
+   * 本条目，那些死键已删除，词表仍可按需扩展。）
    */
   canvasPersist: { source: 'daemon', target: 'sqlite' },
 } as const satisfies Readonly<Record<string, LogDirection>>;

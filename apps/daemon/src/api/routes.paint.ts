@@ -679,10 +679,9 @@ type ParsedListQuery =
   | { ok: false; message: string };
 
 /**
- * Validates the collection query for the canvas library. `sort` is whitelisted
- * (`updated` by default); `limit` defaults to 50 and is capped at 100; `offset`
- * starts at 0. Anything out of range or non-integer is a client error, not an
- * empty result.
+ * 校验画布库集合查询。`sort` 走白名单（默认 `updated`）；`limit` 默认 50、
+ * 上限 100；`offset` 从 0 起。越界或非整数一律按客户端错误处理，而不是
+ * 返回空结果。
  */
 function parseCanvasListQuery(query: Record<string, unknown>): ParsedListQuery {
   const sortRaw = query.sort;

@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import type { TraceSummary } from '@paintcodex/protocol';
 import { formatComponentPath } from './log-format';
 import { formatDuration, formatTimestamp } from './monitor-format';
-import { TraceTimelinePane } from './trace-timeline';
+import { TraceView } from './TraceView';
 
 interface TraceListProps {
   items: readonly TraceSummary[];
@@ -98,7 +98,7 @@ export function TraceList({
               {expanded ? (
                 <tr className="trace-table__detail-row">
                   <td colSpan={6}>
-                    <TraceTimelinePane traceId={trace.traceId} onClose={() => onToggle(trace.traceId)} />
+                    <TraceView traceId={trace.traceId} onClose={() => onToggle(trace.traceId)} />
                   </td>
                 </tr>
               ) : null}

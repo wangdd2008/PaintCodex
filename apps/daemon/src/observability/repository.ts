@@ -10,7 +10,11 @@ import type {
   TraceSummary,
   TraceSummaryPage,
 } from '@paintcodex/protocol';
-import { LOG_CATEGORIES, LOG_COMPONENTS } from '@paintcodex/protocol';
+import {
+  LOG_CATEGORIES,
+  LOG_COMPONENTS,
+  DEFAULT_TRACE_WINDOW_MS,
+} from '@paintcodex/protocol';
 import type { DatabaseConnection } from '../storage/database.js';
 import type {
   AgentLogQuery,
@@ -23,8 +27,6 @@ import type {
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 500;
 const DEFAULT_WINDOW_MS = 5 * 60_000;
-/** 追踪摘要默认窗口 15 分钟；上限 24 小时（路由层校验范围）。 */
-const DEFAULT_TRACE_WINDOW_MS = 15 * 60_000;
 /** 拓扑快照默认窗口 5 分钟；与统计卡片同口径（票 ③06）。 */
 const DEFAULT_TOPOLOGY_WINDOW_MS = 5 * 60_000;
 const DEFAULT_TRACE_LIMIT = 50;
