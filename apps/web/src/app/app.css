@@ -99,8 +99,22 @@ button {
 }
 
 /* 图层列折叠时第三列收成一条纵向把手（票 ②01）。 */
-.workspace--layers-collapsed {
-  grid-template-columns: 56px minmax(0, 1fr) 28px var(--chat-width, 380px);
+@media (min-width: 1101px) {
+  .workspace--layers-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr) 28px var(--chat-width, 380px);
+  }
+
+  /*
+   * 对话列收起时同样留 28px 竖条，否则整列 display:none，展开入口只剩
+   * 图层列右缘那条透明拖拽条。≤1100px 侧栏是单一面板，列数不同，不在此列。
+   */
+  .workspace--chat-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr) 240px 28px;
+  }
+
+  .workspace--layers-collapsed.workspace--chat-collapsed {
+    grid-template-columns: 56px minmax(0, 1fr) 28px 28px;
+  }
 }
 
 /*
@@ -140,9 +154,12 @@ button {
   overflow: hidden;
 }
 
-/* 对话列收起：列宽由 --chat-width:0 决定，内容直接裁掉。 */
+/*
+ * 对话列收起：桌面端收成 28px 纵向把手（列宽由 .workspace--chat-collapsed
+ * 决定），把手本身占满这一列。窄屏抽屉里两段是纵向堆叠，收起即整段隐藏。
+ */
 .chat-column--collapsed {
-  display: none;
+  overflow: hidden;
 }
 
 /* AI 面板保底高度：图层增长时优先让图层列表滚动而不是压扁对话。 */
@@ -177,8 +194,9 @@ button {
   background: #26272e;
 }
 
-/* 图层列折叠后的纵向把手。 */
-.layer-collapse-handle {
+/* 图层列 / 对话列折叠后的纵向把手：同一套视觉，两种朝向复用。 */
+.layer-collapse-handle,
+.chat-collapse-handle {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -192,12 +210,19 @@ button {
   padding: 8px 0;
 }
 
-.layer-collapse-handle:hover {
+.layer-collapse-handle:hover,
+.chat-collapse-handle:hover {
   color: #e8e8ea;
   background: #26272e;
 }
 
-.layer-collapse-handle__label {
+/* 对话把手贴左缘，与图层把手贴右缘呼应。 */
+.chat-collapse-handle {
+  border-left: 1px solid #2c2d33;
+}
+
+.layer-collapse-handle__label,
+.chat-collapse-handle__label {
   writing-mode: vertical-rl;
   font-size: 11px;
   letter-spacing: 0.2em;
@@ -694,6 +719,11 @@ button {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+  }
+
+  /* 抽屉里两段纵向堆叠，28px 竖条没有意义：收起即整段隐藏，由抽屉开关找回。 */
+  .side-panel .chat-column--collapsed {
+    display: none;
   }
 
   .side-panel .chat-resizer {

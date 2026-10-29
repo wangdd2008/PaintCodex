@@ -489,6 +489,7 @@ export function App() {
           view === 'canvas' ? 'workspace' : 'workspace app-hidden',
           resizing ? 'workspace--resizing' : '',
           layersCollapsed ? 'workspace--layers-collapsed' : '',
+          chatCollapsed ? 'workspace--chat-collapsed' : '',
         ]
           .filter(Boolean)
           .join(' ')}
@@ -554,7 +555,19 @@ export function App() {
               chatCollapsed ? 'chat-column chat-column--collapsed' : 'chat-column'
             }
           >
-            {chatCollapsed ? null : (
+            {chatCollapsed ? (
+              // 收起后必须留下可见的展开把手：对话列之前是一整块被隐藏的面板，
+              // 唯一入口只有图层列右缘那条透明拖拽条，用户找不到就只能刷新页面，
+              // 而刷新会清空会话记录（UX-24）。与图层列对齐同一套语义。
+              <button
+                type="button"
+                className="chat-collapse-handle"
+                aria-label="展开对话面板"
+                onClick={() => setChatCollapsed(false)}
+              >
+                <span className="chat-collapse-handle__label">对话</span>
+              </button>
+            ) : (
               <>
                 <div className="column-header">
                   <button
