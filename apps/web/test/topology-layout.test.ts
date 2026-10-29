@@ -112,9 +112,9 @@ describe('toggleTopologyChip', () => {
   });
 
   it('chipLabel 生成可读文案', () => {
-    expect(chipLabel({ kind: 'component', component: 'daemon' })).toBe('组件：daemon');
+    expect(chipLabel({ kind: 'component', component: 'daemon' })).toBe('组件：Daemon');
     expect(chipLabel({ kind: 'channel', channelId: 'browser-daemon' })).toBe(
-      '通道：browser → daemon',
+      '通道：浏览器 → Daemon',
     );
   });
 });

@@ -388,6 +388,9 @@ const ALLOWED_TOKENS = new Set([
   'http_request',
   'sse_subscribe',
   'chat_completed',
+  // 拓扑组件名（票 06，协议词表里的技术标识符）。
+  'Daemon',
+  'SQLite',
   // 监控分类名（协议值，AI 对话分类含连字符）。
   'codex-runtime',
   'canvas-tool',
@@ -543,6 +546,10 @@ describe('语义化文本中文化', () => {
 
         if (url.startsWith('/monitor/stats')) {
           return jsonResponse(stats);
+        }
+
+        if (url.startsWith('/monitor/topology')) {
+          return jsonResponse({ windowMs: 300_000, nodes: [], edges: [] });
         }
 
         return jsonResponse({ traceId: log.traceId, roots: [] });

@@ -1,5 +1,5 @@
 import type { AgentLog, LogComponent } from '@paintcodex/protocol';
-import { channelById } from './topology-layout';
+import { channelById, nodeById } from './topology-layout';
 
 /**
  * 拓扑点击产生的过滤 chip（monitor-readability ③06）。
@@ -32,15 +32,24 @@ function aValue(chip: TopologyChip): string {
   return chip.kind === 'component' ? chip.component : chip.channelId;
 }
 
-/** chip 用于列表展示的人类可读文案。 */
+/** chip 用于列表展示的人类可读文案（用拓扑声明里的中文名）。 */
 export function chipLabel(chip: TopologyChip): string {
   if (chip.kind === 'component') {
-    return `组件：${chip.component}`;
+    const node = nodeById(chip.component);
+
+    return `组件：${node?.label ?? chip.component}`;
   }
 
   const channel = channelById(chip.channelId);
 
-  return channel ? `通道：${channel.a} → ${channel.b}` : `通道：${chip.channelId}`;
+  if (channel === undefined) {
+    return `通道：${chip.channelId}`;
+  }
+
+  const a = nodeById(channel.a)?.label ?? channel.a;
+  const b = nodeById(channel.b)?.label ?? channel.b;
+
+  return `通道：${a} → ${b}`;
 }
 
 /**

@@ -91,12 +91,12 @@ export function channelStatsOf(
   };
 }
 
-/** 节点窗口统计；无快照时按 0 处理（图不变形）。 */
+/** 节点窗口统计；无快照或缺省字段时按 0 处理（图不变形）。 */
 export function nodeStatsOf(
   snapshot: TopologySnapshot | null,
   nodeId: LogComponent,
 ): { count: number; errorCount: number } {
-  const node = snapshot?.nodes.find((entry) => entry.id === nodeId);
+  const node = snapshot?.nodes?.find((entry) => entry.id === nodeId);
 
   return { count: node?.count ?? 0, errorCount: node?.errorCount ?? 0 };
 }
