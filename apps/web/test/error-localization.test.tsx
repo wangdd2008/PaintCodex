@@ -60,7 +60,6 @@ function resetStore(): void {
     status: 'idle',
     error: null,
     requestedCanvasId: null,
-    previousCanvasId: null,
     saving: false,
     saveState: 'idle',
     lastSavedAt: null,

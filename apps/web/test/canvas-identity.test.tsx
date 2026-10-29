@@ -77,7 +77,6 @@ beforeEach(() => {
     status: 'ready',
     error: null,
     requestedCanvasId: storedCanvasA.id,
-    previousCanvasId: null,
     saving: false,
     activeLayerId: null,
   });
@@ -102,37 +101,8 @@ afterEach(() => {
   window.history.replaceState({}, '', '/');
 });
 
-describe('新建画布确认', () => {
-  it('有画布时先确认，取消后 URL、localStorage 与当前画布都不变', async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      String(input) === '/paint/canvas/canvas-a'
-        ? jsonResponse(storedCanvasA)
-        : jsonResponse({}, 500),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    render(createElement(App));
-
-    // 先等首次加载结束，避免把它误算成「新建」请求。
-    await waitFor(() => expect(useCanvasStore.getState().status).toBe('ready'));
-    fetchMock.mockClear();
-
-    fireEvent.click(screen.getByRole('button', { name: '新建画布' }));
-
-    const dialog = screen.getByRole('alertdialog');
-    expect(dialog.textContent).toContain('红色练习');
-    expect(screen.getByRole('button', { name: '取消' })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole('button', { name: '取消' }));
-
-    expect(screen.queryByRole('alertdialog')).toBeNull();
-    expect(window.location.search).toBe('?canvasId=canvas-a');
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('canvas-a');
-    expect(useCanvasStore.getState().canvas?.id).toBe('canvas-a');
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it('确认后新建，并可一次点击「返回上一张」回到原画布（图层完整）', async () => {
+describe('新建画布（确认条退场，直接执行）', () => {
+  it('点击「新建画布」直接创建并跳到新画布：无确认条、无「返回上一张」按钮', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
@@ -152,31 +122,14 @@ describe('新建画布确认', () => {
     await waitFor(() => expect(useCanvasStore.getState().status).toBe('ready'));
 
     fireEvent.click(screen.getByRole('button', { name: '新建画布' }));
-    fireEvent.click(screen.getByRole('button', { name: '新建并切换' }));
+
+    // 画布库上线后新建是一次普通操作（ADR-0010）：不再弹确认条，也没有「返回上一张」兜底。
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.queryByRole('button', { name: '返回上一张' })).toBeNull();
 
     await waitFor(() => expect(useCanvasStore.getState().canvas?.id).toBe('canvas-b'));
-    expect(useCanvasStore.getState().previousCanvasId).toBe('canvas-a');
     expect(window.localStorage.getItem(STORAGE_KEY)).toBe('canvas-b');
     expect(window.location.search).toBe('?canvasId=canvas-b');
-
-    const back = screen.getByRole('button', { name: '返回上一张' });
-    const backSpy = vi.spyOn(window.history, 'back');
-    fireEvent.click(back);
-
-    await waitFor(() => expect(useCanvasStore.getState().canvas?.id).toBe('canvas-a'));
-
-    // 返回上一张走 previousCanvasId + replaceState，不调用 history.back()，
-    // 因此不会把用户送出应用，也不新增历史条目。
-    expect(backSpy).not.toHaveBeenCalled();
-    backSpy.mockRestore();
-
-    const canvas = useCanvasStore.getState().canvas;
-    expect(canvas?.layers).toHaveLength(2);
-    expect(canvas?.layers.map((entry) => entry.name)).toEqual(['笔迹 1', '笔迹 2']);
-    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('canvas-a');
-    expect(window.location.search).toBe('?canvasId=canvas-a');
-    expect(useCanvasStore.getState().previousCanvasId).toBeNull();
-    expect(screen.queryByRole('button', { name: '返回上一张' })).toBeNull();
   });
 
   it('新建失败时当前画布仍可用，URL 与 localStorage 不被覆盖', async () => {
@@ -193,7 +146,6 @@ describe('新建画布确认', () => {
     await waitFor(() => expect(useCanvasStore.getState().status).toBe('ready'));
 
     fireEvent.click(screen.getByRole('button', { name: '新建画布' }));
-    fireEvent.click(screen.getByRole('button', { name: '新建并切换' }));
 
     await waitFor(() => expect(useCanvasStore.getState().error).not.toBeNull());
 

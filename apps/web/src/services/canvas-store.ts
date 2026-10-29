@@ -56,11 +56,6 @@ interface CanvasState {
    * 与「还没有画布」（id 为 null）。
    */
   requestedCanvasId: string | null;
-  /**
-   * 单级回退指针。新建画布容易误点，而这一轮没有画布列表，记住一个 id
-   * 就足以让上一张文档一键返回。
-   */
-  previousCanvasId: string | null;
   /** 与 `saveState === 'saving'` 保持同步，供既有的禁用逻辑使用。 */
   saving: boolean;
   saveState: SaveState;
@@ -92,7 +87,6 @@ interface CanvasState {
    * SSE 订阅随 canvasId 变 null 自然断开。
    */
   closeActiveCanvas: () => void;
-  returnToPreviousCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
   refreshCanvas: () => Promise<void>;
   renameCanvas: (name: string) => Promise<void>;
@@ -399,7 +393,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   status: 'idle',
   error: null,
   requestedCanvasId: null,
-  previousCanvasId: null,
   saving: false,
   saveState: 'idle',
   lastSavedAt: null,
@@ -427,7 +420,6 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         status: 'ready',
         error: null,
         requestedCanvasId: canvas.id,
-        previousCanvasId: previous?.id ?? get().previousCanvasId,
         activeLayerId: topLayerId(canvas),
       });
     } catch (error) {
@@ -447,49 +439,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       status: 'idle',
       error: null,
       requestedCanvasId: null,
-      previousCanvasId: null,
       activeLayerId: null,
       ...resetSaveState(),
     });
-  },
-
-  returnToPreviousCanvas: async () => {
-    const previousId = get().previousCanvasId;
-    const current = get().canvas;
-
-    if (!previousId) {
-      return;
-    }
-
-    // 切换文档会重置上一张的持久化状态。
-    set({ status: 'loading', error: null, ...resetSaveState() });
-
-    try {
-      const canvas = await getCanvas(previousId);
-      rememberCanvas(canvas.id);
-      set({
-        canvas,
-        status: 'ready',
-        error: null,
-        requestedCanvasId: canvas.id,
-        previousCanvasId: null,
-        activeLayerId: topLayerId(canvas),
-      });
-    } catch (error) {
-      // 返回失败不能把当前文档一起拖下水。
-      const missing = error instanceof ApiError && error.status === 404;
-      const message = missing
-        ? '上一张画布不存在，可能已被删除。'
-        : describeCanvasError(error, '无法返回上一张画布');
-
-      set({
-        canvas: current,
-        status: current ? 'ready' : 'error',
-        requestedCanvasId: current?.id ?? previousId,
-        previousCanvasId: missing ? null : previousId,
-        error: message,
-      });
-    }
   },
 
   renameCanvas: async (name: string) => {
