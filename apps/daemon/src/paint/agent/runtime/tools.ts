@@ -477,24 +477,28 @@ function createLayer(
   }
 
   try {
-    const updated = dispatcher.dispatch(canvasId, {
-      actor: 'agent',
-      // Without an observation the tool keeps its old behaviour (write against
-      // the revision it just read); with one, the dispatcher rejects a stale
-      // write instead of overwriting the user's edit.
-      expectedRevision: requestedRevision ?? canvas.revision,
-      action: {
-        type: 'canvas_create_layer',
-        layer: {
-          name,
-          type: 'ai-generated',
-          content: { kind: 'svg', svg: object.svg },
-          ...(object.visible === undefined ? {} : { visible: object.visible }),
-          ...(object.opacity === undefined ? {} : { opacity: object.opacity }),
-          metadata: { prompt: context.prompt },
+    const updated = dispatcher.dispatch(
+      canvasId,
+      {
+        actor: 'agent',
+        // Without an observation the tool keeps its old behaviour (write against
+        // the revision it just read); with one, the dispatcher rejects a stale
+        // write instead of overwriting the user's edit.
+        expectedRevision: requestedRevision ?? canvas.revision,
+        action: {
+          type: 'canvas_create_layer',
+          layer: {
+            name,
+            type: 'ai-generated',
+            content: { kind: 'svg', svg: object.svg },
+            ...(object.visible === undefined ? {} : { visible: object.visible }),
+            ...(object.opacity === undefined ? {} : { opacity: object.opacity }),
+            metadata: { prompt: context.prompt },
+          },
         },
       },
-    });
+      context.trace,
+    );
 
     const created = updated.layers[updated.layers.length - 1];
 
@@ -621,11 +625,15 @@ function updateLayer(
   }
 
   try {
-    const updated = dispatcher.dispatch(canvasId, {
-      actor: 'agent',
-      expectedRevision: requestedRevision ?? canvas.revision,
-      action: { type: 'canvas_update_layer', layerId, patch },
-    });
+    const updated = dispatcher.dispatch(
+      canvasId,
+      {
+        actor: 'agent',
+        expectedRevision: requestedRevision ?? canvas.revision,
+        action: { type: 'canvas_update_layer', layerId, patch },
+      },
+      context.trace,
+    );
     const layer = updated.layers.find((candidate) => candidate.id === layerId);
 
     return {
@@ -717,11 +725,15 @@ async function deleteLayer(
   }
 
   try {
-    const updated = dispatcher.dispatch(canvasId, {
-      actor: 'agent',
-      expectedRevision: observedRevision,
-      action: { type: 'canvas_delete_layer', layerId },
-    });
+    const updated = dispatcher.dispatch(
+      canvasId,
+      {
+        actor: 'agent',
+        expectedRevision: observedRevision,
+        action: { type: 'canvas_delete_layer', layerId },
+      },
+      context.trace,
+    );
 
     return { ok: true, layerId, revision: updated.revision };
   } catch (error) {
@@ -780,7 +792,7 @@ function undo(
   }
 
   try {
-    const updated = dispatcher.undo(canvasId, canvas.revision, 'agent');
+    const updated = dispatcher.undo(canvasId, canvas.revision, 'agent', context.trace);
 
     return {
       ok: true,

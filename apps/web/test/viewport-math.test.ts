@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampScale,
+  docRectToScreen,
   docToScreen,
   fitScale,
   fitViewport,
@@ -70,6 +71,31 @@ describe('docToScreen：文档坐标 → 屏幕像素', () => {
     // 1920*0.5 + 10 = 970；1080*0.5 + 20 = 560
     const vpt = [0.5, 0, 0, 0.5, 10, 20] as const;
     expect(docToScreen(1920, 1080, vpt)).toEqual({ x: 970, y: 560 });
+  });
+});
+
+describe('docRectToScreen：文档矩形 → 屏幕像素矩形（②05 叠加层换算）', () => {
+  it('vpt = [0.5,0,0,0.5,10,20]：左上角与右下角分别过 docToScreen', () => {
+    // 左上：100*0.5+10=60，50*0.5+20=45；右下：300*0.5+10=160，150*0.5+20=95
+    const vpt = [0.5, 0, 0, 0.5, 10, 20] as const;
+    expect(
+      docRectToScreen({ left: 100, top: 50, width: 200, height: 100 }, vpt),
+    ).toEqual({ left: 60, top: 45, width: 100, height: 50 });
+  });
+
+  it('200% 缩放 + 偏移：文档 100×100 框映射成 200×200 屏幕框', () => {
+    // 100*2+5=205；0*2+5=5；宽高 100*2=200
+    const vpt = [2, 0, 0, 2, 5, 5] as const;
+    expect(
+      docRectToScreen({ left: 0, top: 0, width: 100, height: 100 }, vpt),
+    ).toEqual({ left: 5, top: 5, width: 200, height: 200 });
+  });
+
+  it('单位矩阵时文档像素即屏幕像素', () => {
+    const vpt = [1, 0, 0, 1, 0, 0] as const;
+    expect(
+      docRectToScreen({ left: 100, top: 50, width: 200, height: 100 }, vpt),
+    ).toEqual({ left: 100, top: 50, width: 200, height: 100 });
   });
 });
 

@@ -14,6 +14,7 @@ import type {
 } from '@paintcodex/protocol';
 import { CommandDispatcher } from '../paint/command-dispatcher.js';
 import type { CodexRuntime } from '../paint/agent/runtime/codex-runtime.js';
+import { getRequestSpan } from '../observability/request-context.js';
 import {
   CanvasNotFoundError,
   LayerNotFoundError,
@@ -70,7 +71,9 @@ export function registerPaintRoutes(
       });
     }
 
-    return reply.code(201).send(dispatcher.createCanvas(body, 'user'));
+    return reply
+      .code(201)
+      .send(dispatcher.createCanvas(body, 'user', getRequestSpan(request) ?? undefined));
   });
 
   app.get<{ Querystring: { limit?: string; offset?: string; sort?: string } }>(
@@ -140,7 +143,12 @@ export function registerPaintRoutes(
       }
 
       try {
-        return dispatcher.renameCanvas(request.params.id, request.body.name.trim(), 'user');
+        return dispatcher.renameCanvas(
+          request.params.id,
+          request.body.name.trim(),
+          'user',
+          getRequestSpan(request) ?? undefined,
+        );
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -237,11 +245,15 @@ export function registerPaintRoutes(
 
       try {
         return reply.code(201).send(
-          dispatcher.dispatch(request.params.id, {
-            actor: 'user',
-            expectedRevision,
-            action: { type: 'canvas_create_layer', layer },
-          }),
+          dispatcher.dispatch(
+            request.params.id,
+            {
+              actor: 'user',
+              expectedRevision,
+              action: { type: 'canvas_create_layer', layer },
+            },
+            getRequestSpan(request) ?? undefined,
+          ),
         );
       } catch (error) {
         return sendPaintError(reply, error);
@@ -272,15 +284,19 @@ export function registerPaintRoutes(
       const { expectedRevision, actor: _actor, ...patch } = body;
 
       try {
-        return dispatcher.dispatch(request.params.id, {
-          actor: 'user',
-          expectedRevision,
-          action: {
-            type: 'canvas_update_layer',
-            layerId: request.params.layerId,
-            patch,
+        return dispatcher.dispatch(
+          request.params.id,
+          {
+            actor: 'user',
+            expectedRevision,
+            action: {
+              type: 'canvas_update_layer',
+              layerId: request.params.layerId,
+              patch,
+            },
           },
-        });
+          getRequestSpan(request) ?? undefined,
+        );
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -303,14 +319,18 @@ export function registerPaintRoutes(
     }
 
     try {
-      return dispatcher.dispatch(request.params.id, {
-        actor: 'user',
-        expectedRevision,
-        action: {
-          type: 'canvas_delete_layer',
-          layerId: request.params.layerId,
+      return dispatcher.dispatch(
+        request.params.id,
+        {
+          actor: 'user',
+          expectedRevision,
+          action: {
+            type: 'canvas_delete_layer',
+            layerId: request.params.layerId,
+          },
         },
-      });
+        getRequestSpan(request) ?? undefined,
+      );
     } catch (error) {
       return sendPaintError(reply, error);
     }
@@ -329,11 +349,15 @@ export function registerPaintRoutes(
       }
 
       try {
-        return dispatcher.dispatch(request.params.id, {
-          actor: 'user',
-          expectedRevision: body.expectedRevision,
-          action: body.action,
-        });
+        return dispatcher.dispatch(
+          request.params.id,
+          {
+            actor: 'user',
+            expectedRevision: body.expectedRevision,
+            action: body.action,
+          },
+          getRequestSpan(request) ?? undefined,
+        );
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -350,7 +374,12 @@ export function registerPaintRoutes(
       }
 
       try {
-        return dispatcher.undo(request.params.id, expectedRevision, 'user');
+        return dispatcher.undo(
+          request.params.id,
+          expectedRevision,
+          'user',
+          getRequestSpan(request) ?? undefined,
+        );
       } catch (error) {
         return sendPaintError(reply, error);
       }
@@ -367,7 +396,12 @@ export function registerPaintRoutes(
       }
 
       try {
-        return dispatcher.redo(request.params.id, expectedRevision, 'user');
+        return dispatcher.redo(
+          request.params.id,
+          expectedRevision,
+          'user',
+          getRequestSpan(request) ?? undefined,
+        );
       } catch (error) {
         return sendPaintError(reply, error);
       }
