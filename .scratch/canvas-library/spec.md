@@ -133,8 +133,9 @@ GET /paint/canvas/:id/thumbnail
 - 新增 `useChatStore`：`transcripts: Record<string, ChatMessage[]>`，键是 `canvasId`。
 - `AiChatPanel` 的 `setMessages` 全部改为写 `transcripts[runCanvasId ?? 当前 canvasId]`；发送时捕获的 `runCanvasId` 已经是现存机制（`AiChatPanel.tsx:348-349`）。
 - 画布切换 / 新建时：先 `abort()` 在飞请求，再向**发起时那张**画布的桶追加一条「已取消」，然后切换到新桶。
-- 服务端不存对话（沿用 UX-24：画布在 SQLite，对话是会话态）。刷新即空。
-- 不设条数上限——它本来就在内存里，随刷新消失。
+- 服务端不存对话（沿用 UX-24：画布在 SQLite，对话是会话态）。
+- **2026-10-29 修订**：桶写 `sessionStorage`（键 `paintcodex.chat.transcripts.v1`），会话边界从「一次页面生命周期」放宽到「一个标签页生命周期」——同标签页刷新/切视图不再丢记录，关标签页仍然清空，服务端仍然不存对话。理由：收起对话列曾经没有可见的展开入口（见票 ②01 回归修复），用户只能靠刷新回来，而刷新会把记录清空，两件事叠加就成了「记录莫名消失」。恢复时收敛在飞残留：`generating` 记作 `incomplete`、运行中工具判失败、挂起确认条置 `expired`。
+- 不设条数上限；存储损坏或配额写满时退回空记录，内存会话照常继续。画布硬删除时同步丢弃它的桶。
 
 ### 7. 「返回上一张」与新建确认条退场
 

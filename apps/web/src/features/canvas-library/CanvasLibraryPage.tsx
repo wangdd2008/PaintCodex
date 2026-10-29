@@ -6,6 +6,7 @@ import {
   renameCanvas,
 } from '../../services/api';
 import { describeCanvasError, useCanvasStore } from '../../services/canvas-store';
+import { useChatStore } from '../ai-chat/chat-store';
 import { displayCanvasName } from '../../services/naming';
 import { buildCanvasUrl } from '../../app/view-route';
 import { formatRelativeTime } from './canvas-library-time';
@@ -79,6 +80,9 @@ export function CanvasLibraryPage({
   function handleDeleted(id: string) {
     setItems((prev) => prev.filter((item) => item.id !== id));
     setTotal((prev) => Math.max(0, prev - 1));
+
+    // 画布没了，它的会话记录也没有归属了；留着只会在 sessionStorage 里堆积。
+    useChatStore.getState().dropTranscript(id);
 
     // 删的是当前打开的画布：工作区里那张已经不存在了，清掉活动画布槽。
     if (useCanvasStore.getState().canvas?.id === id) {
