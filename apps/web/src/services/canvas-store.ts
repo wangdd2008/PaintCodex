@@ -87,6 +87,11 @@ interface CanvasState {
    */
   isDrawing: boolean;
   createNewCanvas: () => Promise<void>;
+  /**
+   * 画布库删掉当前打开的文档后调用：活动画布槽、地址栏与 localStorage 一起清空，
+   * SSE 订阅随 canvasId 变 null 自然断开。
+   */
+  closeActiveCanvas: () => void;
   returnToPreviousCanvas: () => Promise<void>;
   loadCanvas: (id: string) => Promise<void>;
   refreshCanvas: () => Promise<void>;
@@ -433,6 +438,19 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         error: describeCanvasError(error, '无法创建画布'),
       });
     }
+  },
+
+  closeActiveCanvas: () => {
+    rememberCanvas(null);
+    set({
+      canvas: null,
+      status: 'idle',
+      error: null,
+      requestedCanvasId: null,
+      previousCanvasId: null,
+      activeLayerId: null,
+      ...resetSaveState(),
+    });
   },
 
   returnToPreviousCanvas: async () => {
