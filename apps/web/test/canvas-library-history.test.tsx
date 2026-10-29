@@ -82,7 +82,6 @@ beforeEach(() => {
     status: 'ready',
     error: null,
     requestedCanvasId: docA.id,
-    previousCanvasId: null,
     saving: false,
     activeLayerId: null,
   });

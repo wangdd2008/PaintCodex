@@ -31,7 +31,7 @@ export function CanvasNameEditor() {
     inputRef.current?.select();
   }, [editing]);
 
-  // 切换画布（新建或「返回上一张」）时不能把这份草稿带过去。
+  // 切换画布（新建或从画布库打开别的画布）时不能把这份草稿带过去。
   useEffect(() => {
     setEditing(false);
     setDraft(displayCanvasName(name));
