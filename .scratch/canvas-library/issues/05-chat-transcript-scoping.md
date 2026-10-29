@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Covers:** 画布库 §6
 
@@ -12,16 +12,21 @@
 
 ## Acceptance Criteria
 
-- [ ] 新增 `useChatStore`：`transcripts: Record<string, ChatMessage[]>`，键为 `canvasId`。
-- [ ] `AiChatPanel` 的所有 `setMessages` 改为写入 `transcripts[runCanvasId ?? 当前 canvasId]`；切换画布后渲染的永远是当前画布的桶。
-- [ ] 新建画布后显示空会话（旧画布的气泡不再出现）。
-- [ ] 一次 AI 回复进行中切走画布：调用 `abort()`，向**发起时那张**画布的桶追加一条「已取消」，新画布不受影响。
-- [ ] 在没有画布的状态下不显示任何历史（空态），输入框仍禁用并提示先新建画布。
-- [ ] 刷新页面后所有桶清空（会话态，沿用 UX-24），不新增服务端表。
-- [ ] 组件测试覆盖：新建后旧消息不可见；切回本会话内旧画布可见其消息；切走时 abort 被调用。
+- [x] 新增 `useChatStore`：`transcripts: Record<string, ChatMessage[]>`，键为 `canvasId`。
+- [x] `AiChatPanel` 的所有 `setMessages` 改为写入 `transcripts[runCanvasId ?? 当前 canvasId]`；切换画布后渲染的永远是当前画布的桶。
+- [x] 新建画布后显示空会话（旧画布的气泡不再出现）。
+- [x] 一次 AI 回复进行中切走画布：调用 `abort()`，向**发起时那张**画布的桶追加一条「已取消」，新画布不受影响。
+- [x] 在没有画布的状态下不显示任何历史（空态），输入框仍禁用并提示先新建画布。
+- [x] 刷新页面后所有桶清空（会话态，沿用 UX-24），不新增服务端表。
+- [x] 组件测试覆盖：新建后旧消息不可见；切回本会话内旧画布可见其消息；切走时 abort 被调用。
 
 ## Notes
 
 - `runCanvasId` 已存在（`AiChatPanel.tsx:348-349`），本票只是让写入目标用它而不是「当前画布」。
 - 不设条数上限；不写 localStorage、不写 sessionStorage。
 - `ChatMessage` 不新增 `canvasId` 字段——桶的键已经表达了归属。
+
+
+## Comments
+
+- 2026-10-29 · 实现完成：`5a0c997`，合入 integration 分支 `feat/canvas-library-workspace-monitor`（merge `c61d6f2`）；经 code-review 双轴复查与统一修复（`4475df8`/`bdcc10a`）后验收全部满足，关闭。

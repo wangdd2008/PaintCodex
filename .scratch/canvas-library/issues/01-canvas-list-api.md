@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Covers:** 画布库 §1
 
@@ -12,17 +12,22 @@
 
 ## Acceptance Criteria
 
-- [ ] `GET /paint/canvas?limit=&offset=&sort=` 返回 `{ items, total, limit, offset }`，`items` 元素为 `CanvasSummary`：`id`、`name`、`width`、`height`、`backgroundColor`、`layerCount`、`revision`、`hasThumbnail`、`thumbnailRevision`、`createdAt`、`updatedAt`。
-- [ ] `sort` 只接受 `updated`（默认，`updatedAt DESC`）与 `created`（`createdAt DESC`）；其他值 `400 invalid_query`。
-- [ ] `limit` 1–100（默认 50）；`offset` ≥ 0；越界或非整数 `400`。
-- [ ] `layerCount` 与真实图层数一致（子查询，不 N+1）。
-- [ ] 空库返回 `items: []`、`total: 0`、`200`。
-- [ ] `total` 是不受分页影响的画布总数。
-- [ ] 列表**不**返回缩略图字节，只返回 `hasThumbnail` / `thumbnailRevision`。
-- [ ] 契约类型进 `packages/protocol`（`CanvasSummary`、`CanvasListPage`），前端不重新声明。
+- [x] `GET /paint/canvas?limit=&offset=&sort=` 返回 `{ items, total, limit, offset }`，`items` 元素为 `CanvasSummary`：`id`、`name`、`width`、`height`、`backgroundColor`、`layerCount`、`revision`、`hasThumbnail`、`thumbnailRevision`、`createdAt`、`updatedAt`。
+- [x] `sort` 只接受 `updated`（默认，`updatedAt DESC`）与 `created`（`createdAt DESC`）；其他值 `400 invalid_query`。
+- [x] `limit` 1–100（默认 50）；`offset` ≥ 0；越界或非整数 `400`。
+- [x] `layerCount` 与真实图层数一致（子查询，不 N+1）。
+- [x] 空库返回 `items: []`、`total: 0`、`200`。
+- [x] `total` 是不受分页影响的画布总数。
+- [x] 列表**不**返回缩略图字节，只返回 `hasThumbnail` / `thumbnailRevision`。
+- [x] 契约类型进 `packages/protocol`（`CanvasSummary`、`CanvasListPage`），前端不重新声明。
 
 ## Notes
 
 - 新增 `CanvasRepository.list({ limit, offset, sort })` 与 `count()`。
 - `hasThumbnail` 通过 `LEFT JOIN canvas_thumbnails` 得到；票 03 落地前该表可能不存在，查询要用 `CREATE TABLE IF NOT EXISTS` 保证顺序无关。
 - 不做时间范围、搜索、标签。
+
+
+## Comments
+
+- 2026-10-29 · 实现完成：`29e341f`，合入 integration 分支 `feat/canvas-library-workspace-monitor`（merge `cd7e460`）；经 code-review 双轴复查与统一修复（`4475df8`/`bdcc10a`）后验收全部满足，关闭。
