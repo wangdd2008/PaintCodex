@@ -107,6 +107,23 @@ describe('AgentLogRepository.summarizeTraces', () => {
     });
   });
 
+  it('components 同时聚合 source 与 target：只作为 target 出现的组件（如 sqlite）也入列', () => {
+    const repository = createRepository();
+
+    // daemon→sqlite 的落库记录里 sqlite 只出现在 target 端（canvasPersist）。
+    // source 单口径会漏掉 sqlite，导致拓扑 SQLite chip 与追踪列表组件路径恒空。
+    repository.insert({ traceId: 'trace-sqlite', spanId: 's1', timestamp: 1_000, category: 'http', message: 'http_request', source: 'browser', target: 'daemon' });
+    repository.insert({ traceId: 'trace-sqlite', spanId: 's2', parentId: 's1', timestamp: 1_100, category: 'canvas-action', message: 'canvas_persist', source: 'daemon', target: 'sqlite' });
+
+    const page = repository.summarizeTraces({ now: 2_000, windowMs: 5_000 });
+
+    expect(page.items[0]).toMatchObject({
+      traceId: 'trace-sqlite',
+      // 与前端 buildSequence 同口径：source∪target，按行内 source→target 首次出现排序。
+      components: ['browser', 'daemon', 'sqlite'],
+    });
+  });
+
   it('hasError 只返回 errorCount 大于 0 的追踪', () => {
     const repository = createRepository();
 

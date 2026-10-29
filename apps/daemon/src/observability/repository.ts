@@ -82,6 +82,7 @@ interface TraceDetailRow {
   canvas_id: string | null;
   actor: Actor | null;
   source: LogComponent | null;
+  target: LogComponent | null;
 }
 
 const INSERT_SQL = `
@@ -267,7 +268,7 @@ export class AgentLogRepository {
     const detailRows = this.db
       .prepare(
         `SELECT trace_id, timestamp, id, parent_id, category, message,
-                payload, canvas_id, actor, source
+                payload, canvas_id, actor, source, target
          FROM agent_logs
          WHERE trace_id IN (${placeholders}) AND timestamp >= ?
          ORDER BY trace_id ASC, timestamp ASC, id ASC`,
@@ -285,7 +286,15 @@ export class AgentLogRepository {
         continue;
       }
 
-      if (row.source !== null) {
+      // components 取 source∪target（与前端 buildSequence 同口径）：daemon→sqlite
+      // 的落库记录里 sqlite 只出现在 target 端，单取 source 会漏掉它，
+      // 进而让追踪列表的「组件路径」与拓扑 SQLite chip 恒空。
+      // 同一行内先记 source 再记 target，与时序图列顺序一致。
+      for (const component of [row.source, row.target]) {
+        if (component === null) {
+          continue;
+        }
+
         let seen = seenComponents.get(row.trace_id);
 
         if (!seen) {
@@ -293,9 +302,9 @@ export class AgentLogRepository {
           seenComponents.set(row.trace_id, seen);
         }
 
-        if (!seen.has(row.source)) {
-          seen.add(row.source);
-          summary.components.push(row.source);
+        if (!seen.has(component)) {
+          seen.add(component);
+          summary.components.push(component);
         }
       }
 
