@@ -93,6 +93,7 @@ export function CanvasLibraryPage({
   if (loading) {
     return (
       <main className="library-area" aria-busy="true">
+        <h1 className="library-title">画布库</h1>
         加载中…
       </main>
     );
@@ -101,6 +102,7 @@ export function CanvasLibraryPage({
   if (loadError) {
     return (
       <main className="library-area">
+        <h1 className="library-title">画布库</h1>
         <p role="alert" className="library-error">
           {loadError}
         </p>
@@ -114,15 +116,20 @@ export function CanvasLibraryPage({
   if (items.length === 0) {
     return (
       <main className="library-area library-area--empty">
-        <button type="button" className="library-cta" onClick={onCreateCanvas}>
-          新建画布
-        </button>
+        <div className="library-empty">
+          <h1 className="library-title">画布库</h1>
+          <p className="library-empty__text">还没有画布。新建一张，开始绘画。</p>
+          <button type="button" className="library-cta" onClick={onCreateCanvas}>
+            新建画布
+          </button>
+        </div>
       </main>
     );
   }
 
   return (
     <main className="library-area">
+      <h1 className="library-title">画布库</h1>
       <div className="library-grid">
         {items.map((item) => (
           <CanvasCard
@@ -358,7 +365,21 @@ function CardNameField({ summary, onRenamed }: CardNameFieldProps) {
         onClick={beginEdit}
         disabled={saving}
       >
-        ✎
+        <svg
+          className="icon-edit"
+          viewBox="0 0 16 16"
+          width="12"
+          height="12"
+          aria-hidden="true"
+        >
+          <path
+            d="M11.5 2.2 13.8 4.5 5.2 13.1 2 14 2.9 10.8z"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
       {error ? (
         <span role="alert" className="canvas-card__error">

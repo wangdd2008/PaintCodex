@@ -140,7 +140,7 @@ export function CanvasStage() {
   if (status === 'loading') {
     return (
       <div className="canvas-gate canvas-gate--loading" aria-busy="true">
-        <p className="canvas-gate__title">正在加载画布…</p>
+        <h1 className="canvas-gate__title">正在加载画布…</h1>
         <p className="canvas-gate__description">正在从本地服务读取画布内容。</p>
       </div>
     );
@@ -151,9 +151,9 @@ export function CanvasStage() {
 
     return (
       <div className="canvas-gate canvas-gate--error" role="alert">
-        <p className="canvas-gate__title">
+        <h1 className="canvas-gate__title">
           {isLoadFailure ? '画布加载失败' : '无法新建画布'}
-        </p>
+        </h1>
         <p className="canvas-gate__reason">{describeCanvasFailure(error)}</p>
         <div className="canvas-gate__actions">
           <button type="button" className="canvas-gate__cta" onClick={retry}>
@@ -175,7 +175,7 @@ export function CanvasStage() {
 
   return (
     <div className="canvas-gate canvas-gate--no-canvas">
-      <p className="canvas-gate__title">还没有画布</p>
+      <h1 className="canvas-gate__title">还没有画布</h1>
       <p className="canvas-gate__description">
         1920 × 1080，画完可以让 AI 添加图层。
       </p>

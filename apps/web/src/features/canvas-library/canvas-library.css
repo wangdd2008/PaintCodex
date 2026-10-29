@@ -1,4 +1,11 @@
+/*
+ * 画布库：居中列（max 1200px），卡片为真黑平面语言——#111 面、1px 淡边、
+ * 20px 圆角、无阴影。空态与主操作反白。
+ */
 .library-area {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
   padding: 32px;
   overflow-y: auto;
 }
@@ -7,34 +14,79 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  min-height: 100%;
 }
 
+/* 页面标题（h1）。 */
+.library-title {
+  margin: 0 0 24px;
+  color: var(--text);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* 空态：标题 + 一句引导 + 主操作，居中成组。 */
+.library-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.library-empty .library-title {
+  margin: 0;
+}
+
+.library-empty__text {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: var(--fs-body);
+  line-height: 1.6;
+}
+
+/* 空态主操作：反白全圆角。 */
 .library-cta {
-  border: 1px solid #3a3c45;
-  border-radius: 8px;
-  background: #2d5be3;
-  color: #fff;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--text);
+  color: #000000;
   padding: 12px 28px;
   font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 120ms ease;
 }
 
 .library-cta:hover {
-  background: #3a68f0;
+  opacity: 0.88;
+}
+
+.library-cta:focus-visible {
+  outline: 2px solid var(--faint);
+  outline-offset: 2px;
 }
 
 .library-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
-  max-width: 1200px;
 }
 
 .canvas-card {
-  border: 1px solid #2c2d33;
-  border-radius: 8px;
-  background: #1f2026;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
   overflow: hidden;
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.canvas-card:hover {
+  border-color: #2e2e2e;
+  transform: translateY(-1px);
 }
 
 .canvas-card__open {
@@ -50,6 +102,8 @@
   align-items: center;
   justify-content: center;
   overflow: hidden;
+  border-bottom: 1px solid var(--rule);
+  background: #0a0a0a;
 }
 
 .canvas-card__thumb-img {
@@ -61,12 +115,12 @@
 
 .canvas-card__thumb-fallback {
   font-size: 40px;
-  color: rgba(255, 255, 255, 0.55);
+  color: rgba(255, 255, 255, 0.45);
   user-select: none;
 }
 
 .canvas-card__body {
-  padding: 10px 12px;
+  padding: 14px 16px 12px;
 }
 
 .canvas-card__name-row {
@@ -77,7 +131,7 @@
 
 .canvas-card__name {
   font-weight: 600;
-  font-size: 13px;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -86,65 +140,101 @@
 .canvas-card__rename {
   border: none;
   background: transparent;
-  color: #9a9daa;
+  color: var(--faint);
   cursor: pointer;
-  padding: 0 2px;
+  padding: 2px 4px;
+  border-radius: var(--radius-control);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.canvas-card__rename .icon-edit {
+  display: block;
+  width: 12px;
+  height: 12px;
 }
 
 .canvas-card__rename:hover {
-  color: #e8e8ea;
+  background: var(--nested);
+  color: var(--text);
 }
 
 .canvas-card__name-input {
   width: 100%;
-  background: #26272e;
-  border: 1px solid #3a3c45;
-  border-radius: 4px;
+  background: #080808;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-chip);
   color: inherit;
-  padding: 2px 6px;
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 13px;
+}
+
+.canvas-card__name-input:focus-visible {
+  outline: 2px solid var(--faint);
+  outline-offset: 1px;
+  border-color: var(--text);
 }
 
 .canvas-card__meta {
   margin-top: 6px;
   font-size: 12px;
-  color: #9a9daa;
+  color: var(--muted);
 }
 
 .canvas-card__time {
   margin-top: 4px;
   font-size: 12px;
-  color: #6d707c;
+  color: var(--faint);
 }
 
 .canvas-card__actions {
   display: flex;
   justify-content: flex-end;
-  padding: 0 12px 10px;
+  padding: 0 12px 12px;
 }
 
 .canvas-card__delete {
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
   font-size: 12px;
-  padding: 4px 10px;
+  padding: 5px 12px;
+  min-height: 28px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
-.menu-button--danger {
-  border-color: #7a3a3a;
-  color: #e07a7a;
+.canvas-card__delete:hover {
+  border-color: transparent;
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--pill-negative-ink);
+}
+
+.canvas-card__delete:focus-visible {
+  outline: 2px solid var(--faint);
+  outline-offset: 2px;
 }
 
 .canvas-card__error {
-  margin: 0 12px 10px;
+  margin: 0 16px 12px;
   font-size: 12px;
-  color: #e07a7a;
+  color: var(--pill-negative-ink);
 }
 
 .canvas-card__confirm {
-  padding: 16px 12px;
+  padding: 16px;
 }
 
 .canvas-card__confirm-text {
   margin: 0 0 12px;
   font-size: 13px;
+  color: var(--text);
 }
 
 .canvas-card__confirm-actions {
@@ -153,8 +243,15 @@
   justify-content: flex-end;
 }
 
+.canvas-card__confirm-actions .canvas-card__delete {
+  background: var(--pill-negative-ink);
+  border-color: transparent;
+  color: #000000;
+  font-weight: 500;
+}
+
 .library-error {
-  color: #e07a7a;
+  color: var(--pill-negative-ink);
 }
 
 .library-more {

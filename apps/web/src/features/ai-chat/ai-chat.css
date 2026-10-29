@@ -1,3 +1,8 @@
+/*
+ * AI 对话：卡片内的面板。用户气泡升一层明度（#2a2a2a）、助手气泡降一层
+ * （#1a1a1a），靠明度分主客；发送是反白主操作。状态行用 muted/faint，
+ * 颜色只上状态（进行中、失败、确认）。
+ */
 .ai-chat {
   display: flex;
   flex-direction: column;
@@ -6,29 +11,31 @@
 }
 
 .ai-chat__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   border: 0;
-  border-bottom: 1px solid #2c2d33;
+  border-bottom: 1px solid var(--rule);
   background: transparent;
-  color: #b9bcc8;
-  padding: 12px 14px;
+  color: var(--text);
+  padding: 14px var(--card-pad);
   text-align: left;
-  font-size: 12px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: -0.01em;
   cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .ai-chat__toggle:hover {
-  background: #1f2026;
+  background: var(--nested);
 }
 
 .ai-chat__body {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 14px;
-  /* 面板加高时多余高度全归消息列表，而不是堆在输入框下面。 */
+  padding: var(--card-pad);
   flex: 1;
   min-height: 0;
 }
@@ -36,9 +43,8 @@
 .ai-chat__messages {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   flex: 1;
-  /* 不再硬顶 280px：剩余高度全归消息列表，溢出由自己滚动。 */
   max-height: none;
   min-height: 48px;
   overflow-y: auto;
@@ -47,15 +53,15 @@
 
 .ai-chat__empty {
   margin: 0;
-  color: #747785;
+  color: var(--faint);
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.6;
 }
 
 .ai-chat__message {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   max-width: 88%;
 }
 
@@ -70,44 +76,41 @@
 }
 
 .ai-chat__role {
-  color: #747785;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--faint);
+  font-size: var(--fs-small);
+  font-weight: 500;
 }
 
 .ai-chat__text {
   margin: 0;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: 10px 14px;
+  border-radius: 18px;
   font-size: 13px;
-  line-height: 1.45;
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 .ai-chat__message--user .ai-chat__text {
-  border: 1px solid #3a3c45;
-  border-bottom-right-radius: 2px;
-  background: #2f313a;
+  border-bottom-right-radius: 6px;
+  background: var(--raised);
+  color: var(--text);
 }
 
 .ai-chat__message--assistant .ai-chat__text {
-  border: 1px solid #2c2d33;
-  border-bottom-left-radius: 2px;
-  background: #1f2026;
+  border-bottom-left-radius: 6px;
+  background: var(--nested);
+  color: var(--text);
 }
 
 /* Own line inside the bubble so it reads as status, not as reply text. */
 .ai-chat__pending-label {
   display: block;
-  color: #9ea3b0;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--fs-small);
   animation: ai-chat-fade-in 160ms ease-out;
 }
 
-/* 等待文案与「已用 Ns」计时共用一行状态。 */
 .ai-chat__progress {
   display: flex;
   align-items: baseline;
@@ -130,31 +133,31 @@
 }
 
 .ai-chat__write-line {
-  color: #9ea3b0;
-  font-size: 11px;
+  color: var(--faint);
+  font-size: var(--fs-small);
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 
 .ai-chat__write-line--running {
-  color: #b9c6de;
+  color: var(--muted);
 }
 
 .ai-chat__write-line--ok {
-  color: #8fbf9f;
+  color: var(--pill-positive-ink);
 }
 
 .ai-chat__write-line--failed {
-  color: #f2b8b5;
+  color: var(--pill-negative-ink);
 }
 
 .ai-chat__timer {
-  color: #747785;
-  font-size: 11px;
+  color: var(--faint);
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
 }
 
-/* 不可逆动作的确认条：挂在助手气泡内，答复前一直是这一轮的一部分。 */
+/* 不可逆动作的确认条：挂在助手气泡内，暖色淡底（warning 语义）。 */
 .ai-chat__confirmations {
   display: flex;
   flex-direction: column;
@@ -163,10 +166,10 @@
 }
 
 .ai-chat__confirm {
-  border: 1px solid #6b5a34;
-  border-radius: 6px;
-  background: #26231a;
-  padding: 8px 10px;
+  border: 1px solid var(--pill-warning-bg);
+  border-radius: var(--radius-small);
+  background: var(--pill-warning-bg);
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -174,7 +177,7 @@
 
 .ai-chat__confirm-title {
   margin: 0;
-  color: #f0dfb4;
+  color: var(--pill-warning-ink);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
@@ -182,14 +185,15 @@
 
 .ai-chat__confirm-detail {
   margin: 0;
-  color: #d8c48a;
+  color: var(--pill-warning-ink);
   font-size: 11px;
   line-height: 1.45;
+  opacity: 0.9;
 }
 
 .ai-chat__confirm-error {
   margin: 0;
-  color: #f2b8b5;
+  color: var(--pill-negative-ink);
   font-size: 11px;
 }
 
@@ -197,37 +201,40 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 2px;
+  margin-top: 4px;
 }
 
 .ai-chat__confirm-approve,
 .ai-chat__confirm-decline {
-  border: 1px solid #5b5340;
-  border-radius: 6px;
-  padding: 4px 12px;
-  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 0 14px;
+  min-height: 30px;
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
 }
 
 .ai-chat__confirm-approve {
-  border-color: #7a3234;
-  background: #3a1f21;
-  color: #f2b8b5;
+  background: var(--pill-negative-ink);
+  color: #000000;
 }
 
 .ai-chat__confirm-approve:hover:not(:disabled) {
-  background: #4a2628;
+  opacity: 0.88;
 }
 
 .ai-chat__confirm-decline {
-  background: #2b2c33;
-  color: #d5d7e0;
+  background: var(--raised);
+  color: var(--text);
 }
 
 .ai-chat__confirm-decline:hover:not(:disabled) {
-  background: #34353d;
+  background: #3a3a3a;
 }
 
 .ai-chat__confirm-approve:disabled,
@@ -237,14 +244,14 @@
 }
 
 .ai-chat__confirm-status {
-  color: #cbbd93;
+  color: var(--faint);
   font-size: 11px;
 }
 
 /* 运行结束后保留：空白气泡会让人看不出已经完成。 */
 .ai-chat__terminal {
-  color: #8f93a3;
-  font-size: 11px;
+  color: var(--faint);
+  font-size: var(--fs-small);
   font-variant-numeric: tabular-nums;
 }
 
@@ -253,52 +260,53 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  color: #9ea3b0;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--fs-small);
   line-height: 1.4;
 }
 
 .ai-chat__landing-note {
-  color: #747785;
+  color: var(--faint);
 }
 
 .ai-chat__landing-undo {
   border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #9db4e0;
-  padding: 4px 2px;
+  color: var(--text);
+  padding: 4px 10px;
   min-height: 24px;
   font: inherit;
-  font-size: 11px;
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .ai-chat__landing-undo:hover {
-  color: #c9d8f5;
-  text-decoration: underline;
+  background: var(--nested);
 }
 
 .ai-chat__cancelled {
   display: block;
   margin-top: 2px;
-  color: #8f93a3;
-  font-size: 11px;
-  font-style: italic;
+  color: var(--faint);
+  font-size: var(--fs-small);
 }
 
 /* 失败气泡的占位：空内容时它就是气泡正文。 */
 .ai-chat__incomplete {
   display: block;
   margin-top: 2px;
-  color: #f2b8b5;
-  font-size: 11px;
+  color: var(--pill-negative-ink);
+  font-size: var(--fs-small);
 }
 
 .ai-chat__notice {
   display: block;
   margin-top: 2px;
-  color: #cfb26c;
-  font-size: 11px;
+  color: var(--pill-warning-ink);
+  font-size: var(--fs-small);
 }
 
 @keyframes ai-chat-fade-in {
@@ -317,11 +325,11 @@
   justify-content: space-between;
   gap: 8px;
   margin: 0;
-  padding: 8px 10px;
-  border: 1px solid #6b3434;
-  border-radius: 6px;
-  background: #2a1b1d;
-  color: #f2b8b5;
+  padding: 10px 12px;
+  border: 1px solid var(--pill-negative-bg);
+  border-radius: var(--radius-small);
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -332,19 +340,21 @@
 
 .ai-chat__retry {
   flex: none;
-  border: 1px solid #6b3434;
-  border-radius: 6px;
-  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 0 12px;
   min-height: 28px;
-  background: #3a1f21;
-  color: #f2b8b5;
+  background: var(--pill-negative-ink);
+  color: #000000;
   font: inherit;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 120ms ease;
 }
 
 .ai-chat__retry:hover:not(:disabled) {
-  background: #4a2628;
+  opacity: 0.88;
 }
 
 .ai-chat__retry:disabled {
@@ -355,11 +365,11 @@
 /* Why the composer is disabled: AI actions need a canvas to land on. */
 .ai-chat__blocked {
   margin: 0;
-  padding: 8px 10px;
-  border: 1px solid #4d4630;
-  border-radius: 6px;
-  background: #26231a;
-  color: #d8c48a;
+  padding: 10px 12px;
+  border: 1px solid var(--pill-warning-bg);
+  border-radius: var(--radius-small);
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
   font-size: 12px;
   line-height: 1.45;
 }
@@ -373,21 +383,28 @@
 .ai-chat__input {
   width: 100%;
   resize: vertical;
-  border: 1px solid #3a3c45;
-  border-radius: 6px;
-  background: #17181c;
-  color: inherit;
-  padding: 8px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-small);
+  background: #080808;
+  color: var(--text);
+  padding: 10px 12px;
   font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  transition: border-color 120ms ease;
 }
 
 .ai-chat__input:focus {
-  outline: 1px solid #5a5e6d;
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--text);
+}
+
+.ai-chat__input::placeholder {
+  color: var(--faint);
 }
 
 .ai-chat__input:disabled {
-  opacity: 0.7;
+  opacity: 0.6;
 }
 
 .ai-chat__actions {
@@ -400,35 +417,46 @@
 .ai-chat__send,
 .ai-chat__cancel {
   margin-left: auto;
-  border: 1px solid;
-  border-radius: 6px;
-  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  padding: 0 18px;
+  min-height: var(--control-height-sm);
   font: inherit;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    opacity 120ms ease;
 }
 
 .ai-chat__clear {
   border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #8d90a0;
-  padding: 4px 2px;
+  color: var(--faint);
+  padding: 4px 10px;
+  min-height: 28px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-small);
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .ai-chat__clear:hover {
-  color: #d5d7e0;
+  background: var(--nested);
+  color: var(--text);
 }
 
+/* 发送：反白主操作（true-black-flat 的 move）。 */
 .ai-chat__send {
-  border-color: #3a3c45;
-  background: #26272e;
-  color: inherit;
+  background: var(--text);
+  color: #000000;
 }
 
 .ai-chat__send:hover:not(:disabled) {
-  background: #2f313a;
+  background: #e8e8e8;
 }
 
 .ai-chat__send:disabled {
@@ -437,11 +465,10 @@
 }
 
 .ai-chat__cancel {
-  border-color: #7a3234;
-  background: #3a1f21;
-  color: #f2b8b5;
+  background: var(--pill-negative-ink);
+  color: #000000;
 }
 
 .ai-chat__cancel:hover {
-  background: #4a2628;
+  opacity: 0.88;
 }

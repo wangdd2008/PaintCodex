@@ -6,6 +6,28 @@ import {
 } from '../../services/tool-store';
 import './toolbox.css';
 
+/** 选中对勾：SVG 而非字符 ✓，避免被读作 emoji，也不依赖字体字形。 */
+function CheckMark() {
+  return (
+    <svg
+      className="toolbox-check-svg"
+      viewBox="0 0 10 10"
+      width="10"
+      height="10"
+      aria-hidden="true"
+    >
+      <path
+        d="M1.5 5.5 4 8 8.5 2.5"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export function Toolbox() {
   const tool = useToolStore((state) => state.tool);
   const setTool = useToolStore((state) => state.setTool);
@@ -87,7 +109,7 @@ export function Toolbox() {
             >
               {selected ? (
                 <span className="toolbox-check" aria-hidden="true">
-                  ✓
+                  <CheckMark />
                 </span>
               ) : null}
             </button>
@@ -110,7 +132,7 @@ export function Toolbox() {
           />
           {customColorSelected ? (
             <span className="toolbox-check" aria-hidden="true">
-              ✓
+              <CheckMark />
             </span>
           ) : null}
         </label>
@@ -139,7 +161,7 @@ export function Toolbox() {
               />
               {selected ? (
                 <span className="toolbox-width__check" aria-hidden="true">
-                  ✓
+                  <CheckMark />
                 </span>
               ) : null}
             </button>
@@ -164,7 +186,7 @@ export function Toolbox() {
               <span className="toolbox-width__default">默认</span>
             </span>
             <span className="toolbox-width__check" aria-hidden="true">
-              ✓
+              <CheckMark />
             </span>
           </button>
         ) : null}

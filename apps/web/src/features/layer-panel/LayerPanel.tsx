@@ -347,7 +347,12 @@ export function LayerPanel() {
       ) : null}
 
       {!canvas ? (
-        <p className="panel-empty">还没有画布</p>
+        <>
+          <p className="panel-empty">还没有画布</p>
+          <p className="panel-empty panel-empty--hint">
+            新建画布后，每个笔迹与 AI 图层都会按顺序出现在这里。
+          </p>
+        </>
       ) : layers.length === 0 ? (
         <p className="panel-empty">暂无图层。</p>
       ) : (

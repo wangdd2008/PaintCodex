@@ -1,31 +1,39 @@
+/*
+ * 工具条：真黑地面上的竖卡片（#111 / 1px 淡边 / 20px 圆角，无阴影）。
+ * 工具激活只靠明度：文字 muted → white，底升一层；颜色只属于画布与数据。
+ */
 .toolbox {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* 4px 横向内边距：56px 与 48px 工具条下都能放下两列 18px 色块。 */
   padding: 12px 4px;
-  border-right: 1px solid #2c2d33;
-  background: #1b1c21;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
 }
 
 .tool-button {
-  border: 1px solid transparent;
-  border-radius: 8px;
+  border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #b9bcc8;
-  padding: 10px 4px;
-  font-size: 11px;
+  color: var(--muted);
+  padding: 9px 4px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .tool-button:hover:not(:disabled) {
-  background: #26272e;
+  background: var(--nested);
+  color: var(--text);
 }
 
 .tool-button--active {
-  border-color: #5b8def;
-  background: #23314f;
-  color: #e8f0ff;
+  background: var(--active);
+  color: var(--text);
 }
 
 .tool-button:disabled {
@@ -34,8 +42,8 @@
 }
 
 .toolbox-group {
-  border-top: 1px solid #2c2d33;
-  padding-top: 8px;
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
 }
 
 /* 56px 工具条内放两列色块：18 + 4 + 18 = 40，正好等于内容宽度。 */
@@ -51,14 +59,14 @@
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid #6b6f7a;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 50%;
   cursor: pointer;
 }
 
 .toolbox-swatch--selected {
-  border-color: #e8f0ff;
-  box-shadow: 0 0 0 2px #e8f0ff;
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--text);
 }
 
 .toolbox-check {
@@ -66,13 +74,16 @@
   inset: 0;
   display: grid;
   place-items: center;
-  font-size: 10px;
-  line-height: 1;
-  color: #ffffff;
-  text-shadow:
-    0 0 2px #000000,
-    0 0 2px #000000;
   pointer-events: none;
+}
+
+/* 对勾在色块上的可读性：不依赖 text-shadow，用半透明黑圆底。 */
+.toolbox-check .toolbox-check-svg {
+  display: block;
+  width: 10px;
+  height: 10px;
+  color: #ffffff;
+  filter: drop-shadow(0 0 2px rgb(0 0 0 / 85%));
 }
 
 .toolbox-custom {
@@ -83,14 +94,14 @@
 }
 
 .toolbox-custom--selected {
-  box-shadow: 0 0 0 2px #e8f0ff;
+  box-shadow: 0 0 0 2px var(--text);
 }
 
 .toolbox-custom__input {
   width: 18px;
   height: 18px;
   padding: 0;
-  border: 1px solid #6b6f7a;
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: 50%;
   background: transparent;
   appearance: none;
@@ -116,7 +127,7 @@
   border-radius: 50%;
 }
 
-/* 四档粗细：浅底上的实心笔触，按当前颜色和真实像素高度预览。 */
+/* 四档粗细：深底上的真实笔触预览，按当前颜色和真实像素高度。 */
 .toolbox-group--widths {
   display: grid;
   gap: 4px;
@@ -131,18 +142,21 @@
   height: 28px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
-  background: #e8e8ea;
+  border-radius: var(--radius-small);
+  background: var(--nested);
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
 }
 
 .toolbox-width:hover {
-  background: #f4f5f7;
+  background: var(--raised);
 }
 
 .toolbox-width--selected {
-  border-color: #5b8def;
-  box-shadow: 0 0 0 1px #5b8def;
+  border-color: var(--text);
+  box-shadow: 0 0 0 1px var(--text);
 }
 
 .toolbox-width__stroke {
@@ -154,11 +168,16 @@
 .toolbox-width__check {
   position: absolute;
   top: 1px;
-  right: 2px;
-  font-size: 9px;
-  line-height: 1;
-  color: #1b1c21;
+  right: 3px;
+  display: inline-flex;
   pointer-events: none;
+}
+
+.toolbox-width__check .toolbox-check-svg {
+  display: block;
+  width: 9px;
+  height: 9px;
+  color: var(--text);
 }
 
 /* 默认笔宽 6 不在四档里：追加一个带文字、可见选中态的当前值控件。 */
@@ -175,19 +194,19 @@
   align-items: center;
   font-size: 9px;
   line-height: 1;
-  color: #1b1c21;
+  color: var(--text);
   pointer-events: none;
 }
 
 .toolbox-width__default {
   font-size: 8px;
   line-height: 1.2;
-  color: #5b6070;
+  color: var(--faint);
 }
 
 .toolbox-swatch:focus-visible,
 .toolbox-custom__input:focus-visible,
 .toolbox-width:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }

@@ -124,13 +124,13 @@ export function CanvasNameEditor() {
         />
       ) : (
         <>
-          <span
+          <h1
             className="document-name canvas-name__text"
             title="双击重命名"
             onDoubleClick={beginEdit}
           >
             {displayCanvasName(name)}
-          </span>
+          </h1>
           <button
             type="button"
             className="canvas-name__edit"
@@ -146,7 +146,21 @@ export function CanvasNameEditor() {
             }}
             disabled={saving}
           >
-            ✎
+            <svg
+              className="icon-edit"
+              viewBox="0 0 16 16"
+              width="12"
+              height="12"
+              aria-hidden="true"
+            >
+              <path
+                d="M11.5 2.2 13.8 4.5 5.2 13.1 2 14 2.9 10.8z"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinejoin="round"
+              />
+            </svg>
           </button>
         </>
       )}

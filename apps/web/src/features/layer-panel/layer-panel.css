@@ -1,40 +1,49 @@
+/*
+ * 图层面板：卡片内的区块。标题 16px（fs-section）句子式大小写；
+ * 行靠明度分层（#1a1a1a 行、#222 激活行），激活不靠彩色边框；
+ * 状态色只出现在状态（AI 类型、删除、恢复）。
+ */
 .layer-panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* 图层再多也不挤压 AI 面板：列表在自己的容器里滚动。
-     上限随半区走而不是写死 300px，多出的高度永远留给对话。 */
   max-height: min(360px, 50%);
-  padding: 14px;
-  border-bottom: 1px solid #2c2d33;
+  padding: var(--card-pad);
+  border-bottom: 1px solid var(--rule);
 }
 
 .panel-title {
-  margin: 0 0 12px;
-  font-size: 12px;
+  margin: 0 0 14px;
+  font-size: var(--fs-section);
   font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #9a9daa;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 
 .panel-empty {
   margin: 0;
-  color: #747785;
+  color: var(--faint);
   font-size: 13px;
 }
 
-/* 删除恢复条：面板顶部，8 秒或 revision 失效后消失。 */
+.panel-empty--hint {
+  margin-top: 6px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: 0.85;
+}
+
+/* 删除恢复条：中性淡底，撤销动作白字。 */
 .layer-restore {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 0 10px;
-  padding: 7px 10px;
-  border: 1px solid #3b4a66;
-  border-radius: 6px;
-  background: #1e2736;
-  color: #dbe4f7;
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-small);
+  background: var(--pill-neutral-bg);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.4;
 }
@@ -50,10 +59,9 @@
 
 .layer-restore__separator {
   flex: 0 0 auto;
-  color: #8b97ae;
+  color: var(--faint);
 }
 
-/* 命中区 ≥24px；字形保持 12px。 */
 .layer-restore__undo {
   display: inline-flex;
   align-items: center;
@@ -62,22 +70,26 @@
   box-sizing: border-box;
   min-width: 24px;
   min-height: 24px;
-  padding: 0 8px;
-  border: 1px solid #5b8def;
-  border-radius: 5px;
-  background: #2a3a5c;
-  color: #e7eeff;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--raised);
+  color: var(--text);
   font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .layer-restore__undo:hover:not(:disabled) {
-  background: #34486f;
+  background: #3a3a3a;
 }
 
 .layer-restore__undo:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
@@ -94,7 +106,6 @@
   flex-direction: column;
   flex: 1 1 auto;
   gap: 6px;
-  /* 面板限高后由列表接管滚动。 */
   min-height: 0;
   overflow-y: auto;
 }
@@ -104,29 +115,31 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* 38px = 28px 行内控件 + 上下各 4px 内边距 + 2px 边框。 */
   box-sizing: border-box;
-  min-height: 38px;
+  min-height: 40px;
   padding: 4px 10px;
-  border: 1px solid #2c2d33;
-  border-radius: 6px;
-  background: #1b1c21;
+  border-radius: var(--radius-small);
+  background: #1a1a1a;
   font-size: 13px;
+  color: var(--text);
   cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.layer-item:hover {
+  background: #1e1e1e;
 }
 
 .layer-item--active {
-  border-color: #5b8def;
-  background: #23314f;
+  background: #222222;
 }
 
-/* 2px 环 + 2px 间距，颜色 #5b8def 与行底色/选中底色的对比均 ≥3:1。 */
 .layer-item:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid #b4b4b4;
   outline-offset: 2px;
 }
 
-/* 命中区 28×28：靠固定尺寸扩展热区，字形仍是 16px 图标 / 11px 字号。 */
+/* 行内控件：28×28 热区，中性灰，hover 升明度。 */
 .layer-item__visibility {
   display: inline-flex;
   align-items: center;
@@ -139,44 +152,46 @@
   min-height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #7f9ce0;
+  color: var(--faint);
   font-size: 11px;
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .layer-item__visibility:hover {
-  background: #2a2c35;
-  color: #b9ccf5;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
-/* 隐藏态：颜色变淡之外，图标本身叠加斜线。 */
 .layer-item__visibility[aria-pressed='false'] {
   color: #6c7080;
 }
 
 .layer-item__visibility[aria-pressed='false']:hover {
-  color: #9aa2b5;
+  color: var(--muted);
 }
 
 .layer-item__icon {
   display: block;
 }
 
-/* 悬停与键盘聚焦时出现文字提示；tooltip 是装饰，读屏靠 aria-label/aria-pressed。 */
+/* 悬停与键盘聚焦时出现文字提示。 */
 .layer-item__tooltip {
   position: absolute;
-  left: 46px;
+  left: 44px;
   top: 50%;
   z-index: 2;
   transform: translateY(-50%);
-  padding: 3px 8px;
-  border: 1px solid #3a3c45;
-  border-radius: 4px;
-  background: #26272e;
-  color: #e6e8ef;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-chip);
+  background: var(--raised);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.2;
   white-space: nowrap;
@@ -190,7 +205,7 @@
   opacity: 1;
 }
 
-/* 名称是可编辑区域：文字截断，✎ 只在悬停/聚焦时浮在右端，不占常驻宽度。 */
+/* 名称是可编辑区域：文字截断，✎ 只在悬停/聚焦时浮在右端。 */
 .layer-item__name {
   position: relative;
   display: flex;
@@ -207,7 +222,6 @@
   white-space: nowrap;
 }
 
-/* 命中区 24×24：字形 12px，靠固定尺寸扩展热区。 */
 .layer-item__rename {
   position: absolute;
   right: 0;
@@ -223,10 +237,9 @@
   min-height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
-  /* 盖住名称尾部时仍像行的一部分，不出现透字的浮层。 */
-  background: #1b1c21;
-  color: #9a9daa;
+  border-radius: var(--radius-control);
+  background: inherit;
+  color: var(--faint);
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
@@ -234,7 +247,7 @@
 }
 
 .layer-item--active .layer-item__rename {
-  background: #23314f;
+  background: var(--active);
 }
 
 .layer-item:hover .layer-item__rename,
@@ -244,66 +257,76 @@
 }
 
 .layer-item__rename:hover {
-  color: #e6e8ef;
+  color: var(--text);
+}
+
+.layer-item__rename svg,
+.canvas-name__edit svg {
+  display: block;
 }
 
 .layer-item__name-input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 24px;
-  padding: 0 6px;
-  border: 1px solid #5b8def;
-  border-radius: 4px;
-  background: #121317;
-  color: #e6e8ef;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-chip);
+  background: #080808;
+  color: var(--text);
   font: inherit;
   font-size: 13px;
 }
 
 .layer-item__name-input:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid var(--faint);
   outline-offset: 1px;
+  border-color: var(--text);
 }
 
-/* 行尾的不透明度按钮：常显百分比，点开是滑块浮层（票 09）。 */
+/* 行尾的不透明度按钮：常显百分比，点开是滑块浮层。 */
 .layer-item__opacity {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
   box-sizing: border-box;
-  min-width: 34px;
-  min-height: 24px;
-  padding: 0 4px;
-  border: 1px solid #2c2d33;
-  border-radius: 5px;
+  min-width: 36px;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #9a9daa;
+  color: var(--muted);
   font-size: 11px;
   line-height: 1;
   font-variant-numeric: tabular-nums;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
 }
 
 .layer-item__opacity:hover {
-  background: #2a2c35;
-  color: #e6e8ef;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
 .layer-item__opacity[aria-expanded='true'] {
-  border-color: #5b8def;
-  background: #2a3a5c;
-  color: #e7eeff;
+  border-color: var(--text);
+  background: var(--raised);
+  color: var(--text);
 }
 
 .layer-item__rename:focus-visible,
 .layer-item__opacity:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
-/* 滑块浮层：position: fixed + portal，避开列表滚动容器的裁切。 */
+/* 滑块浮层：浮起的控件可以带阴影（规则：只有浮层有阴影）。 */
 .layer-opacity {
   position: fixed;
   z-index: 20;
@@ -313,23 +336,24 @@
     'label value'
     'slider slider';
   gap: 6px 8px;
-  padding: 10px;
-  border: 1px solid #3a3c45;
-  border-radius: 8px;
-  background: #22232a;
-  color: #e6e8ef;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--raised);
+  color: var(--text);
   font-size: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 55%);
 }
 
 .layer-opacity__label {
   grid-area: label;
+  color: var(--muted);
 }
 
 .layer-opacity__value {
   grid-area: value;
   text-align: right;
-  color: #b9ccf5;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -338,26 +362,28 @@
   width: 100%;
   height: 24px;
   margin: 0;
-  accent-color: #5b8def;
+  accent-color: var(--accent);
   cursor: pointer;
 }
 
 .layer-opacity__slider:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
 .layer-item__type {
   flex: 0 0 auto;
-  color: #747785;
+  color: var(--faint);
   font-size: 11px;
 }
 
+/* AI 图层用产品语义的暖橙（同画布 AI 高亮），不引入第二套彩色。 */
 .layer-item__type--ai {
-  color: #b18cff;
+  color: var(--warning);
+  font-weight: 500;
 }
 
-/* 命中区 24×24；字形保持 16px。 */
+/* 删除：hover 才转红，红是信号不是常态。 */
 .layer-item__delete {
   display: inline-flex;
   align-items: center;
@@ -370,23 +396,26 @@
   min-height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #9a9daa;
+  color: var(--faint);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .layer-item__visibility:focus-visible,
 .layer-item__delete:focus-visible {
-  outline: 2px solid #5b8def;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
 .layer-item__delete:hover:not(:disabled) {
-  background: #2a2c35;
-  color: #e07a7a;
+  background: rgba(229, 72, 77, 0.12);
+  color: var(--pill-negative-ink);
 }
 
 .layer-item__delete:disabled {

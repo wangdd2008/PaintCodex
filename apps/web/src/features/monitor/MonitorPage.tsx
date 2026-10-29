@@ -298,6 +298,7 @@ export function MonitorPage() {
   return (
     <div className="monitor-page">
       <div className="monitor-toolbar">
+        <h1 className="monitor-title">监控</h1>
         <span
           className={
             paused ? 'monitor-live monitor-live--paused' : `monitor-live monitor-live--${liveState}`

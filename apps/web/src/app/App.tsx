@@ -427,7 +427,7 @@ export function App() {
                     新建是一次普通操作，成功后地址栏直接指向新画布（ADR-0010）。 */}
                 <button
                   type="button"
-                  className="menu-button"
+                  className="menu-button menu-button--primary"
                   onClick={() => void createNewCanvas()}
                   disabled={status === 'loading'}
                 >
@@ -464,7 +464,7 @@ export function App() {
         ) : (
           <button
             type="button"
-            className="menu-button"
+            className="menu-button menu-button--primary"
             onClick={() => void createFromLibrary()}
           >
             新建画布

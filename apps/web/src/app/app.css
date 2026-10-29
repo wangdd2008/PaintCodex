@@ -1,8 +1,115 @@
+/*
+ * PaintCodex — True-black flat（design-taste-frontend, seed 374440729）
+ *
+ * 真黑平面：侧栏、顶栏与页面共享一个地面，海拔只靠明度分层（#000 地面、
+ * #111 卡片、#2a2a2a 嵌套面板），卡片不加阴影；导航激活只靠文字从 #b4b4b4
+ * 变 #fff；主操作反白（白底黑字的全圆角按钮）。颜色预算 ≤3%，accent 只上
+ * 数据与状态，不碰按钮/标签/导航。画布是唯一光源：真黑环境里一块白纸。
+ *
+ * 字号阶梯：title 20 · section 16 · kpi 24 · body 14 · small 12，不用
+ * 大写跟踪小标签（句子式大小写，tracking 0）。
+ *
+ * Inter 已本地化打包（apps/web/public/fonts/）：不依赖 Google Fonts，
+ * 离线或受限网络下也能渲染同一套字形；中文回退到系统字体。
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/Inter-Latin-400.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/Inter-Latin-500.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/Inter-Latin-600.woff2') format('woff2');
+}
+
 :root {
-  color: #e8e8ea;
-  background: #17181c;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: #ffffff;
+  background: #000000;
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'Microsoft YaHei',
+    sans-serif;
   font-size: 14px;
+  line-height: 1.5;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+
+  /* 明度分层（true-black-flat） */
+  --ground: #000000;
+  --surface: #111111;
+  --raised: #2a2a2a;
+  --nested: #1a1a1a;
+  --active: #222222;
+  --border: #1a1a1a;
+  --rule: #161616;
+  --control: #444444;
+
+  /* 文本三级 */
+  --text: #ffffff;
+  --muted: #b4b4b4;
+  --faint: #949494;
+
+  /* 数据与状态：一个数据色（也是 positive），其余状态各配淡底 */
+  --accent: #c6f24e;
+  --positive: #c6f24e;
+  --negative: #e5484d;
+  --warning: #e5a93b;
+  --chart-1: #c6f24e;
+  --chart-2: #e6e6e6;
+  --chart-3: #6b6b6b;
+
+  --pill-positive-bg: #222a10;
+  --pill-positive-ink: #c6f24e;
+  --pill-negative-bg: #2c1a20;
+  --pill-negative-ink: #e5566f;
+  --pill-warning-bg: #2b2414;
+  --pill-warning-ink: #e5a93b;
+  --pill-neutral-bg: #222222;
+  --pill-neutral-ink: #ffffff;
+
+  /* 半径：软圆角系统，嵌套逐级递减（20 → 12 → 8） */
+  --radius-card: 20px;
+  --radius-panel: 20px;
+  --radius-control: 999px;
+  --radius-small: 12px;
+  --radius-chip: 8px;
+
+  /* 间距与尺寸 */
+  --gap: 14px;
+  --card-pad: 20px;
+  --pad: 22px;
+  --control-height: 36px;
+  --control-height-sm: 32px;
+  --nav-row: 34px;
+  --row-height: 44px;
+
+  /* 字号 */
+  --fs-title: 20px;
+  --fs-section: 16px;
+  --fs-kpi: 24px;
+  --fs-body: 14px;
+  --fs-small: 12px;
+
   /* 对话列宽度（票 ②01）：范围 320–640，运行时由 App 内联覆盖。 */
   --chat-width: 380px;
 }
@@ -14,20 +121,27 @@
 body {
   margin: 0;
   min-height: 100vh;
+  background: var(--ground);
 }
 
 button {
   font: inherit;
 }
 
+/* 数字统一使用等宽数字（app-screen 规则 §9.1） */
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
 .app-shell {
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr) 28px;
+  grid-template-rows: 48px minmax(0, 1fr) 32px;
   height: 100vh;
+  background: var(--ground);
 }
 
 .app-shell--monitor {
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-rows: 48px minmax(0, 1fr);
 }
 
 .app-hidden {
@@ -40,24 +154,28 @@ button {
   overflow: hidden;
 }
 
+/* ---- 菜单栏：页面地面上的 48px 条，无规则，右簇贴边 ---- */
 .menu-bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   padding: 0 16px;
-  border-bottom: 1px solid #2c2d33;
-  background: #1f2026;
+  background: var(--ground);
 }
 
 .brand {
   font-weight: 600;
-  letter-spacing: 0.02em;
-  margin-right: 8px;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  margin-right: 6px;
+  color: var(--text);
 }
 
 .document-name {
-  color: #9a9daa;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 0;
+  font-weight: 400;
 }
 
 .menu-spacer {
@@ -65,26 +183,65 @@ button {
 }
 
 .menu-status {
-  color: #e07a7a;
+  color: var(--pill-negative-ink);
   font-size: 12px;
+  max-width: 34ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
+/* 菜单按钮：全圆角，透明底，hover 升一层明度。 */
 .menu-button {
-  border: 1px solid #3a3c45;
-  border-radius: 6px;
-  background: #26272e;
-  color: inherit;
-  padding: 6px 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  min-height: 32px;
+  padding: 0 14px;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .menu-button:hover:not(:disabled) {
-  background: #2f313a;
+  background: var(--nested);
+  color: var(--text);
 }
 
 .menu-button:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: default;
+}
+
+.menu-button:focus-visible {
+  outline: 2px solid var(--faint);
+  outline-offset: 2px;
+}
+
+/* 主操作：反白全圆角按钮（true-black-flat 的 move）。 */
+.menu-button--primary {
+  background: var(--text);
+  color: #000000;
+  font-weight: 500;
+  border-color: var(--text);
+}
+
+.menu-button--primary:hover:not(:disabled) {
+  background: #e8e8e8;
+  color: #000000;
+}
+
+.menu-button--danger {
+  border-color: transparent;
+  color: var(--pill-negative-ink);
+}
+
+.menu-button--danger:hover:not(:disabled) {
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
 }
 
 /* 抽屉开关只在 ≤860px 出现，桌面始终看得到侧栏。 */
@@ -92,9 +249,12 @@ button {
   display: none;
 }
 
+/* ---- 工作区：四列卡片浮在真黑地面，四周 8px、列间 8px ---- */
 .workspace {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr) 240px var(--chat-width, 380px);
+  gap: 8px;
+  padding: 8px;
   min-height: 0;
 }
 
@@ -104,10 +264,6 @@ button {
     grid-template-columns: 56px minmax(0, 1fr) 28px var(--chat-width, 380px);
   }
 
-  /*
-   * 对话列收起时同样留 28px 竖条，否则整列 display:none，展开入口只剩
-   * 图层列右缘那条透明拖拽条。≤1100px 侧栏是单一面板，列数不同，不在此列。
-   */
   .workspace--chat-collapsed {
     grid-template-columns: 56px minmax(0, 1fr) 240px 28px;
   }
@@ -120,23 +276,25 @@ button {
 /*
  * 桌面端：.side-panel 只是一个逻辑分组，display:contents 让它的两个子列
  * 直接成为 .workspace 的网格项（240px 图层列 + var(--chat-width) 对话列）。
- * ≤1100px 媒体查询里把它改回 flex 纵向堆叠（抽屉形态，票 ②03 接手窄屏）。
+ * ≤1100px 媒体查询里把它改回 flex 纵向堆叠（抽屉形态）。
  */
 .side-panel {
   display: contents;
   min-height: 0;
-  /* display:contents 时这条不产生盒子；≤1100px 媒体查询里恢复为 flex 面板后生效。 */
   overflow: hidden;
 }
 
+/* 工具条与两个侧栏列：同一张卡片语言——明度一步 + 1px 淡边 + 20px 圆角，无阴影。 */
 .layer-column {
   position: relative;
   display: flex;
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  border-left: 1px solid #2c2d33;
-  background: #1b1c21;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  overflow: hidden;
 }
 
 /* LayerPanel 填满图层列剩余宽度；折叠时把手占满整列。 */
@@ -150,14 +308,12 @@ button {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  background: #1b1c21;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
   overflow: hidden;
 }
 
-/*
- * 对话列收起：桌面端收成 28px 纵向把手（列宽由 .workspace--chat-collapsed
- * 决定），把手本身占满这一列。窄屏抽屉里两段是纵向堆叠，收起即整段隐藏。
- */
 .chat-column--collapsed {
   overflow: hidden;
 }
@@ -174,24 +330,31 @@ button {
   align-items: center;
   justify-content: flex-end;
   flex: none;
-  height: 28px;
-  padding: 0 6px;
-  border-bottom: 1px solid #2c2d33;
+  height: 36px;
+  padding: 0 10px;
 }
 
 .column-collapse-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #747785;
-  font-size: 14px;
+  color: var(--faint);
+  font-size: 15px;
   line-height: 1;
-  padding: 2px 6px;
   cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .column-collapse-button:hover {
-  color: #e8e8ea;
-  background: #26272e;
+  color: var(--text);
+  background: var(--nested);
 }
 
 /* 图层列 / 对话列折叠后的纵向把手：同一套视觉，两种朝向复用。 */
@@ -204,51 +367,53 @@ button {
   width: 100%;
   height: 100%;
   border: 0;
-  background: #1b1c21;
-  color: #747785;
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  color: var(--faint);
   cursor: pointer;
-  padding: 8px 0;
+  padding: 10px 0;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .layer-collapse-handle:hover,
 .chat-collapse-handle:hover {
-  color: #e8e8ea;
-  background: #26272e;
-}
-
-/* 对话把手贴左缘，与图层把手贴右缘呼应。 */
-.chat-collapse-handle {
-  border-left: 1px solid #2c2d33;
+  color: var(--text);
+  background: var(--nested);
 }
 
 .layer-collapse-handle__label,
 .chat-collapse-handle__label {
   writing-mode: vertical-rl;
-  font-size: 11px;
-  letter-spacing: 0.2em;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
 }
 
-/* 两列之间 6px 拖拽条（票 ②01）：贴在图层列右缘，纵向贯穿整列。 */
+/* 两列之间 8px 拖拽条（票 ②01）：骑在列间空隙上，纵向贯穿整列。 */
 .chat-resizer {
   position: absolute;
   top: 0;
-  right: 0;
+  right: -8px;
   bottom: 0;
-  width: 6px;
+  width: 8px;
   cursor: col-resize;
   background: transparent;
   border: 0;
   padding: 0;
   margin: 0;
+  border-radius: var(--radius-control);
+  z-index: 3;
 }
 
 .chat-resizer:hover,
 .chat-resizer:focus-visible {
-  background: #3a3c45;
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .chat-resizer:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid var(--faint);
   outline-offset: -2px;
 }
 
@@ -268,18 +433,19 @@ button {
   pointer-events: none;
 }
 
+/* ---- 画布区：工作井比卡片暗一步，白画布是唯一光源 ---- */
 .canvas-area {
   position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
-  background: #111216;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: #080808;
   min-width: 0;
 }
 
-/* 视口：占满画布区的可用空间，overflow:hidden 裁掉视口外的内容。
-   不再锁 16:9、不再 max-width：文档在视口内靠 viewportTransform 居中。 */
 .canvas-viewport {
   display: flex;
   flex-direction: column;
@@ -293,26 +459,24 @@ button {
   flex: 1;
   width: 100%;
   min-height: 0;
-  border: 1px solid #34363f;
-  border-radius: 4px;
-  box-shadow: 0 18px 48px rgb(0 0 0 / 45%);
+  border-radius: 8px;
+  box-shadow: 0 24px 64px rgb(0 0 0 / 70%);
   overflow: hidden;
   background: #ffffff;
   touch-action: none;
 }
 
-/* 空格/中键拖拽平移时给整层一个抓手光标；样式由组件按状态切换 class。 */
 .canvas-frame--panning {
   cursor: grabbing;
 }
 
-/* AI 的「看这里」：只描边不拦截指针，时长由组件的常量内联给出。 */
+/* AI 的「看这里」：只描边不拦截指针；画布上的提示色（产品语义，非 chrome）。 */
 .canvas-ai-highlight {
   position: absolute;
   border: 3px solid #ff8a00;
   border-radius: 6px;
   background: rgb(255 138 0 / 10%);
-  box-shadow: 0 0 24px rgb(255 138 0 / 60%);
+  box-shadow: 0 0 24px rgb(255 138 0 / 50%);
   pointer-events: none;
   animation-name: canvas-ai-highlight-fade;
   animation-timing-function: ease-out;
@@ -336,48 +500,49 @@ button {
   display: block;
 }
 
-/* 视口右下角悬浮控件：适应窗口 / 100% / − / +。 */
+/* 视口右下角悬浮控件：反白小控件组（true-black-flat：主控件反白）。 */
 .canvas-zoom-controls {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
+  right: 16px;
+  bottom: 16px;
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding: 4px;
-  border: 1px solid #34363f;
-  border-radius: 8px;
-  background: rgb(23 24 28 / 88%);
+  border-radius: var(--radius-control);
+  background: #ffffff;
   box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
 }
 
 .canvas-zoom-controls button {
-  min-width: 28px;
+  min-width: 30px;
   height: 28px;
-  padding: 0 8px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #d8dae2;
-  font-size: 13px;
+  color: #1a1a1a;
+  font-size: 12px;
+  font-weight: 500;
   line-height: 1;
   cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 .canvas-zoom-controls button:hover {
-  background: #2f313a;
+  background: #e8e8e8;
 }
 
 .canvas-zoom-controls button:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid #000000;
   outline-offset: 1px;
 }
 
 .canvas-zoom-controls__divider {
   width: 1px;
-  height: 16px;
-  background: #34363f;
+  height: 14px;
+  background: #d8d8d8;
 }
 
 /* Canvas-level error banner: one mutation failure, one line, retry or dismiss. */
@@ -386,12 +551,13 @@ button {
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid #7a3b3b;
-  border-radius: 6px;
-  background: #33201f;
-  color: #ffd7d7;
+  padding: 10px 14px;
+  border: 1px solid var(--pill-negative-bg);
+  border-radius: var(--radius-small);
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
   font-size: 13px;
+  margin-bottom: 10px;
 }
 
 .canvas-alert__message {
@@ -401,23 +567,26 @@ button {
 }
 
 .canvas-alert__retry {
-  min-height: 32px;
-  padding: 0 16px;
-  border: 1px solid #a95a5a;
-  border-radius: 6px;
-  background: #4a2a2a;
-  color: #ffecec;
-  font-size: 13px;
+  flex: none;
+  min-height: 30px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: var(--pill-negative-ink);
+  color: #000000;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 120ms ease;
 }
 
 .canvas-alert__retry:hover {
-  background: #5a3333;
+  opacity: 0.88;
 }
 
 .canvas-alert__retry:focus-visible,
 .canvas-alert__dismiss:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid var(--text);
   outline-offset: 2px;
 }
 
@@ -425,20 +594,19 @@ button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: 1px solid transparent;
-  border-radius: 6px;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-control);
   background: transparent;
-  color: #d9a5a5;
+  color: var(--pill-negative-ink);
   font-size: 16px;
   line-height: 1;
   cursor: pointer;
 }
 
 .canvas-alert__dismiss:hover {
-  border-color: #7a3b3b;
-  color: #ffecec;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 /* Covers the canvas area for the three non-ready states, so no white board is
@@ -454,31 +622,32 @@ button {
   min-height: 280px;
   height: 100%;
   padding: 32px;
-  border: 1px dashed #34363f;
-  border-radius: 8px;
-  background: #17181c;
+  border: 1px dashed var(--control);
+  border-radius: var(--radius-panel);
+  background: #080808;
   text-align: center;
 }
 
 .canvas-gate__title {
   margin: 0;
-  color: #e8e8ea;
-  font-size: 18px;
+  color: var(--text);
+  font-size: var(--fs-title);
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .canvas-gate__description {
   margin: 0;
   max-width: 420px;
-  color: #9a9daa;
-  font-size: 13px;
+  color: var(--muted);
+  font-size: var(--fs-body);
   line-height: 1.6;
 }
 
 .canvas-gate__reason {
   margin: 0;
   max-width: 520px;
-  color: #e07a7a;
+  color: var(--pill-negative-ink);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -487,23 +656,25 @@ button {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   margin-top: 6px;
 }
 
 .canvas-gate__cta {
-  min-height: 44px;
-  padding: 0 24px;
-  border: 1px solid #5b8def;
-  border-radius: 6px;
-  background: #2c3f66;
-  color: #eef3ff;
-  font-size: 14px;
+  min-height: var(--control-height);
+  padding: 0 22px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--text);
+  color: #000000;
+  font-size: var(--fs-body);
+  font-weight: 500;
   cursor: pointer;
+  transition: opacity 120ms ease;
 }
 
 .canvas-gate__cta:hover:not(:disabled) {
-  background: #36507f;
+  opacity: 0.88;
 }
 
 .canvas-gate__cta:disabled {
@@ -512,54 +683,57 @@ button {
 }
 
 .canvas-gate__cta:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
 .canvas-gate__cta--secondary {
-  border-color: #3a3c45;
-  background: #26272e;
-  color: #e8e8ea;
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--control);
 }
 
 .canvas-gate__cta--secondary:hover:not(:disabled) {
-  background: #2f313a;
+  background: var(--nested);
+  opacity: 1;
 }
 
 .canvas-warning {
   margin: 0;
-  color: #e07a7a;
-  font-size: 12px;
+  color: var(--pill-negative-ink);
+  font-size: var(--fs-small);
 }
 
+/* ---- 状态栏：真黑地面 32px 条，上边一条最淡的规则 ---- */
 .status-bar {
   display: flex;
   align-items: center;
   gap: 20px;
   padding: 0 16px;
-  border-top: 1px solid #2c2d33;
-  background: #1f2026;
-  color: #9a9daa;
-  font-size: 12px;
+  border-top: 1px solid var(--rule);
+  background: var(--ground);
+  color: var(--muted);
+  font-size: var(--fs-small);
 }
 
 .status-bar__save {
-  color: #9a9daa;
+  color: var(--muted);
 }
 
 .status-bar__retry {
-  min-height: 20px;
-  padding: 1px 8px;
-  border: 1px solid #7a3b3b;
-  border-radius: 4px;
-  background: #2a1e1e;
-  color: #f0b4b4;
-  font-size: 12px;
+  min-height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
+  font-size: var(--fs-small);
+  font-weight: 500;
   cursor: pointer;
 }
 
 .status-bar__retry:hover:not(:disabled) {
-  background: #3a2626;
+  background: #3a2022;
 }
 
 .status-bar__retry:disabled {
@@ -568,24 +742,21 @@ button {
 }
 
 .status-bar__retry:focus-visible {
-  outline: 2px solid #8fb2ff;
+  outline: 2px solid var(--faint);
   outline-offset: 2px;
 }
 
-/*
- * 连接状态：沿用监控页的「圆点 + 胶囊」视觉语言。
- * 断线是琥珀色——它是等待恢复，不是红色错误（错误由画布区顶部的 role="alert" 横幅承载）。
- */
+/* 连接状态：圆点 + 胶囊（淡底对，状态色不上 chrome 文字外）。 */
 .status-bar__connection {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  border: 1px solid #2c2d33;
-  border-radius: 999px;
-  padding: 1px 8px;
-  color: #9a9daa;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  gap: 7px;
+  border-radius: var(--radius-control);
+  padding: 3px 12px;
+  background: var(--pill-neutral-bg);
+  color: var(--muted);
+  font-size: var(--fs-small);
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -593,36 +764,38 @@ button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #747785;
+  background: var(--faint);
+}
+
+.status-bar__connection--connecting {
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
 }
 
 .status-bar__connection--connecting .status-bar__connection-dot {
-  background: #f0c674;
+  background: var(--warning);
 }
 
 .status-bar__connection--live {
-  color: #9fd6a8;
-  border-color: #33513a;
+  background: var(--pill-positive-bg);
+  color: var(--pill-positive-ink);
 }
 
 .status-bar__connection--live .status-bar__connection-dot {
-  background: #6fce82;
-  box-shadow: 0 0 0 3px rgb(111 206 130 / 15%);
+  background: var(--positive);
 }
 
 .status-bar__connection--reconnecting {
-  color: #f0c674;
-  border-color: #5c4a22;
+  background: var(--pill-warning-bg);
+  color: var(--pill-warning-ink);
 }
 
 .status-bar__connection--reconnecting .status-bar__connection-dot {
-  background: #f0c674;
-  box-shadow: 0 0 0 3px rgb(240 198 116 / 15%);
+  background: var(--warning);
 }
 
 /*
  * 窄屏承诺：桌面优先，窄屏 ≥360px 可用。
- * 完整移动端（触控手势、双指缩放、移动端专用工具栏）不在本轮。
  * 三档断点只做布局收口，桌面布局保持在上面的默认规则里。
  */
 
@@ -646,27 +819,35 @@ button {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-left: 1px solid #2c2d33;
-    background: #1b1c21;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--surface);
   }
 
   .chat-column {
     flex: 1;
     min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .layer-column {
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
   }
 }
 
 /* 第二档：侧栏离开网格，变成覆盖式抽屉；菜单可换行，文档名让位。 */
 @media (max-width: 860px) {
   .app-shell {
-    /* 菜单与状态栏换行后按内容取高，避免压住画布。 */
     grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   .menu-bar {
     flex-wrap: wrap;
-    row-gap: 8px;
-    padding: 8px 12px;
+    row-gap: 6px;
+    padding: 8px 16px;
   }
 
   .document-name {
@@ -680,7 +861,6 @@ button {
   .workspace {
     position: relative;
     grid-template-columns: 48px minmax(0, 1fr);
-    /* 收起时抽屉在右侧视口外；裁掉它，否则 document 仍会被撑出横向滚动。 */
     overflow: hidden;
   }
 
@@ -691,12 +871,14 @@ button {
     bottom: 0;
     z-index: 10;
     width: min(320px, 86vw);
-    border-left: 1px solid #2c2d33;
-    box-shadow: -12px 0 32px rgb(0 0 0 / 55%);
-    /* 收起时移出视口并隐藏，避免被读屏或 Tab 顺序摸到。 */
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: -16px 0 40px rgb(0 0 0 / 60%);
     transform: translateX(100%);
     visibility: hidden;
-    transition: transform 160ms ease, visibility 160ms ease;
+    transition:
+      transform 160ms ease,
+      visibility 160ms ease;
   }
 
   .side-panel.side-panel--open {
@@ -705,23 +887,26 @@ button {
   }
 
   /*
-   * 票 03：抽屉内部纵向两段。图层段在上、最高 min(360px, 50%)（可折叠），
-   * 对话段在下 flex: 1。两列叠成纵向两段后横向拖宽条没有意义，隐藏；
-   * 滚动只发生在图层列表与消息列表内部，抽屉本身不滚（overflow:hidden 继承自上面）。
+   * 抽屉内部纵向两段。图层段在上、最高 min(360px, 50%)（可折叠），
+   * 对话段在下 flex: 1。
    */
   .side-panel .layer-column {
     flex: none;
     max-height: min(360px, 50%);
     overflow: hidden;
+    border: 0;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
   }
 
   .side-panel .chat-column {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    border: 0;
+    border-radius: 0;
   }
 
-  /* 抽屉里两段纵向堆叠，28px 竖条没有意义：收起即整段隐藏，由抽屉开关找回。 */
   .side-panel .chat-column--collapsed {
     display: none;
   }
@@ -742,25 +927,30 @@ button {
   }
 
   .canvas-area {
-    padding: 16px;
+    padding: 12px;
   }
 
   .status-bar {
-    min-height: 28px;
+    min-height: 32px;
   }
 }
 
 /* 第三档：抽屉接近全宽，导出等按钮整体换行，画布贴边保住 280px 可用宽度。 */
 @media (max-width: 560px) {
   .menu-bar {
-    column-gap: 8px;
-    padding: 8px 10px;
+    column-gap: 6px;
+    padding: 8px 16px;
   }
 
-  /* 占满整行的 spacer 把品牌留在第一行，其余按钮从第二行开始排。 */
   .menu-spacer {
     flex-basis: 100%;
     height: 0;
+  }
+
+  /* 按钮均分可用宽度：窄屏下自然排成两行，不再有单个按钮孤行。 */
+  .menu-button {
+    flex: 1 1 auto;
+    justify-content: center;
   }
 
   .side-panel {
@@ -774,6 +964,6 @@ button {
   .status-bar {
     flex-wrap: wrap;
     gap: 2px 12px;
-    padding: 4px 12px;
+    padding: 4px 16px;
   }
 }

@@ -24,3 +24,7 @@ data/
 
 # agent worktrees
 .agents/
+
+# esbuild temp dir (Windows: vite/esbuild Access denied workaround).esbuild-tmp/
+# design-taste-frontend working files (inspect screenshots & report).taste-skill/
+

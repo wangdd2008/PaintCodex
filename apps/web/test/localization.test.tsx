@@ -26,6 +26,7 @@ import { MonitorPage } from '../src/features/monitor/MonitorPage';
 import { useCanvasStore } from '../src/services/canvas-store';
 import { displayCanvasName, nextStrokeLayerName } from '../src/services/naming';
 import { useToolStore } from '../src/services/tool-store';
+import { useChatStore } from '../src/features/ai-chat/chat-store';
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 
@@ -187,6 +188,10 @@ class FakeStroke {
 beforeEach(() => {
   fabricDouble.FakeCanvas.instances.length = 0;
   FakeEventSource.instances.length = 0;
+  // AI 会话记录持久化在 sessionStorage：清掉其他测试可能留下的英文演示消息，
+  // 否则「语义文本中文化」会在恢复的会话里读到英文。
+  window.sessionStorage.clear();
+  useChatStore.setState({ transcripts: {} });
   useCanvasStore.setState({
     canvas: null,
     status: 'idle',
