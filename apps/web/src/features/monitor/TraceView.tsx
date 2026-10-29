@@ -1,8 +1,17 @@
-import type { AgentTrace, AgentTraceNode } from '@paintcodex/protocol';
-import { useEffect, useState } from 'react';
+import type { AgentLog, AgentTrace, AgentTraceNode } from '@paintcodex/protocol';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../services/api';
+import { LogDetail } from './LogDetail';
+import { SequenceDiagram } from './SequenceDiagram';
 import { fetchTrace } from './monitor-api';
-import { formatDuration, formatLogLevel, formatTimestamp, shortenId } from './monitor-format';
+import {
+  formatDirection,
+  formatDuration,
+  formatLogLevel,
+  formatTimestamp,
+  shortenId,
+} from './monitor-format';
+import { buildSequence } from './trace-sequence';
 
 interface TraceViewProps {
   traceId: string | null;
@@ -10,6 +19,8 @@ interface TraceViewProps {
 }
 
 type TraceStatus = 'idle' | 'loading' | 'ready' | 'empty' | 'error';
+
+type ViewMode = 'sequence' | 'tree';
 
 interface TraceState {
   status: TraceStatus;
@@ -23,11 +34,15 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
   const [state, setState] = useState<TraceState>(IDLE_STATE);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
   const [reloadToken, setReloadToken] = useState(0);
+  // 时序图为默认（spec §7）；层级树保留父子结构。
+  const [viewMode, setViewMode] = useState<ViewMode>('sequence');
+  const [selectedLog, setSelectedLog] = useState<AgentLog | null>(null);
 
   useEffect(() => {
     if (traceId === null) {
       setState(IDLE_STATE);
       setExpanded(new Set());
+      setSelectedLog(null);
       return;
     }
 
@@ -43,6 +58,7 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
 
         // Roots start expanded so their direct children are visible.
         setExpanded(new Set(trace.roots.map((node) => node.log.id)));
+        setSelectedLog(null);
         setState({
           status: trace.roots.length === 0 ? 'empty' : 'ready',
           trace,
@@ -72,6 +88,12 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
     };
   }, [traceId, reloadToken]);
 
+  // 同一份数据算一次布局，两种视图共用。
+  const sequence = useMemo(
+    () => (state.trace ? buildSequence(state.trace) : null),
+    [state.trace],
+  );
+
   function toggleNode(id: number) {
     setExpanded((current) => {
       const next = new Set(current);
@@ -86,6 +108,12 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
     });
   }
 
+  function selectLog(log: AgentLog) {
+    setSelectedLog(log);
+  }
+
+  const ready = state.status === 'ready' && state.trace !== null && sequence !== null;
+
   return (
     <section className="trace-view" aria-label="追踪详情">
       <div className="trace-view__header">
@@ -94,6 +122,26 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
           <span className="monitor-muted" title={traceId}>
             {shortenId(traceId, 12)}
           </span>
+        ) : null}
+        {ready ? (
+          <div className="trace-view__switch" role="group" aria-label="追踪内部视图">
+            <button
+              type="button"
+              className="trace-view__tab"
+              aria-pressed={viewMode === 'sequence'}
+              onClick={() => setViewMode('sequence')}
+            >
+              时序图
+            </button>
+            <button
+              type="button"
+              className="trace-view__tab"
+              aria-pressed={viewMode === 'tree'}
+              onClick={() => setViewMode('tree')}
+            >
+              层级树
+            </button>
+          </div>
         ) : null}
         <span className="monitor-spacer" />
         {traceId ? (
@@ -125,21 +173,33 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
           <p className="monitor-empty">加载追踪中…</p>
         ) : state.status === 'error' ? (
           <p className="monitor-error">{state.error ?? '无法加载追踪'}</p>
-        ) : state.trace === null || state.trace.roots.length === 0 ? (
+        ) : !ready ? (
           <p className="monitor-empty">此追踪没有记录任何节点。</p>
+        ) : viewMode === 'sequence' ? (
+          <SequenceDiagram
+            model={sequence}
+            selectedLogId={selectedLog?.id ?? null}
+            onSelect={selectLog}
+          />
         ) : (
           <ul className="trace-tree">
-            {state.trace.roots.map((node) => (
+            {state.trace?.roots.map((node) => (
               <TraceNodeRow
                 key={node.log.id}
                 node={node}
                 depth={0}
                 expanded={expanded}
+                selectedLogId={selectedLog?.id ?? null}
                 onToggle={toggleNode}
+                onSelect={selectLog}
               />
             ))}
           </ul>
         )}
+      </div>
+
+      <div className="trace-view__detail">
+        <LogDetail log={selectedLog} />
       </div>
     </section>
   );
@@ -149,25 +209,44 @@ interface TraceNodeRowProps {
   node: AgentTraceNode;
   depth: number;
   expanded: ReadonlySet<number>;
+  selectedLogId: number | null;
   onToggle: (id: number) => void;
+  onSelect: (log: AgentLog) => void;
 }
 
-function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
+function TraceNodeRow({
+  node,
+  depth,
+  expanded,
+  selectedLogId,
+  onToggle,
+  onSelect,
+}: TraceNodeRowProps) {
   const log = node.log;
   const hasChildren = node.children.length > 0;
   const isOpen = expanded.has(log.id);
+  const isSelected = log.id === selectedLogId;
   const indent = depth * 16;
 
   return (
     <li className="trace-node">
-      <div className="trace-node__row" style={{ paddingLeft: `${indent}px` }}>
+      <div
+        className={`trace-node__row ${isSelected ? 'trace-node__row--selected' : ''}`}
+        style={{ paddingLeft: `${indent}px` }}
+        onClick={() => onSelect(log)}
+        data-testid="trace-tree-row"
+        data-log-id={log.id}
+      >
         {hasChildren ? (
           <button
             type="button"
             className="trace-node__toggle"
             aria-expanded={isOpen}
             aria-label={isOpen ? '折叠节点' : '展开节点'}
-            onClick={() => onToggle(log.id)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggle(log.id);
+            }}
           >
             {isOpen ? '▾' : '▸'}
           </button>
@@ -182,6 +261,9 @@ function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
         </span>
         <span className="trace-node__message" title={log.message}>
           {log.message}
+        </span>
+        <span className="trace-node__direction" title={formatDirection(log)}>
+          {formatDirection(log)}
         </span>
         <span className="category-badge">{log.category}</span>
         <span className="trace-node__duration">{formatDuration(log.durationMs)}</span>
@@ -201,7 +283,9 @@ function TraceNodeRow({ node, depth, expanded, onToggle }: TraceNodeRowProps) {
               node={child}
               depth={depth + 1}
               expanded={expanded}
+              selectedLogId={selectedLogId}
               onToggle={onToggle}
+              onSelect={onSelect}
             />
           ))}
         </ul>
