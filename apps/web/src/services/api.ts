@@ -2,6 +2,8 @@ import type {
   AiExportResultRequest,
   AiRenderResultRequest,
   CanvasDocument,
+  CanvasListPage,
+  CanvasListSort,
   CreateCanvasRequest,
   CreateLayerInput,
   UpdateLayerPatch,
@@ -55,6 +57,22 @@ export function createCanvas(input: CreateCanvasRequest = {}): Promise<CanvasDoc
 
 export function getCanvas(id: string): Promise<CanvasDocument> {
   return request<CanvasDocument>(`/paint/canvas/${encodeURIComponent(id)}`);
+}
+
+/** 画布库分页列表：服务端聚合 layerCount 与缩略图标记，不返回图片字节。 */
+export function listCanvases(
+  limit = 50,
+  offset = 0,
+  sort: CanvasListSort = 'updated',
+): Promise<CanvasListPage> {
+  return request<CanvasListPage>(
+    `/paint/canvas?limit=${limit}&offset=${offset}&sort=${encodeURIComponent(sort)}`,
+  );
+}
+
+/** 硬删除画布文档（图层/快照/缩略图由数据库级联清理）。 */
+export function deleteCanvas(id: string): Promise<void> {
+  return request<void>(`/paint/canvas/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 /** Canvas identity is the only mutable canvas field; geometry stays immutable. */

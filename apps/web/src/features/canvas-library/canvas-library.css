@@ -1,0 +1,164 @@
+.library-area {
+  padding: 32px;
+  overflow-y: auto;
+}
+
+.library-area--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.library-cta {
+  border: 1px solid #3a3c45;
+  border-radius: 8px;
+  background: #2d5be3;
+  color: #fff;
+  padding: 12px 28px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.library-cta:hover {
+  background: #3a68f0;
+}
+
+.library-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  max-width: 1200px;
+}
+
+.canvas-card {
+  border: 1px solid #2c2d33;
+  border-radius: 8px;
+  background: #1f2026;
+  overflow: hidden;
+}
+
+.canvas-card__open {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.canvas-card__thumb {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.canvas-card__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.canvas-card__thumb-fallback {
+  font-size: 40px;
+  color: rgba(255, 255, 255, 0.55);
+  user-select: none;
+}
+
+.canvas-card__body {
+  padding: 10px 12px;
+}
+
+.canvas-card__name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-card__name {
+  font-weight: 600;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-card__rename {
+  border: none;
+  background: transparent;
+  color: #9a9daa;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.canvas-card__rename:hover {
+  color: #e8e8ea;
+}
+
+.canvas-card__name-input {
+  width: 100%;
+  background: #26272e;
+  border: 1px solid #3a3c45;
+  border-radius: 4px;
+  color: inherit;
+  padding: 2px 6px;
+}
+
+.canvas-card__meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9a9daa;
+}
+
+.canvas-card__time {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #6d707c;
+}
+
+.canvas-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 12px 10px;
+}
+
+.canvas-card__delete {
+  font-size: 12px;
+  padding: 4px 10px;
+}
+
+.menu-button--danger {
+  border-color: #7a3a3a;
+  color: #e07a7a;
+}
+
+.canvas-card__error {
+  margin: 0 12px 10px;
+  font-size: 12px;
+  color: #e07a7a;
+}
+
+.canvas-card__confirm {
+  padding: 16px 12px;
+}
+
+.canvas-card__confirm-text {
+  margin: 0 0 12px;
+  font-size: 13px;
+}
+
+.canvas-card__confirm-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.library-error {
+  color: #e07a7a;
+}
+
+.library-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+}
