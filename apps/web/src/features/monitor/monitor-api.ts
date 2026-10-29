@@ -5,6 +5,7 @@ import type {
   LogCategory,
   LogLevel,
   MonitorStats,
+  TopologySnapshot,
   TraceSummaryPage,
 } from '@paintcodex/protocol';
 import { ApiError } from '../../services/api';
@@ -150,6 +151,16 @@ export function fetchStats(
   const window = normalizeInteger(windowMs, DEFAULT_STATS_WINDOW_MS, 1);
 
   return request<MonitorStats>(`/monitor/stats?windowMs=${window}`, signal);
+}
+
+/** 拓扑快照：静态结构由前端声明，这里只拿窗口数字叠加。 */
+export function fetchTopology(
+  windowMs: number = DEFAULT_STATS_WINDOW_MS,
+  signal?: AbortSignal,
+): Promise<TopologySnapshot> {
+  const window = normalizeInteger(windowMs, DEFAULT_STATS_WINDOW_MS, 1);
+
+  return request<TopologySnapshot>(`/monitor/topology?windowMs=${window}`, signal);
 }
 
 /**

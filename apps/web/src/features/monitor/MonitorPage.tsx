@@ -1,13 +1,21 @@
-import type { AgentLog, MonitorStats, TraceSummary } from '@paintcodex/protocol';
+import type {
+  AgentLog,
+  LogComponent,
+  MonitorStats,
+  TopologySnapshot,
+  TraceSummary,
+} from '@paintcodex/protocol';
 import { LOG_CATEGORIES, LOG_LEVELS } from '@paintcodex/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RawLogList } from './raw-log-list';
 import { StatsPanel } from './StatsPanel';
+import { TopologyView } from './TopologyView';
 import { TraceList } from './trace-list';
 import {
   DEFAULT_STATS_WINDOW_MS,
   fetchLogs,
   fetchStats,
+  fetchTopology,
   fetchTraces,
   subscribeToLogs,
 } from './monitor-api';
@@ -20,6 +28,13 @@ import {
   type LogFilterState,
   type LogRange,
 } from './monitor-format';
+import {
+  chipLabel,
+  logMatchesChip,
+  toggleTopologyChip,
+  traceMatchesChip,
+  type TopologyChip,
+} from './topology-filter';
 import './monitor.css';
 
 const RANGE_OPTIONS: ReadonlyArray<{ value: LogRange; label: string }> = [
@@ -50,6 +65,8 @@ export function MonitorPage() {
   const [logs, setLogs] = useState<AgentLog[]>([]);
   const [filters, setFilters] = useState<LogFilterState>(DEFAULT_LOG_FILTERS);
   const [stats, setStats] = useState<MonitorStats | null>(null);
+  const [topology, setTopology] = useState<TopologySnapshot | null>(null);
+  const [chip, setChip] = useState<TopologyChip | null>(null);
   const [traces, setTraces] = useState<TracesState>({
     items: [],
     loading: true,
@@ -89,6 +106,22 @@ export function MonitorPage() {
       }
     } finally {
       statsInFlight.current = false;
+    }
+  }, []);
+
+  /**
+   * 拓扑快照与统计卡片同窗口（5 分钟）。取数失败不影响页面其余部分：
+   * 图保持上一次快照，静态结构本来就不依赖当次取数。
+   */
+  const loadTopology = useCallback(async () => {
+    try {
+      const next = await fetchTopology(STATS_WINDOW_MS);
+
+      if (!disposed.current) {
+        setTopology(next);
+      }
+    } catch {
+      // 静默失败：图上一轮的数字仍在，下一周期会重试。
     }
   }, []);
 
@@ -176,10 +209,20 @@ export function MonitorPage() {
   }, [loadStats]);
 
   useEffect(() => {
+    void loadTopology();
+  }, [loadTopology]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => void loadStats(), STATS_REFRESH_MS);
 
     return () => window.clearInterval(timer);
   }, [loadStats]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => void loadTopology(), STATS_REFRESH_MS);
+
+    return () => window.clearInterval(timer);
+  }, [loadTopology]);
 
   useEffect(() => {
     if (paused) {
@@ -204,11 +247,28 @@ export function MonitorPage() {
     void loadLogs(filters);
     void loadTraces();
     void loadStats();
+    void loadTopology();
   }
 
-  const visibleLogs = useMemo(() => filterLogs(logs, filters), [logs, filters]);
+  const visibleLogs = useMemo(
+    () =>
+      chip === null
+        ? filterLogs(logs, filters)
+        : filterLogs(logs, filters).filter((log) => logMatchesChip(log, chip)),
+    [logs, filters, chip],
+  );
+
   // 没有 traceId 的记录进「未归组」分段，不再渲染成不可点的死行。
   const untracedLogs = visibleLogs.filter((log) => log.traceId === null);
+
+  // 接线点 C：追踪列表也接同一 chip。
+  const visibleTraces = useMemo(
+    () =>
+      chip === null
+        ? traces.items
+        : traces.items.filter((trace) => traceMatchesChip(trace, chip)),
+    [traces.items, chip],
+  );
 
   function toggleTrace(traceId: string) {
     setExpandedTraceId((current) => (current === traceId ? null : traceId));
@@ -216,6 +276,15 @@ export function MonitorPage() {
 
   function toggleLog(logId: number) {
     setExpandedLogId((current) => (current === logId ? null : logId));
+  }
+
+  /** 拓扑点击：同一时刻只有一个 chip；重复点击即取消（票 ③06）。 */
+  function handleToggleNode(component: LogComponent) {
+    setChip((current) => toggleTopologyChip(current, { kind: 'component', component }));
+  }
+
+  function handleToggleChannel(channelId: string) {
+    setChip((current) => toggleTopologyChip(current, { kind: 'channel', channelId }));
   }
 
   const liveLabel = paused
@@ -284,6 +353,26 @@ export function MonitorPage() {
 
       <StatsPanel stats={stats} error={statsError} />
 
+      <TopologyView
+        snapshot={topology}
+        chip={chip}
+        onToggleNode={handleToggleNode}
+        onToggleChannel={handleToggleChannel}
+      />
+
+      {chip ? (
+        <div className="monitor-chipbar" role="status">
+          <span className="monitor-chip">{chipLabel(chip)}</span>
+          <button
+            type="button"
+            className="monitor-button monitor-button--ghost"
+            onClick={() => setChip(null)}
+          >
+            取消过滤
+          </button>
+        </div>
+      ) : null}
+
       <section className="log-list" aria-label={view === 'traces' ? '追踪' : '原始日志'}>
         <div className="log-list__header">
           <h2 className="monitor-heading">
@@ -291,7 +380,7 @@ export function MonitorPage() {
           </h2>
           <span className="monitor-muted">
             {view === 'traces'
-              ? `${traces.items.length} 个追踪`
+              ? `${visibleTraces.length} / ${traces.items.length} 个追踪`
               : `${visibleLogs.length} / ${logs.length} 条`}
           </span>
           <span className="monitor-spacer" />
@@ -360,7 +449,7 @@ export function MonitorPage() {
           {view === 'traces' ? (
             <>
               <TraceList
-                items={traces.items}
+                items={visibleTraces}
                 loading={traces.loading}
                 error={traces.error}
                 expandedTraceId={expandedTraceId}
