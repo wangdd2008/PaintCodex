@@ -60,8 +60,12 @@ export interface LogSort {
 
 export const DEFAULT_LOG_SORT: LogSort = { field: 'timestamp', direction: 'desc' };
 
-/** The live log buffer keeps at most this many records. */
-export const MAX_LOG_BUFFER = 500;
+/**
+ * The live log buffer keeps at most this many records.聚合在服务端
+ * （GET /monitor/traces），客户端只缓冲逐条视图用的窗口；200 条凑不齐
+ * 任何一个完整追踪——这是有意为之，不是容量不足（monitor-readability ③04）。
+ */
+export const MAX_LOG_BUFFER = 200;
 
 export function filterLogs(
   logs: readonly AgentLog[],
@@ -102,10 +106,11 @@ export function mergeLogs(
     byId.set(log.id, log);
   }
 
-  return sortLogs(Array.from(byId.values()), DEFAULT_LOG_SORT).slice(
-    0,
-    Math.max(1, Math.trunc(limit)),
-  );
+  // 逐条视图按落库顺序（id DESC）：span 完成记录回溯写入开始时间，
+  // 按 timestamp 排会让完成记录排在开始记录上面（spec §5）。
+  return [...byId.values()]
+    .sort((left, right) => right.id - left.id)
+    .slice(0, Math.max(1, Math.trunc(limit)));
 }
 
 export function formatDuration(durationMs: number | null | undefined): string {

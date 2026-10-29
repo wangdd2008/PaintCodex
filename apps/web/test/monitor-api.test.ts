@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLogsQuery } from '../src/features/monitor/monitor-api';
+import { buildLogsQuery, buildTracesQuery } from '../src/features/monitor/monitor-api';
 
 describe('buildLogsQuery', () => {
   it('applies the default limit and offset', () => {
@@ -52,5 +52,23 @@ describe('buildLogsQuery', () => {
     expect(buildLogsQuery({ traceId: '', canvasId: '', category: [], level: [] })).toBe(
       '?limit=50&offset=0',
     );
+  });
+});
+
+describe('buildTracesQuery', () => {
+  it('applies the default window and paging', () => {
+    expect(buildTracesQuery()).toBe('?windowMs=900000&limit=50&offset=0');
+  });
+
+  it('serializes window, paging and the error/canvas filters', () => {
+    expect(
+      buildTracesQuery({
+        windowMs: 60_000,
+        limit: 20,
+        offset: 40,
+        hasError: true,
+        canvasId: 'canvas/1',
+      }),
+    ).toBe('?windowMs=60000&limit=20&offset=40&hasError=true&canvasId=canvas%2F1');
   });
 });

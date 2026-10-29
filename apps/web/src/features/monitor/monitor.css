@@ -307,6 +307,125 @@
   overflow: auto;
 }
 
+.monitor-view-switch {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.monitor-button--active {
+  background: #2f313a;
+  border-color: #5b8def;
+  color: #e8e8ea;
+}
+
+.trace-table__error-count {
+  color: #e07a7a;
+  font-weight: 600;
+}
+
+.trace-table__root {
+  display: inline-block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-table__path {
+  display: inline-block;
+  margin-left: 6px;
+  color: #747785;
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.trace-table__detail-row td {
+  background: #1f2026;
+  padding: 10px 12px;
+}
+
+.trace-timeline {
+  padding: 4px 2px;
+}
+
+.untraced-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed #2c2d33;
+}
+
+.log-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.log-detail__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.log-detail__field {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.log-detail__field dt {
+  flex: none;
+  color: #8a8d99;
+}
+
+.log-detail__field dd {
+  margin: 0;
+  color: #e8e8ea;
+  overflow-wrap: anywhere;
+}
+
+.log-detail__raw {
+  color: #b9bcc8;
+}
+
+.log-detail__raw summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.log-detail__raw pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #17181c;
+  overflow: auto;
+  font-size: 11px;
+}
+
+.log-detail__truncated {
+  margin: 4px 0 0;
+  color: #f0c674;
+  font-size: 11px;
+}
+
+.log-detail__error {
+  margin: 0;
+  color: #e07a7a;
+  line-height: 1.4;
+}
+
+.log-detail__empty {
+  margin: 0;
+  color: #747785;
+}
+
 .log-table {
   width: 100%;
   border-collapse: collapse;

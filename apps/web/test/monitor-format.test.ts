@@ -10,6 +10,7 @@ import {
   formatHttpErrorHint,
   formatPercent,
   formatTimestamp,
+  MAX_LOG_BUFFER,
   mergeLogs,
   rangeToSince,
   shortenId,
@@ -277,9 +278,17 @@ describe('mergeLogs', () => {
     expect(merged.find((log) => log.id === 1)?.message).toBe('new');
   });
 
-  it('orders newest first', () => {
-    const merged = mergeLogs([], [makeLog(1, { timestamp: 10 }), makeLog(2, { timestamp: 20 })]);
+  it('orders by insertion id DESC even when timestamps go backwards', () => {
+    // span 完成记录回溯写入开始时间：落库顺序（id）才是逐条视图的排序依据。
+    const merged = mergeLogs(
+      [],
+      [makeLog(1, { timestamp: 5_000 }), makeLog(2, { timestamp: 1_000 })],
+    );
     expect(merged.map((log) => log.id)).toEqual([2, 1]);
+  });
+
+  it('keeps the live buffer at 200 records', () => {
+    expect(MAX_LOG_BUFFER).toBe(200);
   });
 
   it('caps the buffer at the requested size', () => {

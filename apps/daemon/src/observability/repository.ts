@@ -141,10 +141,12 @@ export class AgentLogRepository {
       .prepare(`SELECT COUNT(*) AS count FROM agent_logs ${where}`)
       .get(...params) as { count: number } | undefined;
 
+    // 逐条视图按落库顺序（id DESC）：span 完成记录回溯写入开始时间，
+    // 按 timestamp 排会让完成记录「排在开始记录上面」（monitor-readability ③04）。
     const rows = this.db
       .prepare(
         `SELECT * FROM agent_logs ${where}
-         ORDER BY timestamp DESC, id DESC
+         ORDER BY id DESC
          LIMIT ? OFFSET ?`,
       )
       .all(...params, limit, offset) as AgentLogRow[];
