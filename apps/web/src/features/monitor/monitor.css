@@ -506,12 +506,147 @@
   font-variant-numeric: tabular-nums;
 }
 
-.trace-node__error {
+.trace-view__error {
   margin: 0 10px 6px;
   color: #e07a7a;
   font-size: 11px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+}
+
+/* 追踪内部视图二选一开关：时序图（默认）/ 层级树 */
+.trace-view__switch {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid #2c2d33;
+  border-radius: 6px;
+  padding: 2px;
+}
+
+.trace-view__tab {
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8a8d99;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.trace-view__tab[aria-pressed='true'] {
+  background: #2f313a;
+  color: #e8e8ea;
+}
+
+.trace-view__tab:hover:not([aria-pressed='true']) {
+  color: #b9bcc8;
+}
+
+/* 时序图：列多了横向滚动，不压缩字号 */
+.seq-scroll {
+  overflow-x: auto;
+  padding: 4px;
+}
+
+.seq-diagram {
+  display: block;
+  font-size: 11px;
+}
+
+.seq-col-label {
+  fill: #9a9daa;
+  font-weight: 600;
+}
+
+.seq-lifeline {
+  stroke: #2c2d33;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.seq-time {
+  fill: #747785;
+  font-variant-numeric: tabular-nums;
+}
+
+.seq-message-line {
+  stroke: #8fb8ff;
+  stroke-width: 1.5;
+}
+
+.seq-message {
+  fill: #c8cbd6;
+}
+
+.seq-activation {
+  fill: rgb(143 184 255 / 35%);
+}
+
+.seq-dot {
+  fill: #f0c674;
+}
+
+.seq-entry {
+  cursor: pointer;
+}
+
+.seq-entry--selected .seq-message,
+.seq-entry--selected .seq-col-label {
+  fill: #e8e8ea;
+}
+
+/* 层级树方向列 */
+.trace-node__direction {
+  color: #8fb8ff;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.trace-node__row {
+  cursor: pointer;
+}
+
+.trace-node__row--selected {
+  background: #1d2634;
+  box-shadow: inset 2px 0 0 #5b8def;
+}
+
+/* 追踪明细（LogDetail） */
+.trace-view__detail {
+  border-top: 1px solid #2c2d33;
+}
+
+.log-detail {
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.log-detail--empty {
+  padding: 10px 12px;
+}
+
+.log-detail__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.log-detail__message {
+  color: #e8e8ea;
+  font-weight: 600;
+}
+
+.log-detail__payload {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: #17181c;
+  color: #9a9daa;
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
 }
 
 @media (max-width: 1100px) {
