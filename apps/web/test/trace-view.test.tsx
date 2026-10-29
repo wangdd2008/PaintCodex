@@ -95,13 +95,13 @@ describe('TraceView 追踪内部视图', () => {
     }
     fireEvent.click(firstArrow);
 
-    // 占位 LogDetail 把 payload 原样打成 JSON；在明细区断言，
-    // 避免与时序图里同 message 的文本撞名。
-    await screen.findByText('http_request', { selector: '.log-detail__message' });
+    // ③04 正式 LogDetail：已知键渲染成「标签：值」dl，不再用 message 头。
     await waitFor(() => {
-      const pre = document.querySelector('.log-detail__payload');
-      expect(pre?.textContent).toContain('"method": "GET"');
-      expect(pre?.textContent).toContain('"path": "/monitor/traces"');
+      const fields = document.querySelector('.log-detail__fields');
+      expect(fields?.textContent).toContain('方法');
+      expect(fields?.textContent).toContain('GET');
+      expect(fields?.textContent).toContain('路径');
+      expect(fields?.textContent).toContain('/monitor/traces');
     });
   });
 
@@ -129,14 +129,14 @@ describe('TraceView 追踪内部视图', () => {
     fireEvent.click(screen.getByRole('button', { name: '层级树' }));
     fireEvent.click(screen.getByText('turn_start'));
 
-    // 选中后占位提示消失，明细头显示该记录。
+    // 选中后占位提示消失；turn_start 的 payload 为 null，正式 LogDetail 显示空文案。
     await waitFor(() =>
       expect(
         screen.queryByText('点击时序图或层级树中的任一记录，在此查看其明细。'),
       ).toBeNull(),
     );
     expect(
-      screen.getByText('turn_start', { selector: '.log-detail__message' }),
+      screen.getByText('无 payload 明细', { selector: '.log-detail__empty' }),
     ).toBeTruthy();
   });
 

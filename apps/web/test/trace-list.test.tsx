@@ -4,6 +4,11 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TraceList } from '../src/features/monitor/trace-list';
 
+// 展开区现在渲染 TraceView（③05），它会调 fetchTrace——这里 mock 掉。
+vi.mock('../src/features/monitor/monitor-api', () => ({
+  fetchTrace: vi.fn().mockResolvedValue({ traceId: 'trace-abcdefgh', roots: [] }),
+}));
+
 afterEach(cleanup);
 
 function makeTrace(overrides: Partial<TraceSummary> = {}): TraceSummary {
@@ -83,8 +88,8 @@ describe('TraceList', () => {
     fireEvent.click(screen.getByText('http_request'));
     expect(onToggle).toHaveBeenCalledWith('trace-abcdefgh');
 
-    // 展开态渲染占位（③05 的时序组件）
+    // 展开区已接线到 ③05 的 TraceView（接线点 B）：渲染追踪详情区。
     renderList([makeTrace()], { expandedTraceId: 'trace-abcdefgh' });
-    expect(screen.getByText(/时序视图/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '追踪' })).toBeTruthy();
   });
 });
