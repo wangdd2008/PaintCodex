@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildViewUrl, readViewFromSearch } from '../src/app/view-route';
+import {
+  buildCanvasUrl,
+  buildViewUrl,
+  readViewFromSearch,
+} from '../src/app/view-route';
 
 describe('readViewFromSearch', () => {
   it('defaults to the canvas view', () => {
@@ -10,6 +14,11 @@ describe('readViewFromSearch', () => {
   it('reads the monitor view from the page query parameter', () => {
     expect(readViewFromSearch('?page=monitor')).toBe('monitor');
     expect(readViewFromSearch('?page=monitor&foo=1')).toBe('monitor');
+  });
+
+  it('reads the canvas library view from the page query parameter', () => {
+    expect(readViewFromSearch('?page=canvases')).toBe('canvases');
+    expect(readViewFromSearch('?page=canvases&foo=1')).toBe('canvases');
   });
 
   it('treats unknown page values as the canvas view', () => {
@@ -31,5 +40,25 @@ describe('buildViewUrl', () => {
 
   it('keeps the current pathname', () => {
     expect(buildViewUrl('http://localhost:5173/monitor?page=monitor', 'canvas')).toBe('/monitor');
+  });
+
+  it('sets page=canvases for the library and drops the canvas id', () => {
+    expect(
+      buildViewUrl('http://localhost:5173/?canvasId=abc', 'canvases'),
+    ).toBe('/?page=canvases');
+  });
+});
+
+describe('buildCanvasUrl', () => {
+  it('points at one canvas document and clears the page parameter', () => {
+    expect(
+      buildCanvasUrl('http://localhost:5173/?page=canvases', 'abc'),
+    ).toBe('/?canvasId=abc');
+  });
+
+  it('replaces an existing canvas id rather than appending a duplicate', () => {
+    expect(
+      buildCanvasUrl('http://localhost:5173/?canvasId=old&foo=1', 'new'),
+    ).toBe('/?canvasId=new&foo=1');
   });
 });

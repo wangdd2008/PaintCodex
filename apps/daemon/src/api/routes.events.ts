@@ -29,7 +29,7 @@ export function registerEventRoutes(
         'X-Accel-Buffering': 'no',
       });
 
-      const unsubscribe = events.subscribe(canvas.id, (event) => {
+      const unsubscribe = events.subscribe(canvas.id, (event, trace) => {
         stream.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
         app.observability.log({
           category: 'sse',
@@ -40,6 +40,9 @@ export function registerEventRoutes(
           // daemon 把画布变更推给浏览器
           source: LOG_DIRECTIONS.ssePublish.source,
           target: LOG_DIRECTIONS.ssePublish.target,
+          // 由画布写入触发时，归回发起那次写入的追踪；其他来源（无 trace）保持 NULL。
+          traceId: trace?.traceId ?? null,
+          parentId: trace?.spanId ?? null,
         });
       });
 

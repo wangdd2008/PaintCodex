@@ -1,6 +1,15 @@
 import type { SnapshotChangedEvent } from '@paintcodex/protocol';
+import type { TraceContext } from '../observability/logger.js';
 
-export type CanvasEventListener = (event: SnapshotChangedEvent) => void;
+/**
+ * 监听画布快照变更。`trace` 携带触发这次写入的追踪（AI 工具的 turn span 或
+ * REST 的 HTTP span），只用于把 `sse_publish` 日志归回同一追踪；浏览器收到的
+ * 事件体仍只有 `{ type, canvasId, revision }`，协议不变。
+ */
+export type CanvasEventListener = (
+  event: SnapshotChangedEvent,
+  trace?: TraceContext,
+) => void;
 
 /**
  * In-process pub/sub for canvas snapshots. Every mutation publishes here so
@@ -9,7 +18,7 @@ export type CanvasEventListener = (event: SnapshotChangedEvent) => void;
 export class PaintEvents {
   private readonly listeners = new Map<string, Set<CanvasEventListener>>();
 
-  publishSnapshot(canvasId: string, revision: number): void {
+  publishSnapshot(canvasId: string, revision: number, trace?: TraceContext): void {
     const event: SnapshotChangedEvent = {
       type: 'snapshot_changed',
       canvasId,
@@ -17,7 +26,7 @@ export class PaintEvents {
     };
 
     for (const listener of this.listeners.get(canvasId) ?? []) {
-      listener(event);
+      listener(event, trace);
     }
   }
 

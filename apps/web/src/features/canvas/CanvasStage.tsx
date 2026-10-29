@@ -30,7 +30,13 @@ import {
   NETWORK_FAILURE_MESSAGE,
 } from '../../services/network-error';
 import { useToolStore } from '../../services/tool-store';
-import { clampScale, fitViewport } from '../../services/viewport-math';
+import {
+  clampScale,
+  docRectToScreen,
+  fitViewport,
+  type ScreenRect,
+  type ViewportTransform,
+} from '../../services/viewport-math';
 import { computeZoomPercent, useViewportStore } from '../../services/viewport-store';
 
 const FALLBACK_WIDTH = 1920;
@@ -61,20 +67,15 @@ const LOCATE_HIGHLIGHT_COLOR = '#ff8a00';
 const LOCATE_HIGHLIGHT_STROKE_WIDTH = 8;
 const LOCATE_HIGHLIGHT_DURATION_MS = 800;
 
-/** The `canvas_select` cue, expressed as CSS percentages of the canvas box. */
-interface AiHighlight {
+/**
+ * `canvas_select` 在**文档空间**里要圈出的矩形（文档像素）。它是高亮的
+ * 逻辑位置，与视图无关；真正渲染到 DOM 时再经 docRectToScreen 换成屏幕像素。
+ */
+interface DocHighlightRect {
   left: number;
   top: number;
   width: number;
   height: number;
-}
-
-function percent(value: number, total: number): number {
-  if (!(total > 0)) {
-    return 0;
-  }
-
-  return Math.min(100, Math.max(0, (value / total) * 100));
 }
 
 /**
@@ -226,7 +227,11 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
   const [ready, setReady] = useState(false);
   const [objectsVersion, setObjectsVersion] = useState(0);
   const [blockedStroke, setBlockedStroke] = useState<string | null>(null);
-  const [aiHighlight, setAiHighlight] = useState<AiHighlight | null>(null);
+  const [aiHighlight, setAiHighlight] = useState<ScreenRect | null>(null);
+  // 高亮的逻辑位置（文档像素）与最近一次落到 DOM 的屏幕矩形。缩放/平移
+  // 触发 after:render 时，用当前 viewportTransform 把文档矩形重算成屏幕像素。
+  const docHighlightRef = useRef<DocHighlightRect | null>(null);
+  const appliedHighlightRef = useRef<ScreenRect | null>(null);
   const [panning, setPanning] = useState(false);
   const aiSelection = useCanvasStore((state) => state.aiSelection);
   const isDrawing = useCanvasStore((state) => state.isDrawing);
@@ -397,6 +402,52 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
 
   function reportZoom(): void {
     useViewportStore.getState().setZoomPercent(computeZoomPercent(currentScale()));
+  }
+
+  /** 读当前 Fabric 视口矩阵；拿不到（未挂载）时返回 null。 */
+  function currentViewport(): ViewportTransform | null {
+    const vpt = fabricRef.current?.viewportTransform;
+
+    if (!vpt || vpt.length < 6) {
+      return null;
+    }
+
+    return [vpt[0]!, vpt[1]!, vpt[2]!, vpt[3]!, vpt[4]!, vpt[5]!];
+  }
+
+  /**
+   * 把高亮的文档矩形按当前视口矩阵换算成屏幕像素并落到状态。
+   * 缩放/平移（after:render）与新指示都会调用；像素级无变化时跳过 setState，
+   * 避免笔画渲染时频繁重渲。
+   */
+  function syncHighlightToScreen(): void {
+    const docRect = docHighlightRef.current;
+    const vpt = currentViewport();
+
+    if (!docRect || !vpt) {
+      if (appliedHighlightRef.current !== null) {
+        appliedHighlightRef.current = null;
+        setAiHighlight(null);
+      }
+
+      return;
+    }
+
+    const next = docRectToScreen(docRect, vpt);
+    const prev = appliedHighlightRef.current;
+    const same =
+      prev !== null &&
+      Math.round(prev.left) === Math.round(next.left) &&
+      Math.round(prev.top) === Math.round(next.top) &&
+      Math.round(prev.width) === Math.round(next.width) &&
+      Math.round(prev.height) === Math.round(next.height);
+
+    if (same) {
+      return;
+    }
+
+    appliedHighlightRef.current = next;
+    setAiHighlight(next);
   }
 
   /** 容器像素尺寸应用给 Fabric，并在 fit 模式下重新居中适配。 */
@@ -603,8 +654,18 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       useCanvasStore.getState().setDrawing(false);
     };
 
+    /**
+     * 缩放/平移后 Fabric 重绘的同一帧：DOM 高亮紧跟视口矩阵重算，不跳位、
+     * 也不延迟到下一次 React 渲染（②05）。笔画重绘也触发此事件，但像素
+     * 无变化时 sync 内部跳过 setState。
+     */
+    const handleAfterRender = () => {
+      syncHighlightToScreen();
+    };
+
     canvas.on('mouse:down', handleMouseDown);
     canvas.on('mouse:up', handleMouseUp);
+    canvas.on('after:render', handleAfterRender);
     setReady(true);
 
     return () => {
@@ -621,6 +682,7 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       canvas.off('object:modified', handleObjectModified);
       canvas.off('mouse:down', handleMouseDown);
       canvas.off('mouse:up', handleMouseUp);
+      canvas.off('after:render', handleAfterRender);
       void canvas.dispose();
     };
   }, [width, height, backgroundColor]);
@@ -874,39 +936,40 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
       !aiSelection ||
       aiSelection.canvasId !== canvasDocument.id
     ) {
-      setAiHighlight(null);
+      docHighlightRef.current = null;
+      syncHighlightToScreen();
       return;
     }
+
+    let docRect: DocHighlightRect | null = null;
 
     if (aiSelection.region) {
       const { x, y, width: regionWidth, height: regionHeight } = aiSelection.region;
+      // 区域指示直接给文档坐标。
+      docRect = { left: x, top: y, width: regionWidth, height: regionHeight };
+    } else {
+      const object = aiSelection.layerId
+        ? objectsRef.current.get(aiSelection.layerId)
+        : undefined;
+      const bounds =
+        typeof object?.getBoundingRect === 'function'
+          ? object.getBoundingRect()
+          : null;
 
-      setAiHighlight({
-        left: percent(x, width),
-        top: percent(y, height),
-        width: percent(regionWidth, width),
-        height: percent(regionHeight, height),
-      });
-      return;
+      if (bounds) {
+        // 图层指示取对象真实包围盒（文档坐标）。
+        docRect = {
+          left: bounds.left,
+          top: bounds.top,
+          width: bounds.width,
+          height: bounds.height,
+        };
+      }
     }
 
-    const object = aiSelection.layerId
-      ? objectsRef.current.get(aiSelection.layerId)
-      : undefined;
-    const bounds =
-      typeof object?.getBoundingRect === 'function' ? object.getBoundingRect() : null;
-
-    if (!bounds) {
-      setAiHighlight(null);
-      return;
-    }
-
-    setAiHighlight({
-      left: percent(bounds.left, width),
-      top: percent(bounds.top, height),
-      width: percent(bounds.width, width),
-      height: percent(bounds.height, height),
-    });
+    // 存文档矩形，再按当前视口换算成屏幕像素；之后缩放/平移由 after:render 续算。
+    docHighlightRef.current = docRect;
+    syncHighlightToScreen();
   }, [
     aiSelection,
     isDrawing,
@@ -1157,10 +1220,12 @@ function CanvasSurface({ canvasDocument }: { canvasDocument: CanvasDocument }) {
             className="canvas-ai-highlight"
             aria-hidden="true"
             style={{
-              left: `${aiHighlight.left}%`,
-              top: `${aiHighlight.top}%`,
-              width: `${aiHighlight.width}%`,
-              height: `${aiHighlight.height}%`,
+              // 绝对像素定位（②05）：文档矩形已经视口矩阵换算成屏幕 CSS 像素。
+              // 3px 边框是固定 CSS，不随缩放变粗。
+              left: `${aiHighlight.left}px`,
+              top: `${aiHighlight.top}px`,
+              width: `${aiHighlight.width}px`,
+              height: `${aiHighlight.height}px`,
               // The store owns the lifetime; the fade must match it.
               animationDuration: `${AI_SELECTION_DURATION_MS}ms`,
             }}
