@@ -89,3 +89,7 @@ body: {"name": string}          // 只接受 name；trim 后 1–80 字符
 4. 改名后刷新页面：新名仍在；导出 PNG / JSON 的文件名使用新名。
 5. 浏览器后退（见上一节）：A 有内容 → 新建 B → 按后退，确认与上文描述一致（仍离开应用，属基线行为，不是本票回归）。
 6. 读屏：确认条 `role="alertdialog"`、焦点落在「取消」；重命名按钮与输入框的中文名称可读。
+
+### 2026-10-29 · 机制退场
+
+本票落地的两个机制——「新建前确认」（`NewCanvasConfirm` 确认条）与「返回上一张」（内存态 `previousCanvasId` / `returnToPreviousCanvas`）——已随画布库上线退场：`?page=canvases` 画布库视图成为唯一的文档间导航（见 `docs/adr/0010-canvas-library.md` 的 Migration Path §4），「新建画布」改为直接执行、成功后地址栏指向新画布。本条仅记录机制归属变化，不回改本票状态与历史验收。
