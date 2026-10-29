@@ -1,7 +1,7 @@
 import type { AgentLog, AgentTrace, AgentTraceNode } from '@paintcodex/protocol';
 import { useEffect, useMemo, useState } from 'react';
 import { ApiError } from '../../services/api';
-import { LogDetail } from './LogDetail';
+import { LogDetail } from './log-detail';
 import { SequenceDiagram } from './SequenceDiagram';
 import { fetchTrace } from './monitor-api';
 import {
@@ -199,7 +199,13 @@ export function TraceView({ traceId, onClose }: TraceViewProps) {
       </div>
 
       <div className="trace-view__detail">
-        <LogDetail log={selectedLog} />
+        {selectedLog === null ? (
+          <div className="log-detail log-detail--empty monitor-empty">
+            点击时序图或层级树中的任一记录，在此查看其明细。
+          </div>
+        ) : (
+          <LogDetail payload={selectedLog.payload} error={selectedLog.error ?? null} />
+        )}
       </div>
     </section>
   );

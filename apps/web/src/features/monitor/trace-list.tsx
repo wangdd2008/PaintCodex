@@ -98,7 +98,7 @@ export function TraceList({
               {expanded ? (
                 <tr className="trace-table__detail-row">
                   <td colSpan={6}>
-                    <TraceTimelinePane traceId={trace.traceId} />
+                    <TraceTimelinePane traceId={trace.traceId} onClose={() => onToggle(trace.traceId)} />
                   </td>
                 </tr>
               ) : null}
