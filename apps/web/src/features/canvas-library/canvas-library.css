@@ -23,7 +23,7 @@
   color: var(--text);
   font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 /* 空态：标题 + 一句引导 + 主操作，居中成组。 */
@@ -85,14 +85,22 @@
 }
 
 .canvas-card:hover {
-  border-color: #2e2e2e;
-  transform: translateY(-1px);
+  border-color: #3a3a3a;
+}
+
+.canvas-card:hover .canvas-card__thumb-img {
+  transform: scale(1.02);
 }
 
 .canvas-card__open {
   display: block;
   text-decoration: none;
   color: inherit;
+}
+
+.canvas-card__open:focus-visible {
+  outline: 2px solid var(--faint);
+  outline-offset: 2px;
 }
 
 .canvas-card__thumb {
@@ -111,6 +119,8 @@
   height: 100%;
   object-fit: cover;
   display: block;
+  transform-origin: center;
+  transition: transform 120ms ease;
 }
 
 .canvas-card__thumb-fallback {
@@ -178,6 +188,9 @@
 }
 
 .canvas-card__meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin-top: 6px;
   font-size: 12px;
   color: var(--muted);

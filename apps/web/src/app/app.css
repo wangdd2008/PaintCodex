@@ -6,7 +6,7 @@
  * 变 #fff；主操作反白（白底黑字的全圆角按钮）。颜色预算 ≤3%，accent 只上
  * 数据与状态，不碰按钮/标签/导航。画布是唯一光源：真黑环境里一块白纸。
  *
- * 字号阶梯：title 20 · section 16 · kpi 24 · body 14 · small 12，不用
+ * 字号阶梯：title 22 · section 16 · kpi 24 · body 14 · small 12，不用
  * 大写跟踪小标签（句子式大小写，tracking 0）。
  *
  * Inter 已本地化打包（apps/web/public/fonts/）：不依赖 Google Fonts，
@@ -87,12 +87,12 @@
   --pill-neutral-bg: #222222;
   --pill-neutral-ink: #ffffff;
 
-  /* 半径：软圆角系统，嵌套逐级递减（20 → 12 → 8） */
-  --radius-card: 20px;
-  --radius-panel: 20px;
+  /* 半径：软圆角系统，嵌套逐级递减（12 → 8 → 6），控件保持全圆角 */
+  --radius-card: 12px;
+  --radius-panel: 12px;
   --radius-control: 999px;
-  --radius-small: 12px;
-  --radius-chip: 8px;
+  --radius-small: 8px;
+  --radius-chip: 6px;
 
   /* 间距与尺寸 */
   --gap: 14px;
@@ -104,7 +104,7 @@
   --row-height: 44px;
 
   /* 字号 */
-  --fs-title: 20px;
+  --fs-title: 22px;
   --fs-section: 16px;
   --fs-kpi: 24px;
   --fs-body: 14px;
@@ -166,7 +166,7 @@ button {
 .brand {
   font-weight: 600;
   font-size: 16px;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   margin-right: 6px;
   color: var(--text);
 }
@@ -622,9 +622,11 @@ button {
   min-height: 280px;
   height: 100%;
   padding: 32px;
-  border: 1px dashed var(--control);
+  border: 1px solid var(--border);
   border-radius: var(--radius-panel);
-  background: #080808;
+  background-color: #080808;
+  background-image: radial-gradient(circle, rgb(255 255 255 / 4.5%) 1px, transparent 1.5px);
+  background-size: 22px 22px;
   text-align: center;
 }
 
@@ -633,7 +635,7 @@ button {
   color: var(--text);
   font-size: var(--fs-title);
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .canvas-gate__description {

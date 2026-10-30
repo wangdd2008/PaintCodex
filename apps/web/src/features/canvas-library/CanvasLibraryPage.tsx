@@ -244,7 +244,6 @@ function CanvasCard({ summary, onOpen, onRenamed, onDeleted }: CanvasCardProps) 
                 <span>
                   {summary.width} × {summary.height}
                 </span>
-                <span> · </span>
                 <span>{summary.layerCount} 层</span>
               </div>
               <div className="canvas-card__time">{formatRelativeTime(summary.updatedAt)}</div>
