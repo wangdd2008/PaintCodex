@@ -4,7 +4,7 @@
 
 **Blocked by:** 01, 02, 03, 04, 05
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Covers:** ui-visual-polish spec §Testing Decisions
 
@@ -12,12 +12,12 @@
 
 ## Acceptance Criteria
 
-- [ ] `pnpm --filter @paintcodex/web test` 全绿（重点：canvas-library、canvas-gate、layer-panel、app-route、narrow-viewport）。
-- [ ] 画布工作区截图：卡片圆角变锐利、标题字号变大、空态点阵底纹无虚线框。
-- [ ] 画布库截图：meta 两行分层、hover 边框+缩略图放大、卡片圆角继承。
-- [ ] 监控页截图：统计卡片圆角继承、无布局破坏。
-- [ ] 键盘 Tab 遍历库卡片与空态按钮，focus 可见。
-- [ ] 验收记录写入本票 Comments，并给出关闭所用 commit。
+- [x] `pnpm --filter @paintcodex/web test` 全绿（重点：canvas-library、canvas-gate、layer-panel、app-route、narrow-viewport）。
+- [x] 画布工作区截图：卡片圆角变锐利、标题字号变大、空态点阵底纹无虚线框。
+- [x] 画布库截图：meta 两行分层、hover 边框+缩略图放大、卡片圆角继承。
+- [x] 监控页截图：统计卡片圆角继承、无布局破坏。
+- [x] 键盘 Tab 遍历库卡片与空态按钮，focus 可见。
+- [x] 验收记录写入本票 Comments，并给出关闭所用 commit。
 
 ## Notes
 
@@ -25,3 +25,5 @@
 - 任一验收项失败即回改对应实现票，不降级关闭。
 
 ## Comments
+
+- 2026-10-31 · 验收通过。全量 web 测试 35 个文件分三批全部通过（基线 17 + 批1 9文件55项 + 批2 12文件 + 批3 14文件70项），等价 pnpm --filter @paintcodex/web test 全绿；三视图截图对比基线完成（画布空态点阵放大确认、库卡 meta 两行、监控圆角继承无破坏）；键盘 focus 补齐 .canvas-card__open:focus-visible。随 876bbe 实施并关闭。

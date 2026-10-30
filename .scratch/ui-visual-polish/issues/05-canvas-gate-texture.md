@@ -4,7 +4,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
 **Covers:** ui-visual-polish spec §Implementation Decisions 4
 
@@ -12,12 +12,12 @@
 
 ## Acceptance Criteria
 
-- [ ] `.canvas-gate` 虚线边框（`border: 1px dashed var(--control)`）改为实色底 + 细点阵/极淡网格底纹。
-- [ ] 底纹透明度低到不妨碍标题、描述与按钮阅读。
-- [ ] `.canvas-gate` 类名与 `canvas-gate__title/description/reason/actions` 结构不变。
-- [ ] 文案与按钮不变：还没有画布 / 开始一张画布 / 重试 / 新建画布。
-- [ ] `canvas-gate.test.tsx` 全部断言（文案、按钮、类名）保持成立。
-- [ ] 空态主操作（反白按钮）与其他状态一致。
+- [x] `.canvas-gate` 虚线边框（`border: 1px dashed var(--control)`）改为实色底 + 细点阵/极淡网格底纹。
+- [x] 底纹透明度低到不妨碍标题、描述与按钮阅读。
+- [x] `.canvas-gate` 类名与 `canvas-gate__title/description/reason/actions` 结构不变。
+- [x] 文案与按钮不变：还没有画布 / 开始一张画布 / 重试 / 新建画布。
+- [x] `canvas-gate.test.tsx` 全部断言（文案、按钮、类名）保持成立。
+- [x] 空态主操作（反白按钮）与其他状态一致。
 
 ## Notes
 
@@ -26,3 +26,5 @@
 - 验收需覆盖无画布、加载失败（若有）两种空态截图。
 
 ## Comments
+
+- 2026-10-31 · 验收通过，随 876bbe（feat(web): UI 高级化快赢 1-5）实施并关闭。
