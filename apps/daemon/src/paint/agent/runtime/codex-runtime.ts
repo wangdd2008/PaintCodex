@@ -198,7 +198,9 @@ export function probeCodexVersion(
   const result = spawnSync(invocation.command, invocation.args, {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 10_000,
+    // codex --version 冷启动实测可达 6.5–8 秒以上（首次加载依赖 + 杀软扫描），
+    // 10 秒余量在机器繁忙时经常超时，导致 AI 路由未被注册。
+    timeout: 30_000,
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`.trim();
 
